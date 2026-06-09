@@ -1,0 +1,26 @@
+{
+  "name": "agent-loop-runner",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "babysit-pr": "tsx src/babysit-pr.ts",
+    "build": "tsc",
+    "typecheck": "tsc --noEmit"
+  },
+  "bin": {
+    "babysit-pr": "./src/babysit-pr.ts"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@cursor/sdk": "^1.0.18"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.2",
+    "tsx": "^4.22.4",
+    "typescript": "^6.0.3"
+  }
+}
