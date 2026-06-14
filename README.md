@@ -1,6 +1,7 @@
 # Agent Loop Runner
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
+[![CI](https://github.com/TonkaToyXL/agent-loop-runner/actions/workflows/ci.yml/badge.svg)](https://github.com/TonkaToyXL/agent-loop-runner/actions/workflows/ci.yml)
 [![Node >=20](https://img.shields.io/badge/node-%3E%3D20-brightgreen)](./package.json)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-blue)](./tsconfig.json)
 
