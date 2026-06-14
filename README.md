@@ -1,5 +1,9 @@
 # Agent Loop Runner
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
+[![Node >=20](https://img.shields.io/badge/node-%3E%3D20-brightgreen)](./package.json)
+[![TypeScript](https://img.shields.io/badge/TypeScript-strict-blue)](./tsconfig.json)
+
 CLI utilities for agent automation loops — starting with PR babysitting via [`@cursor/sdk`](https://www.npmjs.com/package/@cursor/sdk).
 
 ## Install

@@ -1,7 +1,7 @@
 {
   "name": "agent-loop-runner",
   "version": "1.0.0",
-  "description": "",
+  "description": "CLI utilities for agent automation loops — starting with PR babysitting via the Cursor SDK.",
   "main": "index.js",
   "type": "module",
   "scripts": {
@@ -12,9 +12,27 @@
   "bin": {
     "babysit-pr": "./src/babysit-pr.ts"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "keywords": [
+    "cursor",
+    "ai-agent",
+    "github",
+    "cli",
+    "pr-automation",
+    "typescript"
+  ],
+  "author": "TonkaToyXL",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/TonkaToyXL/agent-loop-runner.git"
+  },
+  "bugs": {
+    "url": "https://github.com/TonkaToyXL/agent-loop-runner/issues"
+  },
+  "homepage": "https://github.com/TonkaToyXL/agent-loop-runner#readme",
+  "engines": {
+    "node": ">=20.0.0"
+  },
   "dependencies": {
     "@cursor/sdk": "^1.0.18"
   },
