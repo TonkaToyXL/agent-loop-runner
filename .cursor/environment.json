@@ -1,0 +1,5 @@
+{
+  "install": "npm ci && npm run typecheck",
+  "start": "",
+  "terminals": []
+}
