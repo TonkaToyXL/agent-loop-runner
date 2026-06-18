@@ -1,6 +1,6 @@
-# Agent Loop Runner — agent instructions
+# PR Babysit — agent instructions
 
-CLI utilities for PR babysitting and Cursor SDK automation loops.
+Loop a Cursor agent on open pull requests until CI and review are clean.
 
 ## Cursor Cloud specific instructions
 

@@ -1,7 +1,7 @@
 {
   "name": "agent-loop-runner",
   "version": "1.0.0",
-  "description": "CLI utilities for agent automation loops — starting with PR babysitting via the Cursor SDK.",
+  "description": "Loop a Cursor agent on open PRs until CI and review are clean.",
   "main": "index.js",
   "type": "module",
   "scripts": {
