@@ -35,7 +35,7 @@
     "node": ">=20.0.0"
   },
   "dependencies": {
-    "@cursor/sdk": "^1.0.18"
+    "@cursor/sdk": "^1.0.19"
   },
   "devDependencies": {
     "@types/node": "^25.9.2",
