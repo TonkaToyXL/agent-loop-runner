@@ -43,3 +43,21 @@ Add in [Cloud Agents → Secrets](https://cursor.com/dashboard/cloud-agents):
 | `CURSOR_API_KEY` | Running `babysit-pr` or SDK scripts inside the VM |
 
 GitHub access for clone/push/PR comes from the connected GitHub account — no extra token required for normal cloud agent runs.
+
+## Jules specific instructions
+
+### Verification (run before finishing any task)
+
+```bash
+npm ci
+npm run typecheck
+npm test
+```
+
+If `npm test` fails because no test runner is configured, install vitest as a devDependency and wire `npm test` to `vitest run` before adding tests.
+
+### Scope rules for Jules
+
+- Only add tests for pure functions that require no network or SDK mocking.
+- Do not add dependencies beyond vitest.
+- Tests live next to source as `*.test.ts`.
