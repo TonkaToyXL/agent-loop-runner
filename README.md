@@ -4,7 +4,7 @@ Loop a Cursor agent on an open pull request until CI is green and review threads
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 [![CI](https://github.com/TonkaToyXL/agent-loop-runner/actions/workflows/ci.yml/badge.svg)](https://github.com/TonkaToyXL/agent-loop-runner/actions/workflows/ci.yml)
-[![Node >=20](https://img.shields.io/badge/node-%3E%3D20-brightgreen)](./package.json)
+[![Node >=22.13](https://img.shields.io/badge/node-%3E%3D22.13-brightgreen)](./package.json)
 
 Uses [`@cursor/sdk`](https://www.npmjs.com/package/@cursor/sdk) and the [`gh`](https://cli.github.com/) CLI.
 
@@ -48,7 +48,7 @@ Watches CI and review state, prompts a Cursor agent to fix scoped issues, and st
 
 ## Requirements
 
-- Node.js 20+
+- Node.js 22.13+
 - `gh` authenticated for the target repo
 - `CURSOR_API_KEY` environment variable
 

@@ -9,7 +9,7 @@ Use this section when running as a **Cloud Agent** on `TonkaToyXL/agent-loop-run
 ### Boot check (run before finishing)
 
 ```bash
-node --version   # expect 20+
+node --version   # expect 22.13+
 npm ci
 npm run typecheck
 ```
