@@ -1,0 +1,133 @@
+export const REASONING_LEVELS = ["off", "low", "medium", "high", "max"] as const;
+export type Reasoning = (typeof REASONING_LEVELS)[number];
+
+export type ConnectorKind = "openai" | "webhook" | "demo";
+
+/**
+ * How the hub reaches an agent. An agent can list several connectors; the first
+ * one whose required environment variables are all set wins, and demo mode is
+ * the fallback so the dashboard always works.
+ */
+export interface ConnectorConfig {
+  kind: ConnectorKind;
+  label: string;
+  /** Env vars that must be non-empty for this connector to be used. */
+  requiresEnv?: string[];
+  /** openai: base URL such as https://api.x.ai/v1. */
+  baseUrl?: string;
+  /** openai: env var that overrides baseUrl. */
+  baseUrlEnv?: string;
+  /** openai / webhook: env var holding the API key or webhook secret. */
+  apiKeyEnv?: string;
+  /** openai: send reasoning level as this body field (omit if the model rejects it). */
+  reasoningParam?: string;
+  /** webhook: env var holding the webhook URL. */
+  webhookUrlEnv?: string;
+  /** webhook: header that carries the secret (default Authorization: Bearer). */
+  webhookHeader?: string;
+  timeoutMs?: number;
+}
+
+export interface AgentLimits {
+  dailyRequests: number;
+  dailyTokens: number;
+  monthlyBudgetUsd: number;
+}
+
+export interface AgentPricing {
+  inputPerMTok: number;
+  outputPerMTok: number;
+}
+
+export interface AgentConfig {
+  id: string;
+  name: string;
+  color: string;
+  tagline: string;
+  model: string;
+  modelOptions: string[];
+  reasoning: Reasoning;
+  skills: string[];
+  system: string;
+  connectors: ConnectorConfig[];
+  limits: AgentLimits;
+  pricing: AgentPricing;
+  enabled: boolean;
+  maxConcurrent: number;
+}
+
+export type EditableAgentFields = Pick<
+  AgentConfig,
+  "model" | "reasoning" | "skills" | "limits" | "pricing" | "enabled" | "tagline" | "maxConcurrent"
+>;
+
+export interface HubConfig {
+  lead: string;
+  agents: AgentConfig[];
+}
+
+export type TaskStatus = "queued" | "running" | "done" | "failed" | "blocked" | "cancelled";
+export type TaskKind = "direct" | "goal" | "plan" | "subtask" | "synthesis";
+export type Channel = "web" | "telegram" | "imessage" | "system";
+
+export interface ReplyTarget {
+  channel: Channel;
+  chatId: string;
+  /** Display name of who sent it, if known. */
+  from?: string;
+}
+
+export interface TokenUsage {
+  input: number;
+  output: number;
+}
+
+export interface Task {
+  id: string;
+  kind: TaskKind;
+  agentId: string;
+  title: string;
+  prompt: string;
+  status: TaskStatus;
+  channel: Channel;
+  createdAt: string;
+  startedAt?: string;
+  finishedAt?: string;
+  parentId?: string;
+  result?: string;
+  error?: string;
+  model?: string;
+  reasoning?: Reasoning;
+  usage?: TokenUsage;
+  costUsd?: number;
+  /** explicit: the user named the agent. auto: the hub picked it, so it may reroute. */
+  routing: "explicit" | "auto";
+  /** Set when the hub moved this task to another agent. */
+  reroutedFrom?: string;
+  replyTo?: ReplyTarget;
+}
+
+export interface UsageEvent {
+  at: string;
+  agentId: string;
+  taskId: string;
+  model: string;
+  input: number;
+  output: number;
+  costUsd: number;
+  ok: boolean;
+  ms: number;
+}
+
+export interface RateInfo {
+  remainingRequests?: number;
+  remainingTokens?: number;
+  at: string;
+}
+
+export interface ChannelStatus {
+  name: Channel;
+  enabled: boolean;
+  connected: boolean;
+  detail: string;
+}

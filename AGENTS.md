@@ -61,3 +61,12 @@ If `npm test` fails because no test runner is configured, install vitest as a de
 - Only add tests for pure functions that require no network or SDK mocking.
 - Do not add dependencies beyond vitest.
 - Tests live next to source as `*.test.ts`.
+
+## Relay hub
+
+Multi-agent hub in `src/hub/` (server, orchestration, connectors, Telegram/iMessage channels) with a no-build dashboard in `web/`.
+
+- Run locally: `npm run hub`, then open http://127.0.0.1:4747. Agents without keys run in demo mode.
+- Agents and connectors: `relay.config.json`. Secrets only in `.env` (see `.env.example`); never commit them.
+- Pure logic with tests: `router.ts`, `planner.ts`, `usage.ts`, `channels/*`. Add tests next to source as `*.test.ts`.
+- Keep the hub free of new runtime dependencies.

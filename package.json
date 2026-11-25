@@ -1,10 +1,11 @@
 {
   "name": "agent-loop-runner",
   "version": "1.0.0",
-  "description": "Loop a Cursor agent on open PRs until CI and review are clean.",
+  "description": "Relay: one hub to run Grok, Muse, Hermes and other agents together, plus the PR Babysit loop.",
   "main": "index.js",
   "type": "module",
   "scripts": {
+    "hub": "tsx src/hub/main.ts",
     "babysit-pr": "tsx src/babysit-pr.ts",
     "build": "tsc",
     "typecheck": "tsc --noEmit",
@@ -19,7 +20,11 @@
     "github",
     "cli",
     "pr-automation",
-    "typescript"
+    "typescript",
+    "multi-agent",
+    "dashboard",
+    "telegram",
+    "imessage"
   ],
   "author": "TonkaToyXL",
   "license": "MIT",
