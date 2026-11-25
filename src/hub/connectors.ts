@@ -324,34 +324,8 @@ async function runOpenAI(req: RunRequest, config: ConnectorConfig): Promise<RunR
 // ---------------------------------------------------------------- cli (local, signed-in tools)
 const MAX_STDOUT = 4 * 1024 * 1024;
 
-interface AgyJson {
-  status?: string;
-  response?: string;
-  error?: string;
-  usage?: { input_tokens?: number; output_tokens?: number; thinking_tokens?: number; cache_read_tokens?: number };
-}
-
 /** Parse a CLI's stdout into a result. Exported for tests. */
 export function parseCliOutput(stdout: string, format: ConnectorConfig["outputFormat"], label: string): Omit<RunResult, "rate"> & { usage?: TokenUsage } {
-  if (format === "agy-json") {
-    let data: AgyJson;
-    try {
-      data = JSON.parse(stdout.trim().split("\n").filter(Boolean).at(-1) ?? "") as AgyJson;
-    } catch {
-      throw new Error(`${label} printed something Relay couldn't read`);
-    }
-    if (data.status !== "SUCCESS") {
-      const why = data.error?.split("\n")[0] || data.status || "error";
-      throw new Error(/auth/i.test(why) ? `${label}: not signed in. Run 'agy' once in Terminal and sign in.` : `${label}: ${why}`);
-    }
-    const text = (data.response ?? "").trim();
-    if (!text) throw new Error(`${label} returned an empty reply`);
-    const u = data.usage;
-    return {
-      text,
-      usage: u ? { input: u.input_tokens ?? 0, output: (u.output_tokens ?? 0) + (u.thinking_tokens ?? 0) } : { input: 0, output: estimateTokens(text) },
-    };
-  }
   const text = stdout.trim();
   if (!text) throw new Error(`${label} returned an empty reply`);
   return { text, usage: { input: 0, output: estimateTokens(text) } };

@@ -47,8 +47,6 @@ say "Not connected, on purpose. Anthropic's terms for Pro/Max plans don't allow"
 say "bot- or script-driven access except with a pay-per-use API key, so Relay"
 say "leaves Claude out to keep your account safe. Keep using Claude in its own apps."
 
-bash scripts/setup-antigravity.sh || warn "Gemini setup didn't finish. Rerun with: npm run setup:antigravity"
-
 if ask "Connect Grok through your Grok Bot routine?" y; then bash scripts/setup-grok.sh || warn "Grok setup didn't finish. Rerun with: npm run setup:grok"; fi
 
 title "ClinePass"

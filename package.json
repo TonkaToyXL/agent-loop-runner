@@ -12,7 +12,6 @@
     "setup:imessage": "bash scripts/setup-imessage.sh",
     "setup:grok": "bash scripts/setup-grok.sh",
     "setup:clinepass": "bash scripts/setup-clinepass.sh",
-    "setup:antigravity": "bash scripts/setup-antigravity.sh",
     "setup:email": "bash scripts/setup-email.sh",
     "babysit-pr": "tsx src/babysit-pr.ts",
     "build": "tsc",

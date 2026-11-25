@@ -76,7 +76,6 @@ fi
 echo
 say "Optional: let one agent read your mail to summarize it (/inbox summary)."
 say "Whatever it reads goes to that agent's provider:"
-say "  gemini  Google (via your AI Pro plan, if you turned Gemini on)"
 say "  muse    Meta's Muse Spark via ClinePass"
 say "  cline   open models (Kimi, GLM, DeepSeek, Qwen…) via ClinePass"
 say "  none    no summaries; /inbox lists still work, with no AI involved"
@@ -87,7 +86,7 @@ CURRENT="$(get_kv "$RELAY_ENV" MAIL_SUMMARIZER)"
 read -r PICK || true
 PICK="$(printf '%s' "${PICK:-${CURRENT:-none}}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
 case "$PICK" in
-  gemini|muse|cline|none) ;;
+  muse|cline|none) ;;
   *) warn "\"$PICK\" isn't one of the choices; using none."; PICK=none ;;
 esac
 set_kv "$RELAY_ENV" MAIL_SUMMARIZER "$PICK"

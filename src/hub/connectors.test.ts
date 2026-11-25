@@ -170,37 +170,23 @@ describe("networkReason", () => {
   });
 });
 
-describe("Antigravity CLI", () => {
-  it("reads agy's JSON envelope, counting thinking tokens as output", () => {
-    const out = JSON.stringify({ status: "SUCCESS", response: "ok\n", usage: { input_tokens: 100, output_tokens: 5, thinking_tokens: 20 } });
-    expect(parseCliOutput(out, "agy-json", "Antigravity")).toEqual({ text: "ok", usage: { input: 100, output: 25 } });
-  });
-
-  it("turns agy errors into readable messages", () => {
-    expect(() => parseCliOutput(JSON.stringify({ status: "ERROR", error: "authentication required" }), "agy-json", "Antigravity")).toThrow(
-      "not signed in",
-    );
-    expect(() =>
-      parseCliOutput(JSON.stringify({ status: "ERROR", error: "invalid model selection\nAvailable models: ..." }), "agy-json", "Antigravity"),
-    ).toThrow("Antigravity: invalid model selection");
-  });
-
+describe("opt-in connectors", () => {
   it("stays off until the opt-in switch is truly on", () => {
     const a = normalizeAgent(
-      { id: "g", model: "default", connectors: [{ kind: "cli", label: "agy", billing: "subscription", command: "sh", requiresEnv: ["T_AGY_ON"] }] },
+      { id: "g", model: "default", connectors: [{ kind: "cli", label: "tool", billing: "subscription", command: "sh", requiresEnv: ["T_OPT_IN"] }] },
       0,
     );
-    const saved = process.env.T_AGY_ON;
+    const saved = process.env.T_OPT_IN;
     try {
       for (const off of ["", "false", "0", "no", "off"]) {
-        process.env.T_AGY_ON = off;
+        process.env.T_OPT_IN = off;
         expect(resolveConnector(a).live).toBe(false);
       }
-      process.env.T_AGY_ON = "true";
+      process.env.T_OPT_IN = "true";
       expect(resolveConnector(a).live).toBe(true);
     } finally {
-      if (saved === undefined) delete process.env.T_AGY_ON;
-      else process.env.T_AGY_ON = saved;
+      if (saved === undefined) delete process.env.T_OPT_IN;
+      else process.env.T_OPT_IN = saved;
     }
   });
 });

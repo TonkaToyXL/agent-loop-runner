@@ -30,7 +30,7 @@ bash -c "$(curl -fsSL https://raw.githubusercontent.com/TonkaToyXL/agent-loop-ru
 
 It downloads Relay to `~/agent-loop-runner` (or updates it), then runs the guided setup. Run the same line, or `npm run relay:update`, to update later; your `.env` is kept.
 
-It installs what Relay needs, connects the agents you already use, links Telegram, blocks pay-per-use APIs, and keeps Relay running in the background (it starts at login and restarts if it stops). Run it again any time to add something. Each piece also has its own command: `npm run setup:hermes`, `setup:grok`, `setup:clinepass`, `setup:antigravity`, `setup:email`, `setup:telegram`, `setup:imessage`.
+It installs what Relay needs, connects the agents you already use, links Telegram, blocks pay-per-use APIs, and keeps Relay running in the background (it starts at login and restarts if it stops). Run it again any time to add something. Each piece also has its own command: `npm run setup:hermes`, `setup:grok`, `setup:clinepass`, `setup:email`, `setup:telegram`, `setup:imessage`.
 
 From your phone, send `/doctor` to the Telegram bot for a full check of agents, channels, email, and safety settings. Relay also messages you when it starts (for example after the Mac restarts) and when an agent goes offline or comes back. Set `RELAY_NOTIFY=false` to turn those notices off.
 
@@ -45,7 +45,6 @@ Relay uses the subscriptions and tools you already have. Pay-per-use APIs are **
 | **Grok** | A Grok Bot routine with a Webhook trigger | Your Grok subscription (Grok Bot usage) |
 | **Hermes** | Hermes Agent's built-in API server on your Mac | Whatever Hermes already uses |
 | **Muse** | Muse Spark 1.3 through ClinePass | Your ClinePass ($9.99/mo flat). Without ClinePass, Muse is off: Meta's own API is pay-per-use, and the Muse app can't be controlled by other apps. |
-| **Gemini** | Google's Antigravity CLI (`agy -p`), run unmodified on your Mac | Your Google AI Pro plan. Opt-in; see below. |
 | **Cline** | Open models (Kimi K3.1 Pro, GLM 5.3, DeepSeek, Qwen…) through ClinePass | Your ClinePass |
 | Grok via xAI API | Optional fallback | Pay-per-use, blocked by default |
 
@@ -69,9 +68,7 @@ Once connected, Hermes' card shows online/offline, the reasoning level is sent w
 
 **ClinePass.** `npm run setup:clinepass` saves your key (app.cline.bot → Settings → API Keys) and sends one tiny test message. Relay sends only `cline-pass/` models on that key, so it can't spend Cline credits, and the editor refuses other models. Usage counts against ClinePass's 5-hour, weekly, and monthly limits.
 
-**Gemini (Google AI Pro).** Gemini CLI stopped serving AI Pro accounts in June 2026; Google's Antigravity CLI replaced it. `npm run setup:antigravity` turns Gemini on after you confirm. Relay only runs the official `agy` command in headless mode from an empty folder with its sandbox on, and never reads your Google sign-in. Antigravity's terms forbid third-party tools that use your Antigravity login (Google has banned accounts for proxies that do), so never point other tools at it. A reply on Google's developer forum says scripted `agy -p` runs under your own account are allowed, but the terms don't say so outright; opt in only if you're comfortable with that.
-
-**Claude (not included).** Anthropic's Consumer Terms for Free, Pro, and Max plans prohibit accessing Claude "through automated or non-human means, whether through a bot, script, or otherwise" except with an API key or where Anthropic explicitly permits it, and Claude Code's legal page says plan sign-in is for ordinary, individual use. A bot-driven crew isn't clearly covered, so Relay doesn't run Claude on a subscription. The only clearly allowed route is a pay-per-use Anthropic API key.
+**Claude and Gemini (not included).** Gemini is left out by choice. Anthropic's Consumer Terms for Free, Pro, and Max plans prohibit accessing Claude "through automated or non-human means, whether through a bot, script, or otherwise" except with an API key or where Anthropic explicitly permits it, and Claude Code's legal page says plan sign-in is for ordinary, individual use. A bot-driven crew isn't clearly covered, so Relay doesn't run Claude on a subscription. The only clearly allowed route is a pay-per-use Anthropic API key.
 
 **Other agents.** Add an entry to `relay.config.json` with an `openai` connector (any OpenAI-compatible URL) or a `cli` connector (a local command that takes the prompt on stdin). Set `reasoningParam: "reasoning_effort"` on an `openai` connector only if that model accepts it.
 
@@ -103,7 +100,7 @@ Read-only is enforced in code, not just by policy:
 - Relay refuses every IMAP command except sign-in, `EXAMINE` (opens the inbox read-only), search, fetch, and sign-out.
 - Messages are fetched with `BODY.PEEK`, so nothing is even marked as read.
 
-Summaries go to the agent named in `MAIL_SUMMARIZER` (`gemini`, `muse`, `cline`, or `none`), and the mail it reads goes to that agent's provider. Agents that can act for you (Hermes, Grok Bot) are refused as readers, because anyone can email you instructions. Emails are passed as fenced, untrusted data with orders not to follow anything inside them. The app password lives in `.env` (owner-only permissions); summaries and the email snippets sent with them are kept in Relay's local task history.
+Summaries go to the agent named in `MAIL_SUMMARIZER` (`muse`, `cline`, or `none`), and the mail it reads goes to that agent's provider. Agents that can act for you (Hermes, Grok Bot) are refused as readers, because anyone can email you instructions. Emails are passed as fenced, untrusted data with orders not to follow anything inside them. The app password lives in `.env` (owner-only permissions); summaries and the email snippets sent with them are kept in Relay's local task history.
 
 Commands: `/inbox [unread] [48h|3d]`, `/inbox search <words>` (last 7 days), `/inbox summary [48h] [question]`.
 
