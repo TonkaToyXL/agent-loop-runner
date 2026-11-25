@@ -37,20 +37,17 @@ Agents are defined in [`relay.config.json`](./relay.config.json): name, color, m
 | **Grok** | xAI API (OpenAI-compatible) | `XAI_API_KEY` |
 | | or your Grok Bot routine's webhook | `GROK_WEBHOOK_URL`, `GROK_WEBHOOK_KEY` |
 | **Muse** | Muse Spark via Meta's Model API | `MUSE_BASE_URL`, `MUSE_API_KEY` |
-| **Hermes** | Hermes Agent's built-in API server | `HERMES_BASE_URL`, `HERMES_API_KEY` |
+| **Hermes** | Hermes Agent's built-in API server | `HERMES_BASE_URL`, `HERMES_API_KEY` (or run `npm run setup:hermes`) |
 
-**Hermes Agent.** Turn on its API server in `~/.hermes/config.yaml`, then run `hermes gateway`:
+**Hermes Agent.** On the computer that runs Hermes, from this folder:
 
-```yaml
-gateway:
-  api_server:
-    enabled: true
-    port: 8642
-    host: 127.0.0.1
-    key: <same value as HERMES_API_KEY>
+```bash
+npm run setup:hermes
 ```
 
-Set `HERMES_BASE_URL=http://127.0.0.1:8642/v1`.
+It turns on Hermes' API server with a random key (backing up `~/.hermes/.env` first), copies the key into Relay's `.env` without printing it, offers to restart the Hermes gateway, and checks that Hermes accepts the key. Safe to run again. To do it by hand instead: put `API_SERVER_ENABLED=true` and `API_SERVER_KEY=<long random string>` in `~/.hermes/.env`, restart `hermes gateway`, and set `HERMES_BASE_URL=http://127.0.0.1:8642/v1` and the same key as `HERMES_API_KEY` in Relay's `.env`.
+
+Once connected, Hermes' card shows online/offline, the reasoning level is sent with each request, and each reply shows the model that actually answered. Hermes uses its own default model unless you set a **Provider** in its editor (for example `openrouter`); then the Model field picks the exact model Hermes runs.
 
 **Muse.** Relay calls Muse Spark through Meta's API. It does not drive the Muse phone app. Copy the OpenAI-compatible base URL and the exact model ID from Meta's developer docs, then fix the model in the dashboard if it differs from `muse-spark-1.1`.
 

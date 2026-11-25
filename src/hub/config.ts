@@ -23,6 +23,7 @@ export function normalizeAgent(raw: Partial<AgentConfig>, index: number): AgentC
     color: raw.color ?? "#c6f432",
     tagline: raw.tagline ?? "",
     model: raw.model,
+    provider: raw.provider ?? "",
     modelOptions: Array.from(new Set([raw.model, ...(raw.modelOptions ?? [])])),
     reasoning: isReasoning(raw.reasoning) ? raw.reasoning : "medium",
     skills: (raw.skills ?? []).map((s) => s.toLowerCase()),

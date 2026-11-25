@@ -21,6 +21,12 @@ export interface ConnectorConfig {
   apiKeyEnv?: string;
   /** openai: send reasoning level as this body field (omit if the model rejects it). */
   reasoningParam?: string;
+  /** openai: send reasoning as model_options.reasoning_effort instead (Hermes Agent). */
+  reasoningIn?: "model_options";
+  /** openai: the endpoint routes by a `provider` field; the agent's provider setting is sent with the model. */
+  supportsProvider?: boolean;
+  /** openai: path on the base URL's host polled every 30s to show online/offline, e.g. /health. */
+  healthPath?: string;
   /** webhook: env var holding the webhook URL. */
   webhookUrlEnv?: string;
   /** webhook: header that carries the secret (default Authorization: Bearer). */
@@ -45,6 +51,8 @@ export interface AgentConfig {
   color: string;
   tagline: string;
   model: string;
+  /** For connectors with supportsProvider: provider slug that serves `model`. Empty = endpoint default. */
+  provider: string;
   modelOptions: string[];
   reasoning: Reasoning;
   skills: string[];
@@ -58,7 +66,7 @@ export interface AgentConfig {
 
 export type EditableAgentFields = Pick<
   AgentConfig,
-  "model" | "reasoning" | "skills" | "limits" | "pricing" | "enabled" | "tagline" | "maxConcurrent"
+  "model" | "provider" | "reasoning" | "skills" | "limits" | "pricing" | "enabled" | "tagline" | "maxConcurrent"
 >;
 
 export interface HubConfig {
@@ -97,6 +105,8 @@ export interface Task {
   result?: string;
   error?: string;
   model?: string;
+  /** Provider/model that actually answered, when the endpoint reports it. */
+  servedModel?: string;
   reasoning?: Reasoning;
   usage?: TokenUsage;
   costUsd?: number;

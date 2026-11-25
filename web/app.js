@@ -374,7 +374,12 @@ function meter(label, used, cap, fmt, share) {
     <span class="v"><b>${fmt(used)}</b> / ${cap ? fmt(cap) : "∞"}</span></div>`;
 }
 
-const STATUS_TEXT = { idle: "idle", working: "working", limited: "at limit", paused: "paused" };
+const STATUS_TEXT = { idle: "idle", working: "working", limited: "at limit", paused: "paused", offline: "offline" };
+const modelName = (a) => (a.provider ? `${a.provider}/${a.model}` : a.model);
+function connText(a) {
+  if (!a.live || a.online === undefined) return a.connectorLabel;
+  return `${a.connectorLabel} · ${a.online ? "online" : a.healthDetail || "offline"}`;
+}
 function renderCrew() {
   $("#crew").innerHTML = S.agents
     .map((a) => {
@@ -397,7 +402,8 @@ function renderCrew() {
           <span class="status ${a.status}"><i></i>${working}</span>
         </div>
         <div class="labels">
-          <span class="chip" title="Model"><span class="k">model</span>${esc(a.model)}</span>
+          <span class="chip" title="Model"><span class="k">model</span>${esc(modelName(a))}</span>
+          ${a.lastServed && a.lastServed !== modelName(a) ? `<span class="chip" title="Model that answered the last task"><span class="k">served</span>${esc(a.lastServed)}</span>` : ""}
           <span class="chip" title="Reasoning effort"><span class="k">reasoning</span>${think(a.reasoning)}${esc(a.reasoning)}</span>
         </div>
         <div class="meters">
@@ -407,7 +413,7 @@ function renderCrew() {
           ${rate}
         </div>
         <div class="agent-foot">
-          <span class="conn ${a.live ? "live" : ""}" title="${esc(a.connectorLabel)}"><i></i>${esc(a.connectorLabel)}</span>
+          <span class="conn ${a.live ? (a.online === false ? "down" : "live") : ""}" title="${esc(connText(a))}"><i></i>${esc(connText(a))}</span>
           <button class="btn" data-edit="${a.id}" aria-label="Edit ${esc(a.name)}">Edit</button>
         </div>
       </article>`;
@@ -513,10 +519,19 @@ function footer(t) {
   return `<div class="afoot">${[tok, dur, cost].filter(Boolean).map((x) => `<span>${x}</span>`).join("")}${copy}${cancel}</div>`;
 }
 
+function modelChip(t, a) {
+  const asked = t.model ?? a?.model ?? "";
+  const served = t.servedModel;
+  if (!served) return `<span class="chip" title="Model">${esc(asked)}</span>`;
+  // Same model, just provider-qualified: show it once.
+  if (served === asked || served.endsWith(`/${asked}`)) return `<span class="chip" title="Model that answered">${esc(served)}</span>`;
+  return `<span class="chip" title="Requested → model that answered">${esc(asked)} → ${esc(served)}</span>`;
+}
+
 function agentBubble(t) {
   const a = agentById(t.agentId);
   const head = `<div class="ahead"><span class="dot" style="--c:${a?.color}"></span><span class="nm">${esc(a?.name ?? t.agentId)}</span>
-    <span class="chip">${esc(t.model ?? a?.model ?? "")}</span><span class="chip" style="--c:${a?.color}">${think(t.reasoning)}${esc(t.reasoning ?? "")}</span></div>`;
+    ${modelChip(t, a)}<span class="chip" style="--c:${a?.color}">${think(t.reasoning)}${esc(t.reasoning ?? "")}</span></div>`;
   const reroute = t.reroutedFrom ? `<div class="reroute">↪ Rerouted from ${esc(nameOf(t.reroutedFrom))} (at limit or paused)</div>` : "";
   let body;
   if (t.status === "done") body = `<div class="body">${md(t.result)}</div>`;
@@ -740,17 +755,22 @@ function openEditor(id) {
       <button class="icon-btn x" data-close aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
     </div>
     <form class="drawer-body" id="editForm">
-      <div class="conn-box">${a.live ? `● Connected via <b>${esc(a.connectorLabel)}</b>` : `◌ <b>Demo mode.</b> ${esc(a.connectorLabel.replace(/^Demo · /, "To go live: "))} in <code>.env</code>, then restart the hub.`}</div>
+      <div class="conn-box">${a.live ? (a.online === false ? `<span class="err-text">●</span> <b>${esc(a.connectorLabel)}</b> is ${esc(a.healthDetail || "offline")}. Start it, and Relay picks it up within 30s.` : `● Connected via <b>${esc(a.connectorLabel)}</b>${a.lastServed ? ` · last answer from <b>${esc(a.lastServed)}</b>` : ""}`) : `◌ <b>Demo mode.</b> ${esc(a.connectorLabel.replace(/^Demo · /, "To go live: "))} in <code>.env</code>, then restart the hub.`}</div>
       <div class="field">
         <label for="fModel">Model</label>
         <input class="input mono" id="fModel" list="modelList" value="${esc(a.model)}" spellcheck="false" />
         <datalist id="modelList">${a.modelOptions.map((m) => `<option value="${esc(m)}"></option>`).join("")}</datalist>
-        <span class="help">Pick a suggestion or type any model ID the provider accepts.</span>
+        <span class="help">${a.supportsProvider ? "With a provider below, this is the model Hermes runs. Without one, Hermes uses its own default model." : "Pick a suggestion or type any model ID the provider accepts."}</span>
       </div>
+      ${a.supportsProvider ? `<div class="field">
+        <label for="fProv">Provider</label>
+        <input class="input mono" id="fProv" value="${esc(a.provider)}" placeholder="blank = Hermes default" spellcheck="false" />
+        <span class="help">Hermes provider slug, e.g. openrouter, anthropic, openai, nous. Must already be set up in Hermes.</span>
+      </div>` : ""}
       <div class="field">
         <span class="lbl">Reasoning</span>
         <div class="levels" id="fLevels">${LEVELS.map((l) => `<button type="button" data-level="${l}" class="${a.reasoning === l ? "on" : ""}">${think(l)}${l}</button>`).join("")}</div>
-        <span class="help">Shown as a label everywhere. Sent to the provider only if its connector sets a reasoning parameter.</span>
+        <span class="help">${a.sendsReasoning ? "Sent with every request to this agent." : "Shown as a label. This connection doesn't send a reasoning setting to the model."}</span>
       </div>
       <div class="field">
         <span class="lbl">Usage limits <span class="help">(0 = no limit)</span></span>
@@ -819,6 +839,7 @@ $("#drawer").addEventListener("click", async (e) => {
     const n = (sel) => Number($(sel).value || 0);
     const patch = {
       model: $("#fModel").value.trim(),
+      ...($("#fProv") ? { provider: $("#fProv").value.trim() } : {}),
       reasoning: $("#fLevels .on")?.dataset.level,
       limits: { dailyRequests: n("#fReq"), dailyTokens: n("#fTok"), monthlyBudgetUsd: n("#fBud") },
       pricing: { inputPerMTok: n("#fIn"), outputPerMTok: n("#fOut") },

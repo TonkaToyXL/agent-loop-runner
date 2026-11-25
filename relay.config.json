@@ -7,29 +7,58 @@
       "color": "#5ee0ff",
       "tagline": "Live scout for X, news, and trends",
       "model": "grok-4",
-      "modelOptions": ["grok-4", "grok-4-fast-reasoning", "grok-4-fast-non-reasoning", "grok-code-fast-1"],
+      "modelOptions": [
+        "grok-4",
+        "grok-4-fast-reasoning",
+        "grok-4-fast-non-reasoning",
+        "grok-code-fast-1"
+      ],
       "reasoning": "medium",
-      "skills": ["x", "twitter", "news", "trend", "trends", "realtime", "social", "research", "reaction", "reactions", "launch", "posts"],
+      "skills": [
+        "x",
+        "twitter",
+        "news",
+        "trend",
+        "trends",
+        "realtime",
+        "social",
+        "research",
+        "reaction",
+        "reactions",
+        "launch",
+        "posts"
+      ],
       "system": "You are Grok, the team's real-time scout. You are strongest at news, X posts, trends, and fast research. Be direct and cite sources when you have them.",
       "connectors": [
         {
           "kind": "openai",
           "label": "xAI API",
-          "requiresEnv": ["XAI_API_KEY"],
+          "requiresEnv": [
+            "XAI_API_KEY"
+          ],
           "baseUrl": "https://api.x.ai/v1",
           "apiKeyEnv": "XAI_API_KEY"
         },
         {
           "kind": "webhook",
           "label": "Grok Bot webhook",
-          "requiresEnv": ["GROK_WEBHOOK_URL"],
+          "requiresEnv": [
+            "GROK_WEBHOOK_URL"
+          ],
           "webhookUrlEnv": "GROK_WEBHOOK_URL",
           "apiKeyEnv": "GROK_WEBHOOK_KEY",
           "timeoutMs": 540000
         }
       ],
-      "limits": { "dailyRequests": 200, "dailyTokens": 1000000, "monthlyBudgetUsd": 0 },
-      "pricing": { "inputPerMTok": 0, "outputPerMTok": 0 },
+      "limits": {
+        "dailyRequests": 200,
+        "dailyTokens": 1000000,
+        "monthlyBudgetUsd": 0
+      },
+      "pricing": {
+        "inputPerMTok": 0,
+        "outputPerMTok": 0
+      },
       "enabled": true,
       "maxConcurrent": 2
     },
@@ -39,21 +68,52 @@
       "color": "#ff6f61",
       "tagline": "Creative lead for copy, ideas, and scripts",
       "model": "muse-spark-1.1",
-      "modelOptions": ["muse-spark-1.1"],
+      "modelOptions": [
+        "muse-spark-1.1"
+      ],
       "reasoning": "medium",
-      "skills": ["write", "writing", "creative", "copy", "script", "scripts", "caption", "captions", "story", "brainstorm", "ideas", "name", "names", "slogan", "hook", "hooks", "image", "design"],
+      "skills": [
+        "write",
+        "writing",
+        "creative",
+        "copy",
+        "script",
+        "scripts",
+        "caption",
+        "captions",
+        "story",
+        "brainstorm",
+        "ideas",
+        "name",
+        "names",
+        "slogan",
+        "hook",
+        "hooks",
+        "image",
+        "design"
+      ],
       "system": "You are Muse, the team's creative lead. You are strongest at writing, brainstorming, scripts, captions, and naming. Give finished, usable copy.",
       "connectors": [
         {
           "kind": "openai",
           "label": "Meta Model API",
-          "requiresEnv": ["MUSE_BASE_URL", "MUSE_API_KEY"],
+          "requiresEnv": [
+            "MUSE_BASE_URL",
+            "MUSE_API_KEY"
+          ],
           "baseUrlEnv": "MUSE_BASE_URL",
           "apiKeyEnv": "MUSE_API_KEY"
         }
       ],
-      "limits": { "dailyRequests": 200, "dailyTokens": 1000000, "monthlyBudgetUsd": 0 },
-      "pricing": { "inputPerMTok": 0, "outputPerMTok": 0 },
+      "limits": {
+        "dailyRequests": 200,
+        "dailyTokens": 1000000,
+        "monthlyBudgetUsd": 0
+      },
+      "pricing": {
+        "inputPerMTok": 0,
+        "outputPerMTok": 0
+      },
       "enabled": true,
       "maxConcurrent": 2
     },
@@ -63,25 +123,58 @@
       "color": "#f6c445",
       "tagline": "Operator for code, files, and automation",
       "model": "hermes-agent",
-      "modelOptions": ["hermes-agent"],
+      "modelOptions": [
+        "hermes-agent"
+      ],
       "reasoning": "high",
-      "skills": ["code", "coding", "build", "debug", "fix", "terminal", "file", "files", "automate", "automation", "deploy", "schedule", "bash", "repo", "plan", "organize"],
+      "skills": [
+        "code",
+        "coding",
+        "build",
+        "debug",
+        "fix",
+        "terminal",
+        "file",
+        "files",
+        "automate",
+        "automation",
+        "deploy",
+        "schedule",
+        "bash",
+        "repo",
+        "plan",
+        "organize"
+      ],
       "system": "You are Hermes, the team's operator. You are strongest at code, files, terminal work, automation, and planning multi-step work.",
       "connectors": [
         {
           "kind": "openai",
           "label": "Hermes API server",
-          "requiresEnv": ["HERMES_BASE_URL"],
+          "requiresEnv": [
+            "HERMES_BASE_URL",
+            "HERMES_API_KEY"
+          ],
           "baseUrl": "http://127.0.0.1:8642/v1",
           "baseUrlEnv": "HERMES_BASE_URL",
           "apiKeyEnv": "HERMES_API_KEY",
-          "timeoutMs": 600000
+          "timeoutMs": 600000,
+          "reasoningIn": "model_options",
+          "supportsProvider": true,
+          "healthPath": "/health"
         }
       ],
-      "limits": { "dailyRequests": 300, "dailyTokens": 2000000, "monthlyBudgetUsd": 0 },
-      "pricing": { "inputPerMTok": 0, "outputPerMTok": 0 },
+      "limits": {
+        "dailyRequests": 300,
+        "dailyTokens": 2000000,
+        "monthlyBudgetUsd": 0
+      },
+      "pricing": {
+        "inputPerMTok": 0,
+        "outputPerMTok": 0
+      },
       "enabled": true,
-      "maxConcurrent": 2
+      "maxConcurrent": 2,
+      "provider": ""
     }
   ]
 }

@@ -210,6 +210,9 @@ kbd { font: 11px var(--font-mono); padding: 1px 5px; border: 1px solid var(--lin
 .status.working { color: var(--text); }
 .status.working i { background: var(--c); animation: blink 1s ease-in-out infinite; box-shadow: 0 0 10px var(--c); }
 .status.idle i { background: var(--ok); }
+.status.offline { color: var(--danger); }
+.status.offline i { background: var(--danger); }
+.conn.down i { background: var(--danger); }
 .status.limited { color: var(--warn); }
 .status.limited i { background: var(--warn); }
 @keyframes blink { 50% { opacity: 0.35; } }

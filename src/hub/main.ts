@@ -52,6 +52,7 @@ if (process.env.BLUEBUBBLES_URL && process.env.BLUEBUBBLES_PASSWORD && !process.
   imessage.start();
 }
 
+hub.startHealthChecks(Number(process.env.RELAY_HEALTH_MS) || 30_000);
 const server = createHubServer({ hub, token, imessage });
 server.listen(port, host, () => {
   const live = hub
@@ -65,6 +66,7 @@ server.listen(port, host, () => {
 });
 
 const shutdown = () => {
+  hub.stopHealthChecks();
   for (const channel of hub.channels.values()) channel.stop();
   store.flush();
   server.close(() => process.exit(0));

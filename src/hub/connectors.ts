@@ -19,6 +19,7 @@ export interface RunResult {
   text: string;
   usage: TokenUsage;
   rate?: RateInfo;
+  served?: string;
 }
 
 export interface ResolvedConnector {
@@ -133,20 +134,71 @@ function readRate(headers: Headers): RateInfo | undefined {
   };
 }
 
-async function runOpenAI(req: RunRequest, config: ConnectorConfig): Promise<RunResult> {
-  const base = (env(config.baseUrlEnv) || config.baseUrl || "").replace(/\/$/, "");
-  if (!base) throw new Error(`No base URL for ${req.agent.name}`);
-  const key = env(config.apiKeyEnv);
+export function baseUrlOf(config: ConnectorConfig): string {
+  return (env(config.baseUrlEnv) || config.baseUrl || "").replace(/\/$/, "");
+}
+
+/** Chat Completions body for an agent, with the reasoning and provider conventions of its connector. */
+export function buildChatBody(agent: AgentConfig, config: ConnectorConfig, prompt: string): Record<string, unknown> {
   const body: Record<string, unknown> = {
-    model: req.agent.model,
+    model: agent.model,
     messages: [
-      { role: "system", content: req.agent.system },
-      { role: "user", content: req.prompt },
+      { role: "system", content: agent.system },
+      { role: "user", content: prompt },
     ],
   };
-  if (config.reasoningParam && req.agent.reasoning !== "off") {
-    body[config.reasoningParam] = req.agent.reasoning === "max" ? "high" : req.agent.reasoning;
+  const effort = agent.reasoning === "max" ? "high" : agent.reasoning;
+  if (agent.reasoning !== "off") {
+    if (config.reasoningIn === "model_options") body.model_options = { reasoning_effort: effort };
+    else if (config.reasoningParam) body[config.reasoningParam] = effort;
   }
+  if (config.supportsProvider && agent.provider) body.provider = agent.provider;
+  return body;
+}
+
+interface ChatResponse {
+  choices?: { message?: { content?: string | null }; finish_reason?: string | null }[];
+  usage?: { prompt_tokens?: number; completion_tokens?: number };
+  runtime?: { provider?: string; model?: string };
+  hermes?: { error_code?: string };
+}
+
+/** Pull the answer out of a Chat Completions reply. Throws on failed or cancelled turns. */
+export function parseChatResponse(data: ChatResponse, label: string): { text: string; served?: string; usage?: TokenUsage } {
+  const choice = data.choices?.[0];
+  const text = choice?.message?.content?.trim() ?? "";
+  const finish = choice?.finish_reason ?? "";
+  if (finish === "error" || finish === "cancelled") {
+    throw new Error(`${label} ${finish === "error" ? "reported an error" : "cancelled the run"}${text ? `: ${text.slice(0, 300)}` : ""}`);
+  }
+  if (!text) throw new Error(`${label} returned an empty reply`);
+  const rt = data.runtime;
+  const served = rt?.model ? (rt.provider ? `${rt.provider}/${rt.model}` : rt.model) : undefined;
+  const usage =
+    data.usage?.prompt_tokens != null || data.usage?.completion_tokens != null
+      ? { input: data.usage?.prompt_tokens ?? 0, output: data.usage?.completion_tokens ?? 0 }
+      : undefined;
+  return { text, served, usage };
+}
+
+/** Liveness probe for connectors that declare a healthPath. */
+export async function checkHealth(config: ConnectorConfig): Promise<{ ok: boolean; detail: string }> {
+  if (!config.healthPath) return { ok: true, detail: "" };
+  try {
+    const url = new URL(config.healthPath, baseUrlOf(config));
+    const res = await fetch(url, { signal: AbortSignal.timeout(5000) });
+    return { ok: res.ok, detail: res.ok ? "online" : `health HTTP ${res.status}` };
+  } catch (err) {
+    const cause = (err as { cause?: { code?: string } }).cause?.code;
+    return { ok: false, detail: cause === "ECONNREFUSED" ? "not running" : err instanceof Error ? err.message : "unreachable" };
+  }
+}
+
+async function runOpenAI(req: RunRequest, config: ConnectorConfig): Promise<RunResult> {
+  const base = baseUrlOf(config);
+  if (!base) throw new Error(`No base URL for ${req.agent.name}`);
+  const key = env(config.apiKeyEnv);
+  const body = buildChatBody(req.agent, config, req.prompt);
   const timeout = AbortSignal.timeout(config.timeoutMs ?? 300_000);
   const res = await fetch(`${base}/chat/completions`, {
     method: "POST",
@@ -157,19 +209,17 @@ async function runOpenAI(req: RunRequest, config: ConnectorConfig): Promise<RunR
   const rate = readRate(res.headers);
   if (!res.ok) {
     const detail = (await res.text().catch(() => "")).slice(0, 300);
-    throw new Error(`${config.label} HTTP ${res.status}${detail ? `: ${detail}` : ""}`);
+    const hint =
+      res.status === 401 ? " (API key mismatch: check the agent's key in .env)" : res.status === 429 ? " (busy: too many runs at once)" : "";
+    throw new Error(`${config.label} HTTP ${res.status}${hint}${detail ? `: ${detail}` : ""}`);
   }
-  const data = (await res.json()) as {
-    choices?: { message?: { content?: string | null } }[];
-    usage?: { prompt_tokens?: number; completion_tokens?: number };
-  };
-  const text = data.choices?.[0]?.message?.content?.trim() ?? "";
-  if (!text) throw new Error(`${config.label} returned an empty reply`);
+  const parsed = parseChatResponse((await res.json()) as ChatResponse, config.label);
   return {
-    text,
-    usage: {
-      input: data.usage?.prompt_tokens ?? estimateTokens(req.agent.system + req.prompt),
-      output: data.usage?.completion_tokens ?? estimateTokens(text),
+    text: parsed.text,
+    served: parsed.served,
+    usage: parsed.usage ?? {
+      input: estimateTokens(req.agent.system + req.prompt),
+      output: estimateTokens(parsed.text),
     },
     rate,
   };

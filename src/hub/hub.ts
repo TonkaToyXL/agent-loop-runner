@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { isReasoning } from "./config.js";
-import { resolveConnector, runAgent, type Purpose } from "./connectors.js";
+import { checkHealth, resolveConnector, runAgent, type Purpose } from "./connectors.js";
 import { fallbackPlan, parsePlan, planPrompt, synthesisPrompt, type PlannerAgent, type PlanStep } from "./planner.js";
 import { HELP_TEXT, parseCommand, pickAgent } from "./router.js";
 import type { Store } from "./store.js";
@@ -29,7 +29,13 @@ export interface AgentView extends AgentConfig {
   isLead: boolean;
   live: boolean;
   connectorLabel: string;
-  status: "idle" | "working" | "limited" | "paused";
+  supportsProvider: boolean;
+  sendsReasoning: boolean;
+  /** undefined when the connector has no health check. */
+  online?: boolean;
+  healthDetail?: string;
+  lastServed?: string;
+  status: "idle" | "working" | "limited" | "paused" | "offline";
   running: number;
   queued: number;
   usage: AgentUsage;
@@ -61,6 +67,8 @@ export class Hub {
   private readonly controllers = new Map<string, AbortController>();
   private readonly slots = new Map<string, number>();
   private readonly waiters = new Map<string, (() => void)[]>();
+  private readonly health = new Map<string, { ok: boolean; detail: string }>();
+  private healthTimer: NodeJS.Timeout | null = null;
 
   constructor(
     private readonly config: HubConfig,
@@ -96,6 +104,7 @@ export class Hub {
     if (!base) throw new Error(`Unknown agent ${id}`);
     const clean: Partial<EditableAgentFields> = {};
     if (typeof patch.model === "string" && patch.model.trim()) clean.model = patch.model.trim().slice(0, 120);
+    if (typeof patch.provider === "string") clean.provider = patch.provider.trim().slice(0, 60);
     if (patch.reasoning !== undefined) {
       if (!isReasoning(patch.reasoning)) throw new Error("reasoning must be off, low, medium, high or max");
       clean.reasoning = patch.reasoning;
@@ -126,6 +135,35 @@ export class Hub {
     return this.agent(id)!;
   }
 
+  /** Poll agents whose connector declares a health path, so the dashboard shows online/offline. */
+  startHealthChecks(intervalMs = 30_000): void {
+    const run = async () => {
+      let changed = false;
+      for (const agent of this.agents()) {
+        const connector = resolveConnector(agent);
+        if (!connector.live || !connector.config.healthPath) {
+          changed = this.health.delete(agent.id) || changed;
+          continue;
+        }
+        const next = await checkHealth(connector.config);
+        const prev = this.health.get(agent.id);
+        if (!prev || prev.ok !== next.ok || prev.detail !== next.detail) {
+          this.health.set(agent.id, next);
+          changed = true;
+          console.log(`[health] ${agent.name}: ${next.ok ? "online" : `offline (${next.detail})`}`);
+        }
+      }
+      if (changed) this.emitAgents();
+    };
+    void run();
+    this.healthTimer = setInterval(run, intervalMs);
+    this.healthTimer.unref();
+  }
+
+  stopHealthChecks(): void {
+    if (this.healthTimer) clearInterval(this.healthTimer);
+  }
+
   setLead(id: string): void {
     if (!this.agent(id)) throw new Error(`Unknown agent ${id}`);
     this.store.state.lead = id;
@@ -140,12 +178,27 @@ export class Hub {
     const queued = mine.filter((t) => t.status === "queued").length;
     const usage = agentUsage(this.store.state.usage, agent.id, now);
     const limit = limitState(usage, agent.limits);
+    const health = this.health.get(agent.id);
+    const lastServed = [...mine].reverse().find((t) => t.servedModel)?.servedModel;
     return {
       ...agent,
       isLead: agent.id === this.leadId,
       live: connector.live,
       connectorLabel: connector.label,
-      status: !agent.enabled ? "paused" : running > 0 ? "working" : !limit.ok ? "limited" : "idle",
+      supportsProvider: Boolean(connector.config.supportsProvider),
+      sendsReasoning: Boolean(connector.config.reasoningParam || connector.config.reasoningIn),
+      online: health?.ok,
+      healthDetail: health?.detail,
+      lastServed,
+      status: !agent.enabled
+        ? "paused"
+        : running > 0
+          ? "working"
+          : health && !health.ok
+            ? "offline"
+            : !limit.ok
+              ? "limited"
+              : "idle",
       running,
       queued,
       usage,
@@ -259,9 +312,10 @@ export class Hub {
         const v = this.agentView(a);
         const lim = a.limits;
         const lead = v.isLead ? " ★lead" : "";
+        const served = v.lastServed && v.lastServed !== a.model ? ` (last served by ${v.lastServed})` : "";
         return [
           `${v.status === "working" ? "◉" : v.status === "idle" ? "●" : "○"} ${a.name}${lead} · ${v.status}`,
-          `  ${a.model} · reasoning ${a.reasoning} · ${v.connectorLabel}`,
+          `  ${a.provider ? `${a.provider}/` : ""}${a.model}${served} · reasoning ${a.reasoning} · ${v.connectorLabel}`,
           `  today ${v.usage.requestsToday}${lim.dailyRequests ? `/${lim.dailyRequests}` : ""} req · ${fmtK(v.usage.tokensToday)}${lim.dailyTokens ? `/${fmtK(lim.dailyTokens)}` : ""} tok`,
         ].join("\n");
       })
@@ -477,6 +531,7 @@ export class Hub {
     try {
       const result = await runAgent({ agent, prompt, purpose, taskId: task.id, signal: controller.signal, team: this.team() });
       task.usage = result.usage;
+      task.servedModel = result.served;
       task.costUsd = costOf(result.usage, agent.pricing);
       task.result = result.text;
       task.status = "done";
