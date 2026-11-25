@@ -18,7 +18,7 @@ echo
 command -v git >/dev/null || die "git is missing. On a Mac, run: xcode-select --install   then run this again."
 
 if [ -d "$DIR/.git" ]; then
-  say "Updating Relay in $DIR…"
+  say "Updating Relay in ${DIR}…"
   git -C "$DIR" fetch --quiet origin "$BRANCH"
   if ! git -C "$DIR" diff --quiet || ! git -C "$DIR" diff --cached --quiet; then
     die "You have local code changes in $DIR. Commit or stash them, then run this again."
@@ -28,7 +28,7 @@ if [ -d "$DIR/.git" ]; then
 elif [ -e "$DIR" ]; then
   die "$DIR exists but isn't a Relay checkout. Move it aside or set RELAY_HOME to another folder."
 else
-  say "Downloading Relay to $DIR…"
+  say "Downloading Relay to ${DIR}…"
   git clone --quiet --branch "$BRANCH" "$REPO" "$DIR"
 fi
 
