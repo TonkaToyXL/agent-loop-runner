@@ -19,6 +19,8 @@ export interface RunRequest {
   team: PlannerAgent[];
   /** Ask the owner to approve something the agent wants to do. Resolves false on deny or timeout. */
   approve?: (ask: { title: string; detail: string }) => Promise<boolean>;
+  /** Ask the owner a question that needs a typed answer. Resolves null if skipped or unanswered. */
+  ask?: (q: { title: string; detail: string }) => Promise<string | null>;
 }
 
 export interface RunResult {
@@ -520,9 +522,18 @@ async function runHermesRun(req: RunRequest, config: ConnectorConfig, base: stri
         const key = `${control.requestId}:${control.generation}`;
         if (handled.has(key)) continue;
         handled.add(key);
-        if (/clarif/i.test(control.kind)) {
-          // A question needs a typed answer; Relay can't give one from a button, so the run waits.
-          console.warn(`[hermes] run ${runId} asked a question Relay can't answer: ${control.summary}`);
+        if (/clarif|question/i.test(control.kind)) {
+          const reply = req.ask ? await req.ask({ title: `${req.agent.name} has a question`, detail: control.summary }) : null;
+          if (reply === null) {
+            void stop();
+            throw new Error(`${req.agent.name} asked a question and got no answer, so the task stopped.`);
+          }
+          const res = await fetch(`${base}/runs/${runId}/clarify`, {
+            method: "POST",
+            headers,
+            body: JSON.stringify({ request_id: control.requestId, execution_generation: control.generation, answer: reply }),
+          }).catch(() => null);
+          if (!res?.ok) console.warn(`[hermes] couldn't deliver your answer to run ${runId}`);
           continue;
         }
         const ok = req.approve

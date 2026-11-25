@@ -20,7 +20,12 @@ export function chunk(text: string, size = MAX_LEN): string[] {
 
 interface Update {
   update_id: number;
-  message?: { chat: { id: number }; from?: { first_name?: string; username?: string }; text?: string };
+  message?: {
+    chat: { id: number };
+    from?: { first_name?: string; username?: string };
+    text?: string;
+    reply_to_message?: { message_id: number };
+  };
   callback_query?: {
     id: string;
     data?: string;
@@ -31,6 +36,18 @@ interface Update {
 
 /** Text of an approval message, before and after the decision. */
 export function approvalText(a: Approval): string {
+  if (a.kind === "question") {
+    const head =
+      a.status === "pending"
+        ? `❓ ${a.agentName} has a question`
+        : a.status === "approved"
+          ? `✅ Answered: ${a.answer ?? ""}`
+          : a.status === "denied"
+            ? "⏭ Skipped, so the task stopped"
+            : "⌛ No answer in time, so the task stopped";
+    const foot = a.status === "pending" ? `\n\nReply to this message with your answer, or tap Skip.  (id ${a.id})` : `\n\n(id ${a.id})`;
+    return `${head}\n\n${a.detail.slice(0, 900)}${foot}`;
+  }
   const head =
     a.status === "pending"
       ? "🛡 Needs your OK"
@@ -60,6 +77,8 @@ export class TelegramChannel implements ChannelAdapter {
   private abort = new AbortController();
   /** Approval id -> the messages that show it, so they can be updated after a decision. */
   private readonly approvalMessages = new Map<string, { chatId: string; messageId: number }[]>();
+  /** "chatId:messageId" of a question message -> question id, so a swipe-reply answers it. */
+  private readonly questionMessages = new Map<string, string>();
 
   constructor(
     private readonly hub: Hub,
@@ -94,19 +113,22 @@ export class TelegramChannel implements ChannelAdapter {
   }
 
   async sendApproval(chatId: string, approval: Approval): Promise<void> {
+    const buttons =
+      approval.kind === "question"
+        ? [[{ text: "⏭ Skip", callback_data: `ap:${approval.id}:n` }]]
+        : [
+            [
+              { text: "✅ Approve", callback_data: `ap:${approval.id}:y` },
+              { text: "❌ Deny", callback_data: `ap:${approval.id}:n` },
+            ],
+          ];
     const msg = await this.call<{ message_id: number }>("sendMessage", {
       chat_id: chatId,
       text: approvalText(approval),
       disable_web_page_preview: true,
-      reply_markup: {
-        inline_keyboard: [
-          [
-            { text: "✅ Approve", callback_data: `ap:${approval.id}:y` },
-            { text: "❌ Deny", callback_data: `ap:${approval.id}:n` },
-          ],
-        ],
-      },
+      reply_markup: { inline_keyboard: buttons },
     });
+    if (approval.kind === "question") this.questionMessages.set(`${chatId}:${msg.message_id}`, approval.id);
     const list = this.approvalMessages.get(approval.id) ?? [];
     list.push({ chatId, messageId: msg.message_id });
     this.approvalMessages.set(approval.id, list);
@@ -146,10 +168,13 @@ export class TelegramChannel implements ChannelAdapter {
       this.setState(true, `@${me.username}`);
       await this.call("setMyCommands", {
         commands: [
-          { command: "agents", description: "Models, reasoning, usage" },
-          { command: "status", description: "What's running now" },
-          { command: "board", description: "Who did the most work" },
           { command: "team", description: "Give the crew a goal" },
+          { command: "inbox", description: "Recent email (read-only)" },
+          { command: "approvals", description: "What's waiting for your OK" },
+          { command: "status", description: "What's running now" },
+          { command: "agents", description: "Models, reasoning, usage" },
+          { command: "doctor", description: "Check that everything is connected" },
+          { command: "board", description: "Who did the most work" },
           { command: "help", description: "How to talk to the crew" },
         ],
       }).catch(() => {});
@@ -208,6 +233,13 @@ export class TelegramChannel implements ChannelAdapter {
     if (!this.allowed.has(chatId)) {
       // Only tells the sender their own chat id, so the owner can allowlist it.
       await this.send(chatId, `Not authorized. Your chat id is ${chatId}. Add it to TELEGRAM_ALLOWED_CHAT_IDS to use this hub.`).catch(() => {});
+      return;
+    }
+    // A reply to a question message is the answer.
+    const repliedTo = msg.reply_to_message ? this.questionMessages.get(`${chatId}:${msg.reply_to_message.message_id}`) : undefined;
+    if (repliedTo) {
+      const a = this.hub.answerQuestion(repliedTo, msg.text, "telegram");
+      await this.send(chatId, a?.status === "approved" ? `✅ Sent your answer to ${a.agentName}.` : `That question was already ${a?.status ?? "closed"}.`);
       return;
     }
     await this.call("sendChatAction", { chat_id: chatId, action: "typing" }).catch(() => {});

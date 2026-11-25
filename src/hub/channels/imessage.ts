@@ -75,6 +75,13 @@ export class IMessageChannel implements ChannelAdapter {
 
   /** iMessage has no buttons: ask for a one-word reply instead. */
   async sendApproval(chatGuid: string, approval: Approval): Promise<void> {
+    if (approval.kind === "question") {
+      await this.send(
+        chatGuid,
+        `❓ ${approval.agentName} has a question:\n\n${approval.detail.slice(0, 700)}\n\nReply "answer ${approval.id} <your answer>", or "no ${approval.id}" to skip.`,
+      );
+      return;
+    }
     await this.send(
       chatGuid,
       `🛡 Needs your OK\n${approval.title}\n\n${approval.detail.slice(0, 700)}\n\nReply "yes ${approval.id}" to allow or "no ${approval.id}" to block. No answer in 15 min = no.`,

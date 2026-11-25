@@ -86,7 +86,7 @@ describe("Telegram approval buttons", () => {
     expect(parseApprovalButton(undefined)).toBeNull();
   });
   it("shows the outcome after a decision", () => {
-    const a: Approval = { ...req, id: "a1b2c3", status: "pending", createdAt: "2026-01-01T00:00:00Z", expiresAt: "2026-01-01T00:15:00Z" };
+    const a: Approval = { ...req, kind: "approval", id: "a1b2c3", status: "pending", createdAt: "2026-01-01T00:00:00Z", expiresAt: "2026-01-01T00:15:00Z" };
     expect(approvalText(a)).toContain("No answer in 15 min = deny");
     expect(approvalText({ ...a, status: "approved" })).toMatch(/^✅ Approved/);
     expect(approvalText({ ...a, status: "expired" })).toMatch(/^⌛/);
@@ -102,5 +102,49 @@ describe("Hermes pending_controls", () => {
     expect(pendingControls({ pending_controls: [{ tool: "x" }, null, "str"] })).toEqual([]);
     expect(pendingControls({})).toEqual([]);
     expect(pendingControls({ pending_controls: { approvals: [{ request_id: "r", generation: 0 }] } })[0]).toMatchObject({ requestId: "r", generation: 0 });
+  });
+});
+
+describe("questions", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it("resolves with the typed answer; a bare yes doesn't count", async () => {
+    const desk = new ApprovalDesk(() => {}, 60_000);
+    const { approval, answer } = desk.ask({ ...req, title: "Hermes has a question", detail: "Which folder?" });
+    expect(approval.kind).toBe("question");
+    desk.decide(approval.id, true, "telegram");
+    expect(approval.status).toBe("pending");
+    desk.answer(approval.id, "  ~/Documents/Relay  ", "telegram");
+    await expect(answer).resolves.toBe("~/Documents/Relay");
+    expect(approval).toMatchObject({ status: "approved", answer: "~/Documents/Relay" });
+  });
+
+  it("resolves null when skipped or unanswered", async () => {
+    const desk = new ApprovalDesk(() => {}, 60_000);
+    const a = desk.ask(req);
+    desk.decide(a.approval.id, false, "telegram");
+    await expect(a.answer).resolves.toBeNull();
+    const b = desk.ask(req);
+    vi.advanceTimersByTime(60_001);
+    await expect(b.answer).resolves.toBeNull();
+    expect(desk.answer("ffffff", "x", "web")).toBeUndefined();
+  });
+
+  it("parses answers and the doctor command", () => {
+    const agents = [{ id: "hermes", name: "Hermes" }];
+    expect(parseCommand("/answer a1b2c3 use the blue logo", agents)).toEqual({ type: "answer", id: "a1b2c3", text: "use the blue logo" });
+    expect(parseCommand("answer A1B2C3 yes, the 3pm slot", agents)).toEqual({ type: "answer", id: "a1b2c3", text: "yes, the 3pm slot" });
+    expect(parseCommand("/doctor", agents)).toEqual({ type: "doctor" });
+    expect(parseCommand("/health", agents)).toEqual({ type: "doctor" });
+    expect(parseCommand("/answer", agents).type).toBe("error");
+  });
+
+  it("shows questions in Telegram with reply instructions", () => {
+    const q: Approval = { ...req, kind: "question", id: "a1b2c3", status: "pending", detail: "Which folder?", createdAt: "2026-01-01T00:00:00Z", expiresAt: "2026-01-01T00:15:00Z" };
+    expect(approvalText(q)).toContain("❓ Hermes has a question");
+    expect(approvalText(q)).toContain("Reply to this message with your answer");
+    expect(approvalText({ ...q, status: "approved", answer: "Docs" })).toMatch(/^✅ Answered: Docs/);
+    expect(approvalText({ ...q, status: "denied" })).toMatch(/^⏭ Skipped/);
   });
 });

@@ -1,4 +1,6 @@
+import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { hostname } from "node:os";
 import { EventEmitter } from "node:events";
 import { isReasoning } from "./config.js";
 import { checkHealth, coveredModel, resolveConnector, runAgent, type Purpose } from "./connectors.js";
@@ -89,6 +91,8 @@ export class Hub {
   private readonly waiters = new Map<string, (() => void)[]>();
   private readonly health = new Map<string, { ok: boolean; detail: string }>();
   private healthTimer: NodeJS.Timeout | null = null;
+  private readonly healthFails = new Map<string, number>();
+  private readonly healthAlerted = new Map<string, "down" | "up">();
   readonly approvals: ApprovalDesk;
 
   constructor(
@@ -118,6 +122,103 @@ export class Hub {
 
   decideApproval(id: string, approve: boolean, via: string): Approval | undefined {
     return this.approvals.decide(id, approve, via);
+  }
+
+  /** Ask the owner a question that needs a typed answer. */
+  async askOwner(req: ApprovalRequest, task?: Task): Promise<string | null> {
+    const { approval, answer } = this.approvals.ask(req);
+    if (task) {
+      task.awaitingApproval = approval.id;
+      this.touch(task);
+    }
+    const reply = await answer;
+    if (task) {
+      task.awaitingApproval = undefined;
+      this.touch(task);
+    }
+    return reply;
+  }
+
+  answerQuestion(id: string, text: string, via: string): Approval | undefined {
+    return this.approvals.answer(id, text, via);
+  }
+
+  /** Send a short notice to the owner's chats (Telegram). Never fails loudly. */
+  notifyOwner(text: string): void {
+    if (/^(0|false|no|off)$/i.test(process.env.RELAY_NOTIFY?.trim() ?? "")) return;
+    for (const channel of this.channels.values()) {
+      for (const chatId of channel.approvalTargets?.() ?? []) {
+        channel.send(chatId, text).catch(() => {});
+      }
+    }
+  }
+
+  private readonly startedAt = Date.now();
+  private version = "";
+
+  /** Tell the owner Relay is up (e.g. after the Mac restarts). */
+  announceStart(): void {
+    try {
+      this.version = execFileSync("git", ["rev-parse", "--short", "HEAD"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    } catch {
+      this.version = "";
+    }
+    const live = this.agents().filter((a) => resolveConnector(a).live).map((a) => a.name);
+    this.notifyOwner(`🟢 Relay is running on ${hostname()}.\nCrew: ${live.join(", ") || "none connected yet"}.\nSend /doctor for a full check.`);
+  }
+
+  /** Full health report, readable on a phone. */
+  async doctorText(): Promise<string> {
+    const up = Math.round((Date.now() - this.startedAt) / 60_000);
+    const lines = [`🩺 Relay check · ${hostname()} · up ${up < 90 ? `${up}m` : `${Math.round(up / 60)}h`}${this.version ? ` · ${this.version}` : ""}`, "", "Agents"];
+    for (const a of this.agents()) {
+      const v = this.agentView(a);
+      const icon = v.blocked ? "⛔" : !v.live ? "⚪" : v.online === false ? "🔴" : !v.enabled ? "⏸" : !v.limit.ok ? "🟡" : "✅";
+      const state = v.blocked
+        ? "off (pay-per-use, blocked)"
+        : !v.live
+          ? v.connectorLabel.replace(/^Demo · /, "not connected: ")
+          : v.online === false
+            ? `offline (${v.healthDetail})`
+            : !v.enabled
+              ? "paused"
+              : !v.limit.ok
+                ? `at limit: ${v.limit.reason}`
+                : `${v.connectorLabel}${v.online ? " · online" : ""}`;
+      lines.push(`${icon} ${a.name}${v.isLead ? " (lead)" : ""}: ${state}`);
+    }
+    lines.push("", "Channels", "✅ Dashboard");
+    const chans = [...this.channels.values()].map((c) => c.status());
+    for (const name of ["telegram", "imessage"] as const) {
+      const c = chans.find((x) => x.name === name);
+      const label = name === "telegram" ? "Telegram" : "iMessage";
+      lines.push(c ? `${c.connected ? "✅" : "🔴"} ${label}: ${c.detail || (c.connected ? "connected" : "not connected")}` : `⚪ ${label}: not set up`);
+    }
+    lines.push("", "Email");
+    const cfg = mailConfig();
+    if (!cfg) lines.push("⚪ not set up (npm run setup:email)");
+    else {
+      try {
+        const items = await Promise.race([
+          fetchRecent(cfg, { hours: 24, max: 60 }),
+          new Promise<never>((_, reject) => setTimeout(() => reject(new Error("timed out")), 20_000)),
+        ]);
+        lines.push(`✅ ${cfg.user}: signed in read-only · ${items.length} in 24h`);
+      } catch (err) {
+        lines.push(`🔴 ${cfg.user}: ${err instanceof Error ? err.message : String(err)}`);
+      }
+      const reader = this.mailReader();
+      lines.push(reader.agent ? `✅ Summaries by ${reader.agent.name}` : `⚪ Summaries off: ${reader.why}`);
+    }
+    const metered = /^(1|true|yes)$/i.test(process.env.RELAY_ALLOW_METERED?.trim() ?? "");
+    const waiting = this.approvals.pending().length;
+    lines.push(
+      "",
+      "Safety",
+      metered ? "⚠️ Pay-per-use APIs are ALLOWED (RELAY_ALLOW_METERED=true)" : "✅ Pay-per-use APIs blocked",
+      waiting ? `🟡 ${waiting} waiting for your OK (/approvals)` : "✅ Nothing waiting for your OK",
+    );
+    return lines.join("\n");
   }
 
   /** Where approval requests go: every owner chat (Telegram) plus the chat the task came from. */
@@ -243,6 +344,15 @@ export class Hub {
         }
         const next = await checkHealth(connector.config);
         const prev = this.health.get(agent.id);
+        const fails = next.ok ? 0 : (this.healthFails.get(agent.id) ?? 0) + 1;
+        this.healthFails.set(agent.id, fails);
+        if (fails === 2 && this.healthAlerted.get(agent.id) !== "down") {
+          this.healthAlerted.set(agent.id, "down");
+          this.notifyOwner(`🔴 ${agent.name} went offline (${next.detail}). Team work will skip it until it's back.`);
+        } else if (next.ok && this.healthAlerted.get(agent.id) === "down") {
+          this.healthAlerted.set(agent.id, "up");
+          this.notifyOwner(`🟢 ${agent.name} is back online.`);
+        }
         if (!prev || prev.ok !== next.ok || prev.detail !== next.detail) {
           this.health.set(agent.id, next);
           changed = true;
@@ -382,7 +492,15 @@ export class Hub {
       case "approvals": {
         const open = this.approvals.pending();
         if (!open.length) return { reply: "Nothing is waiting for your OK." };
-        return { reply: open.map((a) => `${a.id} · ${a.agentName}: ${a.title}\n  /approve ${a.id}   /deny ${a.id}`).join("\n\n") };
+        return {
+          reply: open
+            .map((a) =>
+              a.kind === "question"
+                ? `${a.id} · ${a.agentName} asks: ${a.detail}\n  /answer ${a.id} <your answer>   /deny ${a.id} to skip`
+                : `${a.id} · ${a.agentName}: ${a.title}\n  /approve ${a.id}   /deny ${a.id}`,
+            )
+            .join("\n\n"),
+        };
       }
       case "decide": {
         const a = this.decideApproval(cmd.id, cmd.approve, origin.channel);
@@ -394,6 +512,14 @@ export class Hub {
       }
       case "inbox":
         return this.inbox(cmd, text, origin);
+      case "doctor":
+        return { reply: await this.doctorText() };
+      case "answer": {
+        const a = this.answerQuestion(cmd.id, cmd.text, origin.channel);
+        if (!a) return { reply: `No question called ${cmd.id}. Send /approvals to see what's waiting.` };
+        if (a.kind !== "question") return { reply: `${a.id} is a yes/no request. Use /approve ${a.id} or /deny ${a.id}.` };
+        return { reply: a.status === "approved" && a.answer === cmd.text.trim().slice(0, 2000) ? `✅ Sent your answer to ${a.agentName}.` : `${a.id} was already ${a.status}.` };
+      }
       case "lead": {
         this.setLead(cmd.agentId);
         return { reply: `${this.agent(cmd.agentId)!.name} now leads team goals.` };
@@ -768,6 +894,7 @@ export class Hub {
         team: this.team(),
         approve: (ask) =>
           this.requestApproval({ taskId: task.id, agentId: runner.id, agentName: runner.name, source: "agent", ...ask }, task),
+        ask: (q) => this.askOwner({ taskId: task.id, agentId: runner.id, agentName: runner.name, source: "agent", ...q }, task),
       });
       task.usage = result.usage;
       task.servedModel = result.served;

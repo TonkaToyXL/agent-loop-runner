@@ -559,7 +559,7 @@ function agentBubble(t) {
   const reroute = t.reroutedFrom ? `<div class="reroute">↪ Rerouted from ${esc(nameOf(t.reroutedFrom))} (at limit or paused)</div>` : "";
   let body;
   if (t.status === "done") body = `<div class="body">${md(t.result)}</div>`;
-  else if (t.awaitingApproval) body = `<div class="needs-ok">🛡 Waiting for your OK (see the card at the top of the thread, or Telegram)</div>`;
+  else if (t.awaitingApproval) body = `<div class="needs-ok">🛡 Waiting for you (see the card at the top of the thread, or Telegram)</div>`;
   else if (t.status === "running" || t.status === "queued") body = thinking(t, t.status === "queued" ? "waiting for a free slot" : "thinking");
   else body = `<div class="err-text">${esc(stateLabel(t))}: ${esc(t.error ?? "")}</div>`;
   return `<div class="msg bot"><div class="bubble" style="--c:${a?.color}">${head}${reroute}${body}${footer(t)}</div></div>`;
@@ -927,8 +927,18 @@ function untilText(iso) {
 function renderApprovals() {
   const open = pendingApprovals();
   const el = $("#approvals");
+  // Keep anything already typed into a question box across re-renders.
+  const drafts = Object.fromEntries($$("#approvals [data-answer-for]").map((i) => [i.dataset.answerFor, i.value]));
   el.innerHTML = open
-    .map((a) => `<div class="ask-card" style="--c:${colorOf(a.agentId)}">
+    .map((a) => a.kind === "question" ? `<form class="ask-card" style="--c:${colorOf(a.agentId)}" data-question="${a.id}">
+      <div class="ask-head"><span class="dot"></span><b>${esc(a.agentName)} has a question</b></div>
+      <div class="ask-detail">${esc(a.detail)}</div>
+      <input class="input" data-answer-for="${a.id}" placeholder="Your answer" value="${esc(drafts[a.id] ?? "")}" autocomplete="off" />
+      <div class="ask-foot">
+        <span class="muted small">No answer in <span data-until="${a.expiresAt}">${untilText(a.expiresAt)}</span> stops the task</span>
+        <span class="ask-btns"><button type="button" class="btn" data-decide="${a.id}" data-approve="0">Skip</button><button type="submit" class="btn primary">Send</button></span>
+      </div>
+    </form>` : `<div class="ask-card" style="--c:${colorOf(a.agentId)}">
       <div class="ask-head"><span class="dot"></span><b>${esc(a.title)}</b></div>
       <div class="ask-detail">${esc(a.detail)}</div>
       <div class="ask-foot">
@@ -950,6 +960,21 @@ $("#approvals").addEventListener("click", async (e) => {
     toast(a.status === "approved" ? "Approved" : a.status === "denied" ? "Denied" : `Already ${a.status}`);
   } catch (err) {
     b.disabled = false;
+    toast(err.message);
+  }
+});
+
+$("#approvals").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const form = e.target.closest("[data-question]");
+  if (!form) return;
+  const input = form.querySelector("[data-answer-for]");
+  const answer = input.value.trim();
+  if (!answer) return input.focus();
+  try {
+    const a = await api(`/api/approvals/${form.dataset.question}`, { method: "POST", body: JSON.stringify({ answer }) });
+    toast(a.status === "approved" ? `Sent to ${a.agentName}` : `Already ${a.status}`);
+  } catch (err) {
     toast(err.message);
   }
 });

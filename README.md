@@ -22,15 +22,17 @@ One place to run all your AI agents together. Talk to Grok, Muse, and Hermes fro
 
 ## Set up on a Mac (one command)
 
-On an always-on Mac such as a Mac mini:
+On an always-on Mac such as a Mac mini, paste this into Terminal:
 
 ```bash
-git clone https://github.com/TonkaToyXL/agent-loop-runner.git ~/agent-loop-runner
-cd ~/agent-loop-runner
-npm run setup:mac
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/TonkaToyXL/agent-loop-runner/claude/friendly-babbage-yr8apd/scripts/install.sh)"
 ```
 
-It installs what Relay needs, connects the agents you already use, links Telegram, blocks pay-per-use APIs, and keeps Relay running in the background (it starts at login and restarts if it stops). Run it again any time to add something. Each piece also has its own command: `npm run setup:hermes`, `setup:grok`, `setup:clinepass`, `setup:antigravity`, `setup:email`, `setup:telegram`.
+It downloads Relay to `~/agent-loop-runner` (or updates it), then runs the guided setup. Run the same line, or `npm run relay:update`, to update later; your `.env` is kept.
+
+It installs what Relay needs, connects the agents you already use, links Telegram, blocks pay-per-use APIs, and keeps Relay running in the background (it starts at login and restarts if it stops). Run it again any time to add something. Each piece also has its own command: `npm run setup:hermes`, `setup:grok`, `setup:clinepass`, `setup:antigravity`, `setup:email`, `setup:telegram`, `setup:imessage`.
+
+From your phone, send `/doctor` to the Telegram bot for a full check of agents, channels, email, and safety settings. Relay also messages you when it starts (for example after the Mac restarts) and when an agent goes offline or comes back. Set `RELAY_NOTIFY=false` to turn those notices off.
 
 To try it without connecting anything: `npm install && npm run hub`, then open http://127.0.0.1:4747. Unconnected agents answer in a labeled demo mode and never join real team work.
 
@@ -84,10 +86,10 @@ Uses long polling, so no public URL is needed.
 
 ## iMessage
 
-iMessage needs a Mac signed in to Messages, running [BlueBubbles Server](https://bluebubbles.app). A separate Apple ID for the bot is cleanest.
+iMessage needs a Mac signed in to Messages, running [BlueBubbles Server](https://bluebubbles.app) (free). A separate Apple ID for the bot is cleanest.
 
-1. In `.env`: `BLUEBUBBLES_URL`, `BLUEBUBBLES_PASSWORD`, `IMESSAGE_ALLOWED_HANDLES` (your number or email), and a long random `IMESSAGE_HOOK_TOKEN`.
-2. In BlueBubbles, add a webhook for **New Messages** pointing to `http://127.0.0.1:4747/hooks/imessage?token=<IMESSAGE_HOOK_TOKEN>` (use `RELAY_PUBLIC_URL` instead of 127.0.0.1 if the hub runs elsewhere).
+1. Run `npm run setup:imessage`. It checks BlueBubbles' password, saves which number or email may text Relay, and creates the secret webhook URL (copied to your clipboard).
+2. In BlueBubbles: Settings → API & Webhooks → add a webhook for **New Messages** with that URL.
 3. Text the bot's Apple ID from your phone.
 
 Relay ignores messages from non-allowlisted handles and its own sent messages, so replies never loop.
@@ -112,7 +114,9 @@ Two checks protect anything that can act outside Relay (agents marked `actsInWor
 1. **Before starting:** if the task mentions sending, posting, replying, buying, paying, deleting, booking, installing, deploying and similar, Relay asks you first.
 2. **Mid-task (Hermes):** Relay runs Hermes through its Runs API. When Hermes' own approval policy pauses a tool call, Relay forwards it to you and passes back your answer.
 
-Answer with the Telegram buttons, the dashboard cards, or by text in any channel: `/approve <id>`, `/deny <id>`, or on iMessage just `yes <id>` / `no <id>`. `/approvals` lists what's waiting. Unanswered requests are denied after 15 minutes (`RELAY_APPROVAL_TIMEOUT_MS`). Hermes questions that need a typed answer (not yes/no) can't be answered from Relay yet; the run waits until it times out.
+Answer with the Telegram buttons, the dashboard cards, or by text in any channel: `/approve <id>`, `/deny <id>`, or on iMessage just `yes <id>` / `no <id>`. `/approvals` lists what's waiting. Unanswered requests are denied after 15 minutes (`RELAY_APPROVAL_TIMEOUT_MS`).
+
+When Hermes asks a question that needs a typed answer, you get it in Telegram: just reply to that message (or send `/answer <id> <text>`, or type in the dashboard card). Skip it, or don't answer within 15 minutes, and the task stops.
 
 ## Chat commands
 
@@ -132,6 +136,8 @@ Same everywhere: dashboard, Telegram, iMessage.
 /inbox summary    what needs your attention
 /approvals        what's waiting for your OK
 /approve <id>     allow it      /deny <id>  block it
+/answer <id> …    answer an agent's question (or reply to its message)
+/doctor           check that everything is connected
 ```
 
 ## Use the dashboard from your phone

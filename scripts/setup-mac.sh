@@ -69,6 +69,10 @@ if ask "Connect Telegram so you can run the crew from your phone?" y; then
   bash scripts/setup-telegram.sh || warn "Telegram setup didn't finish. Rerun with: npm run setup:telegram"
 fi
 
+if ask "Connect iMessage too? (needs the free BlueBubbles app on a Mac)" n; then
+  bash scripts/setup-imessage.sh || warn "iMessage setup didn't finish. Rerun with: npm run setup:imessage"
+fi
+
 # ---- Phone dashboard (optional)
 title "Dashboard on your phone (optional)"
 say "With Tailscale (free for personal use) on this Mac and your phone,"

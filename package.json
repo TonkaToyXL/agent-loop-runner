@@ -9,6 +9,7 @@
     "hub": "tsx src/hub/main.ts",
     "setup:hermes": "bash scripts/setup-hermes.sh",
     "setup:telegram": "bash scripts/setup-telegram.sh",
+    "setup:imessage": "bash scripts/setup-imessage.sh",
     "setup:grok": "bash scripts/setup-grok.sh",
     "setup:clinepass": "bash scripts/setup-clinepass.sh",
     "setup:antigravity": "bash scripts/setup-antigravity.sh",
@@ -16,7 +17,8 @@
     "babysit-pr": "tsx src/babysit-pr.ts",
     "build": "tsc",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "relay:update": "bash scripts/install.sh"
   },
   "bin": {
     "babysit-pr": "./src/babysit-pr.ts"

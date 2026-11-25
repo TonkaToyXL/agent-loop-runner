@@ -63,6 +63,8 @@ server.listen(port, host, () => {
   console.log(`  Crew       →  ${live}`);
   console.log(`  Channels   →  web${hub.channels.has("telegram") ? ", telegram" : ""}${imessage ? ", imessage" : ""}\n`);
   if (!token) console.log("  Tip: set HUB_TOKEN in .env before exposing this beyond your own machine.\n");
+  // Give channels a moment to connect, then tell the owner Relay is up.
+  setTimeout(() => hub.announceStart(), 4000).unref();
 });
 
 const shutdown = () => {

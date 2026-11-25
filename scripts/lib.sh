@@ -3,6 +3,7 @@
 
 RELAY_DIR="$(pwd)"
 RELAY_ENV="$RELAY_DIR/.env"
+# shellcheck disable=SC2034  # used by scripts that source this file
 TELEGRAM_API="${TELEGRAM_API_BASE:-https://api.telegram.org}"
 
 if [ -t 1 ]; then G=$'\033[32m'; Y=$'\033[33m'; R=$'\033[31m'; B=$'\033[1m'; N=$'\033[0m'; else G=""; Y=""; R=""; B=""; N=""; fi
@@ -76,6 +77,7 @@ stop_relay_service() {
   [ "$(uname)" = Darwin ] || return 0
   if launchctl print "gui/$(id -u)/$(relay_service_label)" >/dev/null 2>&1; then
     launchctl bootout "gui/$(id -u)/$(relay_service_label)" >/dev/null 2>&1 || true
+    # shellcheck disable=SC2034
     RELAY_WAS_RUNNING=1
     ok "Paused the Relay background service during setup"
   fi

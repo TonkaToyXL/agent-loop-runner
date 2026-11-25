@@ -15,6 +15,8 @@ export type Command =
   | { type: "approvals" }
   | { type: "inbox"; mode: "list" | "summary"; hours: number; unreadOnly: boolean; text?: string; question?: string }
   | { type: "decide"; id: string; approve: boolean }
+  | { type: "answer"; id: string; text: string }
+  | { type: "doctor" }
   | { type: "error"; message: string };
 
 export interface AgentRef {
@@ -39,6 +41,10 @@ export function parseCommand(input: string, agents: AgentRef[]): Command {
   // Telegram group commands look like /status@MyBot; drop the bot suffix.
   const text = input.trim().replace(/^(\/\w+)@\w+/, "$1");
   if (!text) return { type: "error", message: "Empty message." };
+
+  // Answers to an agent's question: "/answer ab12cd use the blue logo"
+  const answer = /^\/?answer\s+#?([0-9a-f]{6})\s+([\s\S]+)$/i.exec(text);
+  if (answer) return { type: "answer", id: answer[1].toLowerCase(), text: answer[2].trim() };
 
   // Approval answers: "/approve ab12cd", "yes ab12cd", "deny ab12cd", "no ab12cd".
   const decision = /^\/?(approve|approved|yes|ok|allow|deny|denied|no|reject)\s+#?([0-9a-f]{6})$/i.exec(text);
@@ -69,6 +75,12 @@ export function parseCommand(input: string, agents: AgentRef[]): Command {
       case "email":
       case "mail":
         return parseInbox(args);
+      case "doctor":
+      case "health":
+      case "check":
+        return { type: "doctor" };
+      case "answer":
+        return { type: "error", message: "Usage: /answer <id> <your answer>" };
       case "approve":
       case "deny":
         return { type: "error", message: `Usage: /${cmd} <id>. Send /approvals to see what's waiting.` };
@@ -192,4 +204,6 @@ export const HELP_TEXT = [
   "/inbox summary    what needs your attention",
   "/approvals        what's waiting for your OK",
   "/approve <id>     allow it   ·   /deny <id>  block it",
+  "/answer <id> …    answer an agent's question (or just reply to its message)",
+  "/doctor           check that everything is connected",
 ].join("\n");
