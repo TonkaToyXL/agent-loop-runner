@@ -148,3 +148,26 @@ describe("questions", () => {
     expect(approvalText({ ...q, status: "denied" })).toMatch(/^⏭ Skipped/);
   });
 });
+
+describe("error text", () => {
+  it("shows only Error messages and marks user-facing errors", async () => {
+    const { errorText, PublicError } = await import("./errors.js");
+    expect(errorText(new Error("boom"))).toBe("boom");
+    expect(errorText({ stack: "at secret.js:1" })).toBe("Unexpected error");
+    const e = new PublicError("Pick a cline-pass/ model", 400);
+    expect(e).toBeInstanceOf(Error);
+    expect(e.status).toBe(400);
+  });
+
+  it("never puts command text (which can hold a password) in read-only guard errors", async () => {
+    const { assertReadOnly } = await import("./mail/imap.js");
+    let message = "";
+    try {
+      assertReadOnly('XLOGIN "me@x.com" "hunter2secret"');
+    } catch (err) {
+      message = (err as Error).message;
+    }
+    expect(message).toBe("Relay's mail reader refused a command that isn't read-only");
+    expect(message).not.toContain("hunter2");
+  });
+});

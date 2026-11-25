@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { hostname } from "node:os";
 import { EventEmitter } from "node:events";
 import { isReasoning } from "./config.js";
+import { errorText, PublicError } from "./errors.js";
 import { checkHealth, coveredModel, resolveConnector, runAgent, type Purpose } from "./connectors.js";
 import { ApprovalDesk, riskyAction, type Approval, type ApprovalRequest } from "./approvals.js";
 import { digestPrompt, fetchRecent, formatList, mailConfig, span } from "./mail/inbox.js";
@@ -205,7 +206,7 @@ export class Hub {
         ]);
         lines.push(`✅ ${cfg.user}: signed in read-only · ${items.length} in 24h`);
       } catch (err) {
-        lines.push(`🔴 ${cfg.user}: ${err instanceof Error ? err.message : String(err)}`);
+        lines.push(`🔴 ${cfg.user}: ${errorText(err)}`);
       }
       const reader = this.mailReader();
       lines.push(reader.agent ? `✅ Summaries by ${reader.agent.name}` : `⚪ Summaries off: ${reader.why}`);
@@ -292,12 +293,12 @@ export class Hub {
 
   updateAgent(id: string, patch: Partial<EditableAgentFields>): AgentConfig {
     const base = this.agent(id);
-    if (!base) throw new Error(`Unknown agent ${id}`);
+    if (!base) throw new PublicError(`Unknown agent ${id}`, 404);
     const clean: Partial<EditableAgentFields> = {};
     if (typeof patch.model === "string" && patch.model.trim()) clean.model = patch.model.trim().slice(0, 120);
     if (typeof patch.provider === "string") clean.provider = patch.provider.trim().slice(0, 60);
     if (patch.reasoning !== undefined) {
-      if (!isReasoning(patch.reasoning)) throw new Error("reasoning must be off, low, medium, high or max");
+      if (!isReasoning(patch.reasoning)) throw new PublicError("reasoning must be off, low, medium, high or max");
       clean.reasoning = patch.reasoning;
     }
     if (typeof patch.enabled === "boolean") clean.enabled = patch.enabled;
@@ -324,7 +325,7 @@ export class Hub {
     if (clean.model) {
       const conn = resolveConnector({ ...base, ...clean });
       const check = coveredModel({ ...base, ...clean }, conn.config);
-      if (conn.live && check.error) throw new Error(check.error);
+      if (conn.live && check.error) throw new PublicError(check.error);
     }
     this.store.state.overrides[id] = { ...this.store.state.overrides[id], ...clean };
     this.store.save();
@@ -371,7 +372,7 @@ export class Hub {
   }
 
   setLead(id: string): void {
-    if (!this.agent(id)) throw new Error(`Unknown agent ${id}`);
+    if (!this.agent(id)) throw new PublicError(`Unknown agent ${id}`, 404);
     this.store.state.lead = id;
     this.store.save();
     this.emitAgents();
@@ -582,7 +583,7 @@ export class Hub {
       });
       return { reply: `📥 ${reader.agent.name} is reading ${items.length} email${items.length === 1 ? "" : "s"} from the last ${span(cmd.hours)}…`, taskId: task.id };
     } catch (err) {
-      return { reply: `Couldn't read email: ${err instanceof Error ? err.message : String(err)}` };
+      return { reply: `Couldn't read email: ${errorText(err)}` };
     }
   }
 
@@ -780,7 +781,7 @@ export class Hub {
       goal.status = "done";
     } catch (err) {
       goal.status = controller.signal.aborted ? "cancelled" : "failed";
-      goal.error = err instanceof Error ? err.message : String(err);
+      goal.error = errorText(err);
       for (const t of this.store.state.tasks) {
         if (t.parentId === goal.id && t.status === "queued") {
           t.status = "cancelled";
@@ -905,7 +906,7 @@ export class Hub {
       if (result.rate) this.store.state.rates[agent.id] = result.rate;
       return result.text;
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = errorText(err);
       task.status = controller.signal.aborted ? "cancelled" : "failed";
       task.error = message;
       this.record(task, agent, false, Date.now() - started);

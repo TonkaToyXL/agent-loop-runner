@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { Approval } from "../approvals.js";
+import { errorText } from "../errors.js";
 import type { ChannelAdapter, Hub } from "../hub.js";
 import type { ChannelStatus } from "../types.js";
 
@@ -114,7 +115,7 @@ export class IMessageChannel implements ChannelAdapter {
       const { reply } = await this.hub.handleText(text, { channel: "imessage", chatId: chatGuid, from: sender });
       await this.send(chatGuid, reply);
     } catch (err) {
-      await this.send(chatGuid, `Error: ${err instanceof Error ? err.message : String(err)}`).catch(() => {});
+      await this.send(chatGuid, `Error: ${errorText(err)}`).catch(() => {});
     }
   }
 }

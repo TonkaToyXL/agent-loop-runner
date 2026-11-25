@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { extname, join, normalize, resolve, sep } from "node:path";
 import { resolveWebhook } from "./connectors.js";
+import { errorText, PublicError } from "./errors.js";
 import type { IMessageChannel, BlueBubblesMessage } from "./channels/imessage.js";
 import type { Hub } from "./hub.js";
 
@@ -29,14 +30,14 @@ async function readJson<T>(req: IncomingMessage): Promise<T> {
   let size = 0;
   for await (const chunk of req) {
     size += (chunk as Buffer).length;
-    if (size > MAX_BODY) throw Object.assign(new Error("Body too large"), { status: 413 });
+    if (size > MAX_BODY) throw new PublicError("Body too large", 413);
     chunks.push(chunk as Buffer);
   }
   if (!size) return {} as T;
   try {
     return JSON.parse(Buffer.concat(chunks).toString("utf8")) as T;
   } catch {
-    throw Object.assign(new Error("Invalid JSON"), { status: 400 });
+    throw new PublicError("Invalid JSON", 400);
   }
 }
 
@@ -166,8 +167,10 @@ export function createHubServer({ hub, token, imessage }: ServerOptions) {
         send(res, 404, { error: "not found" });
       }
     } catch (err) {
-      const status = (err as { status?: number }).status ?? 400;
-      send(res, status, { error: err instanceof Error ? err.message : String(err) });
+      if (err instanceof PublicError) return send(res, err.status, { error: err.message });
+      // Unexpected: details stay in the local log, the client gets a generic message.
+      console.error(`[server] ${req.method} ${path}: ${errorText(err)}`);
+      send(res, 500, { error: "Something went wrong. Check the Relay log for details." });
     }
   });
 }

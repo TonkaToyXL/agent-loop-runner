@@ -1,4 +1,5 @@
 import type { Approval } from "../approvals.js";
+import { errorText } from "../errors.js";
 import type { ChannelAdapter, Hub } from "../hub.js";
 import type { ChannelStatus } from "../types.js";
 
@@ -251,7 +252,7 @@ export class TelegramChannel implements ChannelAdapter {
       });
       await this.send(chatId, reply);
     } catch (err) {
-      await this.send(chatId, `Error: ${err instanceof Error ? err.message : String(err)}`).catch(() => {});
+      await this.send(chatId, `Error: ${errorText(err)}`).catch(() => {});
     }
   }
 }
