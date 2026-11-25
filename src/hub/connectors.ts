@@ -241,6 +241,20 @@ export function parseChatResponse(raw: ChatResponse, label: string): { text: str
   return { text, served, usage };
 }
 
+/** Turn Node's vague "fetch failed" into the underlying cause, e.g. ECONNREFUSED or ENOTFOUND. */
+export function networkReason(err: unknown): string {
+  const cause = (err as { cause?: { code?: string; message?: string } })?.cause;
+  const code = cause?.code;
+  const known: Record<string, string> = {
+    ECONNREFUSED: "nothing is listening there; is it running?",
+    ENOTFOUND: "address not found; check the URL or your internet",
+    ETIMEDOUT: "connection timed out",
+    ECONNRESET: "connection was reset",
+  };
+  if (code && known[code]) return known[code];
+  return code ?? cause?.message ?? (err instanceof Error ? err.message : String(err));
+}
+
 /** Liveness probe for connectors that declare a healthPath. */
 export async function checkHealth(config: ConnectorConfig): Promise<{ ok: boolean; detail: string }> {
   if (!config.healthPath) return { ok: true, detail: "" };
@@ -262,12 +276,19 @@ async function runOpenAI(req: RunRequest, config: ConnectorConfig): Promise<RunR
   if (covered.error) throw new Error(covered.error);
   const body = buildChatBody(req.agent, config, req.prompt);
   const timeout = AbortSignal.timeout(config.timeoutMs ?? 300_000);
-  const res = await fetch(`${base}/chat/completions`, {
-    method: "POST",
-    headers: { ...config.headers, "content-type": "application/json", ...(key ? { authorization: `Bearer ${key}` } : {}) },
-    body: JSON.stringify(body),
-    signal: AbortSignal.any([req.signal, timeout]),
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${base}/chat/completions`, {
+      method: "POST",
+      headers: { ...config.headers, "content-type": "application/json", ...(key ? { authorization: `Bearer ${key}` } : {}) },
+      body: JSON.stringify(body),
+      signal: AbortSignal.any([req.signal, timeout]),
+    });
+  } catch (err) {
+    if (req.signal.aborted) throw new Error("Cancelled");
+    if (timeout.aborted) throw new Error(`${config.label} took longer than ${Math.round((config.timeoutMs ?? 300_000) / 1000)}s`);
+    throw new Error(`Can't reach ${config.label} (${networkReason(err)})`);
+  }
   const rate = readRate(res.headers);
   if (!res.ok) {
     const detail = (await res.text().catch(() => "")).slice(0, 300);

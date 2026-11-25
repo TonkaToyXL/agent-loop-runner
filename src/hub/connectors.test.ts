@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { normalizeAgent } from "./config.js";
-import { buildChatBody, coveredModel, parseChatResponse, parseCliOutput, resolveConnector } from "./connectors.js";
+import { buildChatBody, coveredModel, networkReason, parseChatResponse, parseCliOutput, resolveConnector } from "./connectors.js";
 import type { ConnectorConfig } from "./types.js";
 
 const hermesConn: ConnectorConfig = { kind: "openai", label: "Hermes", reasoningIn: "model_options", supportsProvider: true };
@@ -175,5 +175,15 @@ describe("ClinePass guard", () => {
   it("unwraps Cline's legacy {success, data} response shape", () => {
     const legacy = { success: true, data: { choices: [{ message: { content: "ok" }, finish_reason: "stop" }], usage: { prompt_tokens: 3, completion_tokens: 1 } } };
     expect(parseChatResponse(legacy as never, "ClinePass")).toMatchObject({ text: "ok", usage: { input: 3, output: 1 } });
+  });
+});
+
+describe("networkReason", () => {
+  it("explains common network failures", () => {
+    const fail = (code?: string, message?: string) => Object.assign(new TypeError("fetch failed"), { cause: { code, message } });
+    expect(networkReason(fail("ECONNREFUSED"))).toMatch(/is it running/);
+    expect(networkReason(fail("ENOTFOUND"))).toMatch(/address not found/);
+    expect(networkReason(fail(undefined, "proxy said no"))).toBe("proxy said no");
+    expect(networkReason(new Error("plain"))).toBe("plain");
   });
 });
