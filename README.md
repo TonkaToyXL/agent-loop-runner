@@ -28,7 +28,7 @@ cd ~/agent-loop-runner
 npm run setup:mac
 ```
 
-It installs what Relay needs, connects the agents you already use, links Telegram, blocks pay-per-use APIs, and keeps Relay running in the background (it starts at login and restarts if it stops). Run it again any time to add something. Each piece also has its own command: `npm run setup:hermes`, `setup:grok`, `setup:telegram`.
+It installs what Relay needs, connects the agents you already use, links Telegram, blocks pay-per-use APIs, and keeps Relay running in the background (it starts at login and restarts if it stops). Run it again any time to add something. Each piece also has its own command: `npm run setup:hermes`, `setup:grok`, `setup:clinepass`, `setup:telegram`.
 
 To try it without connecting anything: `npm install && npm run hub`, then open http://127.0.0.1:4747. Unconnected agents answer in a labeled demo mode and never join real team work.
 
@@ -41,7 +41,8 @@ Relay uses the subscriptions and tools you already have. Pay-per-use APIs are **
 | **Grok** | A Grok Bot routine with a Webhook trigger | Your Grok subscription (Grok Bot usage) |
 | **Hermes** | Hermes Agent's built-in API server on your Mac | Whatever Hermes already uses |
 | **Claude** | Claude Code signed in on your Mac (`claude -p`) | Your Claude plan |
-| **Muse** | Meta's Model API | Pay-per-use, so **off** by default. The Muse app can't be controlled by other apps. |
+| **Muse** | Muse Spark 1.3 through ClinePass | Your ClinePass ($9.99/mo flat). Without ClinePass, Muse is off: Meta's own API is pay-per-use, and the Muse app can't be controlled by other apps. |
+| **Cline** | Open models (Kimi K3.1 Pro, GLM 5.3, DeepSeek, Qwen…) through ClinePass | Your ClinePass |
 | Grok via xAI API | Optional fallback | Pay-per-use, blocked by default |
 
 Agents are defined in [`relay.config.json`](./relay.config.json). Any OpenAI-compatible endpoint (Ollama, LM Studio, OpenRouter) or local command-line assistant can be added as another entry. Mark each connection's `billing` as `subscription`, `local`, or `metered`.
@@ -58,9 +59,11 @@ It turns on Hermes' API server with a random key (backing up `~/.hermes/.env` fi
 
 Once connected, Hermes' card shows online/offline, the reasoning level is sent with each request, and each reply shows the model that actually answered. Hermes uses its own default model unless you set a **Provider** in its editor (for example `openrouter`); then the Model field picks the exact model Hermes runs.
 
-**Muse.** Relay can only reach Muse Spark through Meta's pay-per-use Model API, so Muse stays off unless you set `MUSE_BASE_URL`, `MUSE_API_KEY`, and `RELAY_ALLOW_METERED=true`. Relay can't drive the Muse phone app.
+**Muse.** Runs on Muse Spark 1.3 through ClinePass. Without ClinePass, Muse stays off unless you set `MUSE_BASE_URL`, `MUSE_API_KEY`, and `RELAY_ALLOW_METERED=true` for Meta's pay-per-use API. Relay can't drive the Muse phone app.
 
 **Grok Bot.** `npm run setup:grok` walks you through it: create a new Grok Bot routine named Relay with a Webhook trigger, paste the instructions it prints (also copied to your clipboard), then paste the routine's webhook URL, key, and key header. The routine answers by running `scripts/relay-reply.sh`, which only ever posts to Relay's own callback address. The routine's computer must be the Mac running Relay, or set `RELAY_PUBLIC_URL` to an address it can reach.
+
+**ClinePass.** `npm run setup:clinepass` saves your key (app.cline.bot → Settings → API Keys) and sends one tiny test message. Relay sends only `cline-pass/` models on that key, so it can't spend Cline credits, and the editor refuses other models. Usage counts against ClinePass's 5-hour, weekly, and monthly limits.
 
 **Claude.** If Claude Code is installed and signed in (`claude` once in Terminal), Claude joins the crew automatically and runs on your Claude plan. Pick `sonnet`, `opus`, or `haiku` in its editor.
 

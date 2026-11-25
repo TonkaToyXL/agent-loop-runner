@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { isReasoning } from "./config.js";
-import { checkHealth, resolveConnector, runAgent, type Purpose } from "./connectors.js";
+import { checkHealth, coveredModel, resolveConnector, runAgent, type Purpose } from "./connectors.js";
 import { fallbackPlan, parsePlan, planPrompt, synthesisPrompt, type PlannerAgent, type PlanStep } from "./planner.js";
 import { HELP_TEXT, parseCommand, pickAgent } from "./router.js";
 import type { Store } from "./store.js";
@@ -145,6 +145,12 @@ export class Hub {
       };
     }
     if (patch.maxConcurrent !== undefined) clean.maxConcurrent = Math.max(1, Math.min(8, Math.floor(nonNeg(patch.maxConcurrent, 1))));
+    // Refuse model edits that would leave a subscription and start billing per use.
+    if (clean.model) {
+      const conn = resolveConnector({ ...base, ...clean });
+      const check = coveredModel({ ...base, ...clean }, conn.config);
+      if (conn.live && check.error) throw new Error(check.error);
+    }
     this.store.state.overrides[id] = { ...this.store.state.overrides[id], ...clean };
     this.store.save();
     this.emitAgents();

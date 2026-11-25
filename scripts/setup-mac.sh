@@ -53,9 +53,14 @@ fi
 
 if ask "Connect Grok through your Grok Bot routine?" y; then bash scripts/setup-grok.sh || warn "Grok setup didn't finish. Rerun with: npm run setup:grok"; fi
 
-title "Muse"
-say "Muse has no free way in: the Muse app can't be controlled by other apps, and"
-say "Meta's Muse API is pay-per-use. Muse stays off and out of team work."
+title "ClinePass"
+say "Your ClinePass (\$9.99/mo flat) can power Muse (Muse Spark 1.3) and a Cline"
+say "teammate on open models like Kimi K3.1 Pro and GLM 5.3. No per-use charges."
+if ask "Connect ClinePass?" y; then
+  bash scripts/setup-clinepass.sh || warn "ClinePass setup didn't finish. Rerun with: npm run setup:clinepass"
+else
+  say "Skipped. Without it, Muse stays off (its only other route is pay-per-use)."
+fi
 
 # ---- Channels
 if ask "Connect Telegram so you can run the crew from your phone?" y; then

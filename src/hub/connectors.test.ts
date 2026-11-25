@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { normalizeAgent } from "./config.js";
-import { buildChatBody, parseChatResponse, parseCliOutput, resolveConnector } from "./connectors.js";
+import { buildChatBody, coveredModel, parseChatResponse, parseCliOutput, resolveConnector } from "./connectors.js";
 import type { ConnectorConfig } from "./types.js";
 
 const hermesConn: ConnectorConfig = { kind: "openai", label: "Hermes", reasoningIn: "model_options", supportsProvider: true };
@@ -142,5 +142,38 @@ describe("parseCliOutput", () => {
   it("passes plain text through", () => {
     expect(parseCliOutput("  answer \n", "text", "Tool").text).toBe("answer");
     expect(() => parseCliOutput("   ", "text", "Tool")).toThrow("empty reply");
+  });
+});
+
+describe("ClinePass guard", () => {
+  const cp: ConnectorConfig = {
+    kind: "openai",
+    label: "ClinePass",
+    billing: "subscription",
+    modelPrefix: "cline-pass/",
+    headers: { "X-Response-Format": "openai" },
+    body: { stream: false },
+  };
+  const mk = (model: string) => normalizeAgent({ id: "cline", model }, 0);
+
+  it("allows cline-pass models and refuses others that would bill credits", () => {
+    const saved = process.env.RELAY_ALLOW_METERED;
+    delete process.env.RELAY_ALLOW_METERED;
+    try {
+      expect(coveredModel(mk("cline-pass/glm-5.3"), cp).error).toBeUndefined();
+      expect(coveredModel(mk("anthropic/claude-sonnet-4-6"), cp).error).toMatch(/isn't included in ClinePass.*cline-pass\//);
+    } finally {
+      if (saved !== undefined) process.env.RELAY_ALLOW_METERED = saved;
+    }
+  });
+
+  it("sends stream:false and lets a connector override the model id", () => {
+    expect(buildChatBody(mk("cline-pass/glm-5.3"), cp, "hi")).toMatchObject({ stream: false, model: "cline-pass/glm-5.3" });
+    expect(buildChatBody(mk("cline-pass/x"), { kind: "openai", label: "Meta", model: "muse-spark-1.1" }, "hi").model).toBe("muse-spark-1.1");
+  });
+
+  it("unwraps Cline's legacy {success, data} response shape", () => {
+    const legacy = { success: true, data: { choices: [{ message: { content: "ok" }, finish_reason: "stop" }], usage: { prompt_tokens: 3, completion_tokens: 1 } } };
+    expect(parseChatResponse(legacy as never, "ClinePass")).toMatchObject({ text: "ok", usage: { input: 3, output: 1 } });
   });
 });

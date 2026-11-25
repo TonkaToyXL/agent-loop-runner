@@ -180,9 +180,25 @@ export function baseUrlOf(config: ConnectorConfig): string {
 }
 
 /** Chat Completions body for an agent, with the reasoning and provider conventions of its connector. */
+/**
+ * The model this connector will send, or an error message when the model isn't covered by the
+ * subscription (e.g. a non-"cline-pass/" model on a ClinePass key would be billed per use).
+ */
+export function coveredModel(agent: AgentConfig, config: ConnectorConfig): { model: string; error?: string } {
+  const model = config.model || agent.model;
+  if (config.modelPrefix && !model.startsWith(config.modelPrefix) && !meteredAllowed()) {
+    return {
+      model,
+      error: `${model} isn't included in ${config.label}, so it would be billed per use. Pick a model that starts with ${config.modelPrefix}`,
+    };
+  }
+  return { model };
+}
+
 export function buildChatBody(agent: AgentConfig, config: ConnectorConfig, prompt: string): Record<string, unknown> {
   const body: Record<string, unknown> = {
-    model: agent.model,
+    ...config.body,
+    model: config.model || agent.model,
     messages: [
       { role: "system", content: agent.system },
       { role: "user", content: prompt },
@@ -198,6 +214,8 @@ export function buildChatBody(agent: AgentConfig, config: ConnectorConfig, promp
 }
 
 interface ChatResponse {
+  /** Some APIs (Cline's legacy format) nest the completion under `data`. */
+  data?: ChatResponse;
   choices?: { message?: { content?: string | null }; finish_reason?: string | null }[];
   usage?: { prompt_tokens?: number; completion_tokens?: number };
   runtime?: { provider?: string; model?: string };
@@ -205,7 +223,8 @@ interface ChatResponse {
 }
 
 /** Pull the answer out of a Chat Completions reply. Throws on failed or cancelled turns. */
-export function parseChatResponse(data: ChatResponse, label: string): { text: string; served?: string; usage?: TokenUsage } {
+export function parseChatResponse(raw: ChatResponse, label: string): { text: string; served?: string; usage?: TokenUsage } {
+  const data = !raw.choices && raw.data ? raw.data : raw;
   const choice = data.choices?.[0];
   const text = choice?.message?.content?.trim() ?? "";
   const finish = choice?.finish_reason ?? "";
@@ -239,11 +258,13 @@ async function runOpenAI(req: RunRequest, config: ConnectorConfig): Promise<RunR
   const base = baseUrlOf(config);
   if (!base) throw new Error(`No base URL for ${req.agent.name}`);
   const key = env(config.apiKeyEnv);
+  const covered = coveredModel(req.agent, config);
+  if (covered.error) throw new Error(covered.error);
   const body = buildChatBody(req.agent, config, req.prompt);
   const timeout = AbortSignal.timeout(config.timeoutMs ?? 300_000);
   const res = await fetch(`${base}/chat/completions`, {
     method: "POST",
-    headers: { "content-type": "application/json", ...(key ? { authorization: `Bearer ${key}` } : {}) },
+    headers: { ...config.headers, "content-type": "application/json", ...(key ? { authorization: `Bearer ${key}` } : {}) },
     body: JSON.stringify(body),
     signal: AbortSignal.any([req.signal, timeout]),
   });

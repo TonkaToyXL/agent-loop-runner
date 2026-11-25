@@ -38,6 +38,14 @@ export interface ConnectorConfig {
   supportsProvider?: boolean;
   /** openai: path on the base URL's host polled every 30s to show online/offline, e.g. /health. */
   healthPath?: string;
+  /** openai: extra request headers (non-secret), e.g. {"X-Response-Format": "openai"}. */
+  headers?: Record<string, string>;
+  /** openai: extra body fields, e.g. {"stream": false}. */
+  body?: Record<string, unknown>;
+  /** Only model IDs starting with this are covered by the subscription; others are refused (they'd be billed). */
+  modelPrefix?: string;
+  /** Model ID to send through this connector instead of the agent's model (when providers name it differently). */
+  model?: string;
   /** webhook: env var holding the webhook URL. */
   webhookUrlEnv?: string;
   /** webhook: header that carries the secret (default Authorization: Bearer). */
