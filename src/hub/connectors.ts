@@ -367,6 +367,7 @@ async function runCli(req: RunRequest, config: ConnectorConfig): Promise<RunResu
   // An empty working folder, so the tool doesn't pick up whatever project Relay runs from.
   const cwd = join(tmpdir(), "relay-cli", req.agent.id);
   mkdirSync(cwd, { recursive: true });
+  if (req.signal.aborted) throw new Error("Cancelled");
   const child = spawn(config.command!, args, { cwd, env: process.env, stdio: ["pipe", "pipe", "pipe"] });
   let stdout = "";
   let stderr = "";

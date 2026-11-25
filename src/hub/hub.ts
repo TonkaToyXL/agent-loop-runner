@@ -90,6 +90,8 @@ export class Hub {
   private readonly controllers = new Map<string, AbortController>();
   private readonly slots = new Map<string, number>();
   private readonly waiters = new Map<string, (() => void)[]>();
+  /** Requests started but not yet recorded in usage, per agent. */
+  private readonly inFlight = new Map<string, number>();
   private readonly health = new Map<string, { ok: boolean; detail: string }>();
   private healthTimer: NodeJS.Timeout | null = null;
   private readonly healthFails = new Map<string, number>();
@@ -287,8 +289,11 @@ export class Hub {
     return this.agents().map(({ id, name, skills, tagline }) => ({ id, name, skills, tagline, enabled: ok.has(id) }));
   }
 
+  /** Limit status, counting requests already running for this agent (they aren't in usage yet). */
   limitFor(agent: AgentConfig, now = new Date()): LimitState {
-    return limitState(agentUsage(this.store.state.usage, agent.id, now), agent.limits);
+    const usage = agentUsage(this.store.state.usage, agent.id, now);
+    usage.requestsToday += this.inFlight.get(agent.id) ?? 0;
+    return limitState(usage, agent.limits);
   }
 
   updateAgent(id: string, patch: Partial<EditableAgentFields>): AgentConfig {
@@ -812,15 +817,29 @@ export class Hub {
     return open.find((a) => a.id === id);
   }
 
-  private async acquire(agentId: string, max: number): Promise<void> {
+  /** Wait for a free slot. Returns false (holding no slot) if the task is cancelled while waiting. */
+  private async acquire(agentId: string, max: number, signal: AbortSignal): Promise<boolean> {
     while ((this.slots.get(agentId) ?? 0) >= max) {
+      if (signal.aborted) return false;
       await new Promise<void>((resolve) => {
         const list = this.waiters.get(agentId) ?? [];
-        list.push(resolve);
+        const wake = () => {
+          signal.removeEventListener("abort", onAbort);
+          resolve();
+        };
+        const onAbort = () => {
+          const i = list.indexOf(wake);
+          if (i >= 0) list.splice(i, 1);
+          resolve();
+        };
+        list.push(wake);
         this.waiters.set(agentId, list);
+        signal.addEventListener("abort", onAbort, { once: true });
       });
     }
+    if (signal.aborted) return false;
     this.slots.set(agentId, (this.slots.get(agentId) ?? 0) + 1);
+    return true;
   }
 
   private release(agentId: string): void {
@@ -875,7 +894,18 @@ export class Hub {
       }
     }
 
-    await this.acquire(agent.id, agent.maxConcurrent);
+    if (!(await this.acquire(agent.id, agent.maxConcurrent, controller.signal))) {
+      this.controllers.delete(task.id);
+      throw this.fail(task, "cancelled", "Cancelled before it started.");
+    }
+    // Re-check limits now that the task is about to run: others may have used them up while it waited.
+    const latest = this.limitFor(agent);
+    if (!latest.ok) {
+      this.release(agent.id);
+      this.controllers.delete(task.id);
+      throw this.fail(task, "blocked", `${agent.name}: ${latest.reason} while this was waiting.`);
+    }
+    this.inFlight.set(agent.id, (this.inFlight.get(agent.id) ?? 0) + 1);
     task.status = "running";
     task.startedAt = new Date().toISOString();
     task.model = agent.model;
@@ -912,6 +942,7 @@ export class Hub {
       this.record(task, agent, false, Date.now() - started);
       throw err;
     } finally {
+      this.inFlight.set(agent.id, Math.max(0, (this.inFlight.get(agent.id) ?? 1) - 1));
       this.release(agent.id);
       this.controllers.delete(task.id);
       task.finishedAt = new Date().toISOString();
@@ -920,7 +951,7 @@ export class Hub {
     }
   }
 
-  private fail(task: Task, status: "blocked" | "failed", error: string): Error {
+  private fail(task: Task, status: "blocked" | "failed" | "cancelled", error: string): Error {
     task.status = status;
     task.error = error;
     task.finishedAt = new Date().toISOString();
