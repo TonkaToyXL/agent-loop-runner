@@ -11,6 +11,7 @@
     "setup:telegram": "bash scripts/setup-telegram.sh",
     "setup:grok": "bash scripts/setup-grok.sh",
     "setup:clinepass": "bash scripts/setup-clinepass.sh",
+    "setup:antigravity": "bash scripts/setup-antigravity.sh",
     "babysit-pr": "tsx src/babysit-pr.ts",
     "build": "tsc",
     "typecheck": "tsc --noEmit",

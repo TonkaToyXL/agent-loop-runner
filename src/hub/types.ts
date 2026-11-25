@@ -21,7 +21,9 @@ export interface ConnectorConfig {
   /** cli: arguments. {model}, {system} and {prompt} are filled in; without {prompt} the prompt goes to stdin. */
   args?: string[];
   /** cli: how to read stdout. */
-  outputFormat?: "text" | "claude-json";
+  outputFormat?: "text" | "claude-json" | "agy-json";
+  /** cli: flag that selects the model (e.g. --model). Skipped when the agent's model is "default". */
+  modelArg?: string;
   /** Env vars that must be non-empty for this connector to be used. */
   requiresEnv?: string[];
   /** openai: base URL such as https://api.x.ai/v1. */

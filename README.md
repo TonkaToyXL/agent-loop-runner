@@ -28,7 +28,7 @@ cd ~/agent-loop-runner
 npm run setup:mac
 ```
 
-It installs what Relay needs, connects the agents you already use, links Telegram, blocks pay-per-use APIs, and keeps Relay running in the background (it starts at login and restarts if it stops). Run it again any time to add something. Each piece also has its own command: `npm run setup:hermes`, `setup:grok`, `setup:clinepass`, `setup:telegram`.
+It installs what Relay needs, connects the agents you already use, links Telegram, blocks pay-per-use APIs, and keeps Relay running in the background (it starts at login and restarts if it stops). Run it again any time to add something. Each piece also has its own command: `npm run setup:hermes`, `setup:grok`, `setup:clinepass`, `setup:antigravity`, `setup:telegram`.
 
 To try it without connecting anything: `npm install && npm run hub`, then open http://127.0.0.1:4747. Unconnected agents answer in a labeled demo mode and never join real team work.
 
@@ -42,6 +42,7 @@ Relay uses the subscriptions and tools you already have. Pay-per-use APIs are **
 | **Hermes** | Hermes Agent's built-in API server on your Mac | Whatever Hermes already uses |
 | **Claude** | Claude Code signed in on your Mac (`claude -p`) | Your Claude plan |
 | **Muse** | Muse Spark 1.3 through ClinePass | Your ClinePass ($9.99/mo flat). Without ClinePass, Muse is off: Meta's own API is pay-per-use, and the Muse app can't be controlled by other apps. |
+| **Gemini** | Google's Antigravity CLI (`agy -p`), run unmodified on your Mac | Your Google AI Pro plan. Opt-in; see below. |
 | **Cline** | Open models (Kimi K3.1 Pro, GLM 5.3, DeepSeek, Qwen…) through ClinePass | Your ClinePass |
 | Grok via xAI API | Optional fallback | Pay-per-use, blocked by default |
 
@@ -64,6 +65,8 @@ Once connected, Hermes' card shows online/offline, the reasoning level is sent w
 **Grok Bot.** `npm run setup:grok` walks you through it: create a new Grok Bot routine named Relay with a Webhook trigger, paste the instructions it prints (also copied to your clipboard), then paste the routine's webhook URL, key, and key header. The routine answers by running `scripts/relay-reply.sh`, which only ever posts to Relay's own callback address. The routine's computer must be the Mac running Relay, or set `RELAY_PUBLIC_URL` to an address it can reach.
 
 **ClinePass.** `npm run setup:clinepass` saves your key (app.cline.bot → Settings → API Keys) and sends one tiny test message. Relay sends only `cline-pass/` models on that key, so it can't spend Cline credits, and the editor refuses other models. Usage counts against ClinePass's 5-hour, weekly, and monthly limits.
+
+**Gemini (Google AI Pro).** Gemini CLI stopped serving AI Pro accounts in June 2026; Google's Antigravity CLI replaced it. `npm run setup:antigravity` turns Gemini on after you confirm. Relay only runs the official `agy` command in headless mode from an empty folder with its sandbox on, and never reads your Google sign-in. Antigravity's terms forbid third-party tools that use your Antigravity login (Google has banned accounts for proxies that do), so never point other tools at it. A reply on Google's developer forum says scripted `agy -p` runs under your own account are allowed, but the terms don't say so outright; opt in only if you're comfortable with that.
 
 **Claude.** If Claude Code is installed and signed in (`claude` once in Terminal), Claude joins the crew automatically and runs on your Claude plan. Pick `sonnet`, `opus`, or `haiku` in its editor.
 

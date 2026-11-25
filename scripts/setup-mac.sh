@@ -51,6 +51,8 @@ else
   say "  npm install -g @anthropic-ai/claude-code   then run 'claude' once to sign in."
 fi
 
+bash scripts/setup-antigravity.sh || warn "Gemini setup didn't finish. Rerun with: npm run setup:antigravity"
+
 if ask "Connect Grok through your Grok Bot routine?" y; then bash scripts/setup-grok.sh || warn "Grok setup didn't finish. Rerun with: npm run setup:grok"; fi
 
 title "ClinePass"
