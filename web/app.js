@@ -628,7 +628,7 @@ function renderThread() {
       const meta = `${who}${CHANNEL_LABEL[t.channel]} · ${clock(t.createdAt)} · ${to}`;
       const cls = enter("thread", t.id);
       const reply = (t.kind === "goal" ? goalBubble(t) : agentBubble(t)).replace('<div class="msg bot">', `<div class="msg bot${cls}">`);
-      return userBubble(t.prompt, meta, cls) + reply;
+      return userBubble(t.display ?? t.prompt, meta, cls) + reply;
     })
     .join("");
   if (nearBottom || renderThread.forceBottom) {
@@ -699,6 +699,9 @@ const COMMANDS = [
   ["/model ", "<agent> <model-id>"],
   ["/reasoning ", "<agent> off|low|medium|high|max"],
   ["/lead ", "<agent> plans team goals"],
+  ["/inbox", "recent email (read-only)"],
+  ["/inbox summary", "what needs your attention"],
+  ["/approvals", "what's waiting for your OK"],
   ["/help", "all commands"],
 ];
 

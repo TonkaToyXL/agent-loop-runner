@@ -13,6 +13,7 @@ export type Command =
   | { type: "reasoning"; agentId: string; reasoning: Reasoning }
   | { type: "lead"; agentId: string }
   | { type: "approvals" }
+  | { type: "inbox"; mode: "list" | "summary"; hours: number; unreadOnly: boolean; text?: string; question?: string }
   | { type: "decide"; id: string; approve: boolean }
   | { type: "error"; message: string };
 
@@ -64,6 +65,10 @@ export function parseCommand(input: string, agents: AgentRef[]): Command {
       case "approvals":
       case "pending":
         return { type: "approvals" };
+      case "inbox":
+      case "email":
+      case "mail":
+        return parseInbox(args);
       case "approve":
       case "deny":
         return { type: "error", message: `Usage: /${cmd} <id>. Send /approvals to see what's waiting.` };
@@ -109,7 +114,45 @@ export function parseCommand(input: string, agents: AgentRef[]): Command {
     return { type: "error", message: `No agent called @${who}. Try /agents.` };
   }
 
+  // "summarize my inbox", "anything urgent in my email?", "check my mail"
+  if (MAIL_ASK.test(text)) {
+    const plain = /^(please\s+)?(summari[sz]e|check|review|go through)\s+(my\s+)?(inbox|e-?mails?|mail)\s*[.!?]*$/i.test(text);
+    return { type: "inbox", mode: "summary", hours: 24, unreadOnly: false, question: plain ? undefined : text };
+  }
+
   return { type: "auto", text };
+}
+
+const MAIL_ASK =
+  /\b(summari[sz]e|check|review|go through|what'?s|whats|anything|any|did i get|do i have)\b[^.?!]*\b(my\s+)?(inbox|e-?mails?|my mail)\b/i;
+
+/** /inbox [unread] [48h|3d] · /inbox search <words> · /inbox summary [48h] [question] */
+export function parseInbox(args: string[]): Command {
+  let mode: "list" | "summary" = "list";
+  let unreadOnly = false;
+  let hours = 24;
+  let text: string | undefined;
+  const rest: string[] = [];
+  const words = [...args];
+  if (/^(summary|summarize|summarise|digest)$/i.test(words[0] ?? "")) {
+    mode = "summary";
+    words.shift();
+  } else if (/^(search|find)$/i.test(words[0] ?? "")) {
+    words.shift();
+    text = words.join(" ").trim();
+    if (!text) return { type: "error", message: "Usage: /inbox search <words>" };
+    return { type: "inbox", mode: "list", hours: 24 * 7, unreadOnly: false, text };
+  }
+  for (const w of words) {
+    const h = /^(\d{1,3})(h|d)?$/i.exec(w);
+    if (h && rest.length === 0) hours = Number(h[1]) * (h[2]?.toLowerCase() === "d" ? 24 : 1);
+    else if (/^unread$/i.test(w) && rest.length === 0) unreadOnly = true;
+    else rest.push(w);
+  }
+  hours = Math.min(Math.max(hours, 1), 24 * 14);
+  const question = rest.join(" ").trim() || undefined;
+  if (mode === "list" && question) return { type: "error", message: "Usage: /inbox [unread] [48h] · /inbox search <words> · /inbox summary [question]" };
+  return { type: "inbox", mode, hours, unreadOnly, question };
 }
 
 /** Pick the agent whose skills best match the text. Ties go to the fallback (lead). */
@@ -145,6 +188,8 @@ export const HELP_TEXT = [
   "/model <agent> <model-id>",
   "/reasoning <agent> off|low|medium|high|max",
   "/lead <agent>     choose who plans team goals",
+  "/inbox            recent email (read-only)",
+  "/inbox summary    what needs your attention",
   "/approvals        what's waiting for your OK",
   "/approve <id>     allow it   ·   /deny <id>  block it",
 ].join("\n");

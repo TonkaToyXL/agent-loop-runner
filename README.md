@@ -12,6 +12,7 @@ One place to run all your AI agents together. Talk to Grok, Muse, and Hermes fro
 
 - **One thread for every agent.** `@grok`, `@muse`, `@hermes`, or plain text (Relay picks the best agent from its strengths).
 - **Team mode, step by step.** `@team <goal>`: the lead plans up to 6 steps. Independent steps run in parallel; a step that needs earlier work waits for it and gets those results (research → draft → review). The lead writes the wrap-up. Watch the baton move on the crew map.
+- **Read-only email.** `/inbox`, `/inbox unread`, `/inbox search <words>` list mail with no AI involved; `/inbox summary` (or "anything urgent in my email?") has one text-only agent you choose summarize it. Relay can't send, delete, move, or mark mail as read.
 - **Approve from your phone.** Nothing acts for you without a tap. When Hermes or Grok Bot is about to send, post, buy, delete, or pay, and whenever Hermes pauses mid-task for permission, you get **Approve / Deny** buttons in Telegram and on the dashboard. No answer in 15 minutes = deny.
 - **Limits that reroute.** Daily request/token caps and a monthly budget per agent. When one agent is capped, auto-routed and team work moves to a teammate; direct asks stop and say why.
 - **Model and reasoning labels everywhere**, editable from the dashboard or by chat (`/model grok grok-4-fast-reasoning`, `/reasoning hermes high`).
@@ -29,7 +30,7 @@ cd ~/agent-loop-runner
 npm run setup:mac
 ```
 
-It installs what Relay needs, connects the agents you already use, links Telegram, blocks pay-per-use APIs, and keeps Relay running in the background (it starts at login and restarts if it stops). Run it again any time to add something. Each piece also has its own command: `npm run setup:hermes`, `setup:grok`, `setup:clinepass`, `setup:antigravity`, `setup:telegram`.
+It installs what Relay needs, connects the agents you already use, links Telegram, blocks pay-per-use APIs, and keeps Relay running in the background (it starts at login and restarts if it stops). Run it again any time to add something. Each piece also has its own command: `npm run setup:hermes`, `setup:grok`, `setup:clinepass`, `setup:antigravity`, `setup:email`, `setup:telegram`.
 
 To try it without connecting anything: `npm install && npm run hub`, then open http://127.0.0.1:4747. Unconnected agents answer in a labeled demo mode and never join real team work.
 
@@ -91,6 +92,19 @@ iMessage needs a Mac signed in to Messages, running [BlueBubbles Server](https:/
 
 Relay ignores messages from non-allowlisted handles and its own sent messages, so replies never loop.
 
+## Email (read-only)
+
+`npm run setup:email` connects one inbox over IMAP with an app password (free): Gmail/Google Workspace, iCloud, Yahoo, Fastmail, or any IMAP server. Outlook/Hotmail isn't supported (Microsoft requires an OAuth sign-in flow).
+
+Read-only is enforced in code, not just by policy:
+- IMAP can't send mail. Relay has no SMTP code at all.
+- Relay refuses every IMAP command except sign-in, `EXAMINE` (opens the inbox read-only), search, fetch, and sign-out.
+- Messages are fetched with `BODY.PEEK`, so nothing is even marked as read.
+
+Summaries go to the agent named in `MAIL_SUMMARIZER` (`gemini`, `muse`, `cline`, or `none`), and the mail it reads goes to that agent's provider. Agents that can act for you (Hermes, Grok Bot) are refused as readers, because anyone can email you instructions. Emails are passed as fenced, untrusted data with orders not to follow anything inside them. The app password lives in `.env` (owner-only permissions); summaries and the email snippets sent with them are kept in Relay's local task history.
+
+Commands: `/inbox [unread] [48h|3d]`, `/inbox search <words>` (last 7 days), `/inbox summary [48h] [question]`.
+
 ## Approvals
 
 Two checks protect anything that can act outside Relay (agents marked `actsInWorld` in `relay.config.json`: Hermes and Grok Bot):
@@ -114,6 +128,8 @@ Same everywhere: dashboard, Telegram, iMessage.
 /model <agent> <model-id>
 /reasoning <agent> off|low|medium|high|max
 /lead <agent>     choose who plans team goals
+/inbox            recent email (read-only, no AI)
+/inbox summary    what needs your attention
 /approvals        what's waiting for your OK
 /approve <id>     allow it      /deny <id>  block it
 ```

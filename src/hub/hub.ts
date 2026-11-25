@@ -3,6 +3,7 @@ import { EventEmitter } from "node:events";
 import { isReasoning } from "./config.js";
 import { checkHealth, coveredModel, resolveConnector, runAgent, type Purpose } from "./connectors.js";
 import { ApprovalDesk, riskyAction, type Approval, type ApprovalRequest } from "./approvals.js";
+import { digestPrompt, fetchRecent, formatList, mailConfig, span } from "./mail/inbox.js";
 import {
   fallbackPlan,
   parsePlan,
@@ -391,6 +392,8 @@ export class Hub {
         }
         return { reply: a.status === "approved" ? `✅ Approved: ${a.title}` : `❌ Denied: ${a.title}` };
       }
+      case "inbox":
+        return this.inbox(cmd, text, origin);
       case "lead": {
         this.setLead(cmd.agentId);
         return { reply: `${this.agent(cmd.agentId)!.name} now leads team goals.` };
@@ -420,6 +423,40 @@ export class Hub {
         const task = this.submitGoal(cmd.text, origin);
         return { reply: `→ Team goal started. ${this.agent(this.leadId)!.name} is splitting the work.`, taskId: task.id };
       }
+    }
+  }
+
+  /** The agent allowed to read email: set by MAIL_SUMMARIZER, text-only, and live. */
+  mailReader(): { agent?: AgentConfig; why?: string } {
+    const id = process.env.MAIL_SUMMARIZER?.trim().toLowerCase();
+    if (!id || id === "none") return { why: "No agent is allowed to read your email yet (MAIL_SUMMARIZER isn't set)." };
+    const agent = this.agent(id);
+    if (!agent) return { why: `MAIL_SUMMARIZER is "${id}", but there's no such agent connected.` };
+    if (agent.actsInWorld) return { why: `${agent.name} can act on your computer or accounts, so Relay won't let it read email (an email could try to give it orders).` };
+    if (!agent.enabled || !resolveConnector(agent).live) return { why: `${agent.name} is off or not connected right now.` };
+    return { agent };
+  }
+
+  private async inbox(
+    cmd: { mode: "list" | "summary"; hours: number; unreadOnly: boolean; text?: string; question?: string },
+    typed: string,
+    origin: ReplyTarget,
+  ): Promise<{ reply: string; taskId?: string }> {
+    const cfg = mailConfig();
+    if (!cfg) return { reply: "Email isn't connected. On the Mac, run: npm run setup:email" };
+    const reader = cmd.mode === "summary" ? this.mailReader() : {};
+    try {
+      const items = await fetchRecent(cfg, { hours: cmd.hours, unreadOnly: cmd.unreadOnly, text: cmd.text, max: cmd.mode === "summary" ? 40 : 30 });
+      if (cmd.mode === "list") return { reply: formatList(items, cmd) };
+      if (!reader.agent) return { reply: `${reader.why}\n\nHere's the plain list instead:\n\n${formatList(items, cmd)}` };
+      if (!items.length) return { reply: `No ${cmd.unreadOnly ? "unread " : ""}email in the last ${span(cmd.hours)}.` };
+      const task = this.submitDirect(reader.agent.id, digestPrompt(items, cmd.hours, cmd.question), origin, "explicit", {
+        display: typed,
+        title: `Inbox summary · ${items.length} email${items.length === 1 ? "" : "s"}, last ${span(cmd.hours)}`,
+      });
+      return { reply: `📥 ${reader.agent.name} is reading ${items.length} email${items.length === 1 ? "" : "s"} from the last ${span(cmd.hours)}…`, taskId: task.id };
+    } catch (err) {
+      return { reply: `Couldn't read email: ${err instanceof Error ? err.message : String(err)}` };
     }
   }
 
@@ -476,8 +513,14 @@ export class Hub {
     return task;
   }
 
-  submitDirect(agentId: string, prompt: string, origin: ReplyTarget, routing: Task["routing"]): Task {
-    const task = this.createTask({ kind: "direct", agentId, prompt, channel: origin.channel, replyTo: origin, routing });
+  submitDirect(
+    agentId: string,
+    prompt: string,
+    origin: ReplyTarget,
+    routing: Task["routing"],
+    extra: { display?: string; title?: string } = {},
+  ): Task {
+    const task = this.createTask({ kind: "direct", agentId, prompt, channel: origin.channel, replyTo: origin, routing, ...extra });
     this.baton({ from: "you", to: agentId, taskId: task.id, kind: "delegate" });
     void this.execute(task, "work", prompt)
       .catch(() => {})

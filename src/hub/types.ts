@@ -146,6 +146,8 @@ export interface Task {
   /** Team steps: 1-based step number and the steps it builds on. */
   step?: number;
   after?: number[];
+  /** What the user actually typed, when the prompt sent to the agent is longer (e.g. inbox summaries). */
+  display?: string;
   /** Id of the approval this task is waiting on, if any. */
   awaitingApproval?: string;
   replyTo?: ReplyTarget;

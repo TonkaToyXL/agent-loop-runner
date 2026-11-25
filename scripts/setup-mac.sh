@@ -60,6 +60,10 @@ else
   say "Skipped. Without it, Muse stays off (its only other route is pay-per-use)."
 fi
 
+if ask "Connect your email (read-only: Relay can't send, delete, or mark read)?" y; then
+  bash scripts/setup-email.sh || warn "Email setup didn't finish. Rerun with: npm run setup:email"
+fi
+
 # ---- Channels
 if ask "Connect Telegram so you can run the crew from your phone?" y; then
   bash scripts/setup-telegram.sh || warn "Telegram setup didn't finish. Rerun with: npm run setup:telegram"
