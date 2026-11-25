@@ -11,7 +11,8 @@ One place to run all your AI agents together. Talk to Grok, Muse, and Hermes fro
 ## What it does
 
 - **One thread for every agent.** `@grok`, `@muse`, `@hermes`, or plain text (Relay picks the best agent from its strengths).
-- **Team mode.** `@team <goal>`: the lead plans, subtasks run in parallel, the lead writes the wrap-up. Watch the baton move on the crew map.
+- **Team mode, step by step.** `@team <goal>`: the lead plans up to 6 steps. Independent steps run in parallel; a step that needs earlier work waits for it and gets those results (research → draft → review). The lead writes the wrap-up. Watch the baton move on the crew map.
+- **Approve from your phone.** Nothing acts for you without a tap. When Hermes or Grok Bot is about to send, post, buy, delete, or pay, and whenever Hermes pauses mid-task for permission, you get **Approve / Deny** buttons in Telegram and on the dashboard. No answer in 15 minutes = deny.
 - **Limits that reroute.** Daily request/token caps and a monthly budget per agent. When one agent is capped, auto-routed and team work moves to a teammate; direct asks stop and say why.
 - **Model and reasoning labels everywhere**, editable from the dashboard or by chat (`/model grok grok-4-fast-reasoning`, `/reasoning hermes high`).
 - **Dashboard:** who's working, board of queued/working/done/failed, leaderboard of who did the most work, tokens, spend, and provider rate-limit headroom when the provider reports it.
@@ -90,6 +91,15 @@ iMessage needs a Mac signed in to Messages, running [BlueBubbles Server](https:/
 
 Relay ignores messages from non-allowlisted handles and its own sent messages, so replies never loop.
 
+## Approvals
+
+Two checks protect anything that can act outside Relay (agents marked `actsInWorld` in `relay.config.json`: Hermes and Grok Bot):
+
+1. **Before starting:** if the task mentions sending, posting, replying, buying, paying, deleting, booking, installing, deploying and similar, Relay asks you first.
+2. **Mid-task (Hermes):** Relay runs Hermes through its Runs API. When Hermes' own approval policy pauses a tool call, Relay forwards it to you and passes back your answer.
+
+Answer with the Telegram buttons, the dashboard cards, or by text in any channel: `/approve <id>`, `/deny <id>`, or on iMessage just `yes <id>` / `no <id>`. `/approvals` lists what's waiting. Unanswered requests are denied after 15 minutes (`RELAY_APPROVAL_TIMEOUT_MS`). Hermes questions that need a typed answer (not yes/no) can't be answered from Relay yet; the run waits until it times out.
+
 ## Chat commands
 
 Same everywhere: dashboard, Telegram, iMessage.
@@ -104,6 +114,8 @@ Same everywhere: dashboard, Telegram, iMessage.
 /model <agent> <model-id>
 /reasoning <agent> off|low|medium|high|max
 /lead <agent>     choose who plans team goals
+/approvals        what's waiting for your OK
+/approve <id>     allow it      /deny <id>  block it
 ```
 
 ## Use the dashboard from your phone

@@ -1,6 +1,8 @@
 export interface PlanStep {
   agentId: string;
   task: string;
+  /** 0-based indexes of earlier steps this one builds on. Empty = can start right away. */
+  after: number[];
 }
 
 export interface PlannerAgent {
@@ -11,7 +13,9 @@ export interface PlannerAgent {
   enabled: boolean;
 }
 
-const MAX_STEPS = 5;
+const MAX_STEPS = 6;
+/** How much of an earlier step's answer to pass forward. */
+const MAX_HANDOFF_CHARS = 6000;
 
 export function planPrompt(goal: string, agents: PlannerAgent[]): string {
   const roster = agents
@@ -19,16 +23,21 @@ export function planPrompt(goal: string, agents: PlannerAgent[]): string {
     .map((a) => `- ${a.id} (${a.name}): ${a.tagline}. Strengths: ${a.skills.slice(0, 10).join(", ")}`)
     .join("\n");
   return [
-    "You are the lead of a team of AI agents. Split the goal into 1 to 5 independent subtasks",
-    "that can run in parallel, and give each to the agent best suited for it.",
+    "You lead a team of AI agents. Break the goal into 1 to 6 steps and give each step to the",
+    "agent best suited for it.",
+    "",
+    "Steps run in parallel unless one needs another's result. When a step needs earlier work",
+    '(for example, write copy from research, or review a draft), list those step numbers in "after".',
+    "A step only sees the results of the steps it lists. Only point back to earlier steps.",
     "",
     "Team:",
     roster,
     "",
     `Goal: ${goal}`,
     "",
-    'Reply with only a JSON array, no prose. Example: [{"agent":"grok","task":"..."}]',
-    "Each task must stand alone: say exactly what to produce and in what format.",
+    "Reply with only a JSON array, no prose. Example:",
+    '[{"step":1,"agent":"grok","task":"Find ..."},{"step":2,"agent":"muse","task":"Write ... using the findings","after":[1]}]',
+    "Each task must say exactly what to produce and in what format.",
   ].join("\n");
 }
 
@@ -45,15 +54,32 @@ export function parsePlan(text: string, validIds: string[]): PlanStep[] | null {
   }
   if (!Array.isArray(raw)) return null;
   const ids = new Set(validIds);
-  const steps: PlanStep[] = [];
-  for (const item of raw) {
-    if (!item || typeof item !== "object") continue;
+
+  // First pass: keep valid steps and remember how the model numbered them.
+  const kept: { agentId: string; task: string; label: number; afterRaw: unknown }[] = [];
+  raw.forEach((item, i) => {
+    if (!item || typeof item !== "object") return;
     const rec = item as Record<string, unknown>;
     const agentId = String(rec.agent ?? rec.agentId ?? "").toLowerCase().replace(/^@/, "");
     const task = String(rec.task ?? rec.prompt ?? "").trim();
-    if (ids.has(agentId) && task) steps.push({ agentId, task });
-  }
-  return steps.length ? steps.slice(0, MAX_STEPS) : null;
+    if (!ids.has(agentId) || !task) return;
+    const label = Number(rec.step ?? rec.id ?? i + 1);
+    kept.push({ agentId, task, label: Number.isFinite(label) ? label : i + 1, afterRaw: rec.after ?? rec.depends_on ?? rec.dependsOn });
+  });
+  if (!kept.length) return null;
+  const steps = kept.slice(0, MAX_STEPS);
+
+  // Second pass: map dependency labels to indexes, keeping only earlier steps (no cycles possible).
+  return steps.map((s, i) => {
+    const refs = Array.isArray(s.afterRaw) ? s.afterRaw : s.afterRaw === undefined || s.afterRaw === null ? [] : [s.afterRaw];
+    const after = new Set<number>();
+    for (const ref of refs) {
+      const n = Number(ref);
+      const idx = steps.findIndex((o) => o.label === n);
+      if (idx >= 0 && idx < i) after.add(idx);
+    }
+    return { agentId: s.agentId, task: s.task, after: [...after].sort((a, b) => a - b) };
+  });
 }
 
 /** Plan without a model: give the goal to every agent whose skills match, framed by its strengths. */
@@ -68,18 +94,42 @@ export function fallbackPlan(goal: string, agents: PlannerAgent[]): PlanStep[] {
   return crew.slice(0, MAX_STEPS).map((a) => ({
     agentId: a.id,
     task: `${goal}\n\nYour part: cover this from your strengths (${a.tagline.toLowerCase()}). Be concrete and brief.`,
+    after: [],
   }));
 }
 
-export function synthesisPrompt(goal: string, parts: { agentName: string; ok: boolean; text: string }[]): string {
-  const body = parts
-    .map((p) => `### ${p.agentName}${p.ok ? "" : " (failed)"}\n${p.text}`)
+export interface StepResult {
+  step: number;
+  agentName: string;
+  ok: boolean;
+  text: string;
+}
+
+/** The prompt a step actually receives: its task plus the results it builds on. */
+export function stepPrompt(task: string, inputs: StepResult[]): string {
+  if (!inputs.length) return task;
+  const body = inputs
+    .map((r) => {
+      const text = r.text.length > MAX_HANDOFF_CHARS ? `${r.text.slice(0, MAX_HANDOFF_CHARS)}\n[…cut for length]` : r.text;
+      return `### Step ${r.step} · ${r.agentName}${r.ok ? "" : " (failed)"}\n${text}`;
+    })
     .join("\n\n");
+  return `${task}\n\nResults from earlier steps that you build on:\n\n${body}`;
+}
+
+/** Steps whose dependencies are all finished and that haven't started yet. */
+export function readySteps(steps: PlanStep[], finished: Set<number>, started: Set<number>): number[] {
+  return steps.map((s, i) => i).filter((i) => !started.has(i) && steps[i].after.every((d) => finished.has(d)));
+}
+
+export function synthesisPrompt(goal: string, parts: { agentName: string; ok: boolean; text: string }[]): string {
+  const body = parts.map((p, i) => `### Step ${i + 1} · ${p.agentName}${p.ok ? "" : " (failed)"}\n${p.text}`).join("\n\n");
   return [
     `Goal: ${goal}`,
     "",
-    "Your teammates worked on parts of this goal. Combine their work into one finished answer.",
-    "Lead with the result. Keep what is useful, drop repetition, and note any part that failed.",
+    "Your teammates worked through the steps of this goal. Combine their work into one finished answer.",
+    "Lead with the result. Later steps usually build on earlier ones, so prefer the most refined version.",
+    "Drop repetition, and say plainly if any step failed.",
     "",
     body,
   ].join("\n");

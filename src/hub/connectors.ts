@@ -17,6 +17,8 @@ export interface RunRequest {
   signal: AbortSignal;
   /** Only the demo connector uses this, to fake a realistic team plan. */
   team: PlannerAgent[];
+  /** Ask the owner to approve something the agent wants to do. Resolves false on deny or timeout. */
+  approve?: (ask: { title: string; detail: string }) => Promise<boolean>;
 }
 
 export interface RunResult {
@@ -279,6 +281,10 @@ async function runOpenAI(req: RunRequest, config: ConnectorConfig): Promise<RunR
   const key = env(config.apiKeyEnv);
   const covered = coveredModel(req.agent, config);
   if (covered.error) throw new Error(covered.error);
+  if (config.runsApi) {
+    const headers = { ...config.headers, "content-type": "application/json", ...(key ? { authorization: `Bearer ${key}` } : {}) };
+    if (await hermesSupportsRuns(base, headers, req.signal)) return runHermesRun(req, config, base, headers);
+  }
   const body = buildChatBody(req.agent, config, req.prompt);
   const timeout = AbortSignal.timeout(config.timeoutMs ?? 300_000);
   let res: Response;
@@ -404,6 +410,141 @@ async function runCli(req: RunRequest, config: ConnectorConfig): Promise<RunResu
   return { ...parsed, usage: parsed.usage ?? { input: estimateTokens(req.prompt), output: estimateTokens(parsed.text) } };
 }
 
+// ---------------------------------------------------------------- Hermes Runs API (approvals)
+export interface PendingControl {
+  requestId: string;
+  generation: number;
+  kind: string;
+  summary: string;
+}
+
+const TERMINAL_OK = new Set(["completed", "succeeded", "success", "done"]);
+const TERMINAL_BAD = new Set(["failed", "error", "cancelled", "canceled", "interrupted", "expired"]);
+
+function short(v: unknown, max = 400): string {
+  const s = typeof v === "string" ? v : v === undefined || v === null ? "" : JSON.stringify(v);
+  return s.length > max ? `${s.slice(0, max - 1)}…` : s;
+}
+
+/**
+ * Pull approval prompts out of a Hermes run status (`pending_controls`). Hermes documents the
+ * identity fields (prompt_id / request_id and execution_generation); the rest is read defensively.
+ * Exported for tests.
+ */
+export function pendingControls(run: Record<string, unknown>): PendingControl[] {
+  const raw = run.pending_controls;
+  const list = Array.isArray(raw) ? raw : raw && typeof raw === "object" ? Object.values(raw as object).flat() : [];
+  const out: PendingControl[] = [];
+  for (const item of list) {
+    if (!item || typeof item !== "object") continue;
+    const c = item as Record<string, unknown>;
+    const requestId = String(c.prompt_id ?? c.request_id ?? c.id ?? "");
+    const generation = Number(c.execution_generation ?? c.generation);
+    if (!requestId || !Number.isFinite(generation)) continue;
+    const kind = String(c.kind ?? c.type ?? "approval");
+    const tool = c.tool ?? c.tool_name ?? c.name;
+    const what = c.description ?? c.summary ?? c.message ?? c.title ?? c.question ?? c.preview ?? c.command ?? c.arguments ?? c.params;
+    const summary = [tool ? `Tool: ${short(tool, 80)}` : "", what ? short(what) : ""].filter(Boolean).join("\n") || short(c);
+    out.push({ requestId, generation, kind, summary });
+  }
+  return out;
+}
+
+const runsSupport = new Map<string, { ok: boolean; at: number }>();
+
+async function hermesSupportsRuns(base: string, headers: Record<string, string>, signal: AbortSignal): Promise<boolean> {
+  const cached = runsSupport.get(base);
+  if (cached && Date.now() - cached.at < 10 * 60_000) return cached.ok;
+  let ok = false;
+  try {
+    const res = await fetch(`${base}/capabilities`, { headers, signal: AbortSignal.any([signal, AbortSignal.timeout(5000)]) });
+    if (res.ok) {
+      const caps = (await res.json()) as { features?: Record<string, unknown> };
+      ok = Boolean(caps.features?.run_submission && caps.features?.run_status);
+    }
+  } catch {
+    ok = false;
+  }
+  runsSupport.set(base, { ok, at: Date.now() });
+  return ok;
+}
+
+async function runHermesRun(req: RunRequest, config: ConnectorConfig, base: string, headers: Record<string, string>): Promise<RunResult> {
+  const chat = buildChatBody(req.agent, config, req.prompt);
+  const body: Record<string, unknown> = { input: req.prompt, instructions: req.agent.system, model: chat.model };
+  if (chat.provider) body.provider = chat.provider;
+  if (chat.model_options) body.model_options = chat.model_options;
+
+  const deadline = Date.now() + (config.timeoutMs ?? 1_800_000);
+  const created = await fetch(`${base}/runs`, {
+    method: "POST",
+    headers: { ...headers, "Idempotency-Key": `relay-${req.taskId}` },
+    body: JSON.stringify(body),
+    signal: AbortSignal.any([req.signal, AbortSignal.timeout(30_000)]),
+  });
+  if (!created.ok) throw new Error(`${config.label} HTTP ${created.status}: ${(await created.text().catch(() => "")).slice(0, 200)}`);
+  const runId = String(((await created.json()) as { run_id?: string }).run_id ?? "");
+  if (!runId) throw new Error(`${config.label} didn't return a run id`);
+
+  const stop = () => fetch(`${base}/runs/${runId}/stop`, { method: "POST", headers, body: "{}" }).catch(() => {});
+  const handled = new Set<string>();
+  let warned = false;
+  try {
+    for (;;) {
+      if (Date.now() > deadline) {
+        void stop();
+        throw new Error(`${config.label} took longer than ${Math.round((config.timeoutMs ?? 1_800_000) / 60_000)} minutes`);
+      }
+      await sleep(1500, req.signal);
+      const res = await fetch(`${base}/runs/${runId}`, { headers, signal: AbortSignal.any([req.signal, AbortSignal.timeout(15_000)]) });
+      if (!res.ok) throw new Error(`${config.label} status HTTP ${res.status}`);
+      const run = (await res.json()) as Record<string, unknown>;
+      const status = String(run.status ?? "").toLowerCase();
+
+      if (TERMINAL_OK.has(status)) {
+        const text = short(run.output ?? run.response ?? "", 1_000_000).trim();
+        if (!text) throw new Error(`${config.label} returned an empty reply`);
+        const u = run.usage as { input_tokens?: number; output_tokens?: number } | undefined;
+        const rt = run.runtime as { provider?: string; model?: string } | undefined;
+        return {
+          text,
+          served: rt?.model ? (rt.provider ? `${rt.provider}/${rt.model}` : rt.model) : undefined,
+          usage: { input: u?.input_tokens ?? estimateTokens(req.prompt), output: u?.output_tokens ?? estimateTokens(text) },
+        };
+      }
+      if (TERMINAL_BAD.has(status)) {
+        throw new Error(`${config.label} run ${status}${run.error ? `: ${short(run.error, 300)}` : ""}`);
+      }
+
+      for (const control of pendingControls(run)) {
+        const key = `${control.requestId}:${control.generation}`;
+        if (handled.has(key)) continue;
+        handled.add(key);
+        if (/clarif/i.test(control.kind)) {
+          // A question needs a typed answer; Relay can't give one from a button, so the run waits.
+          console.warn(`[hermes] run ${runId} asked a question Relay can't answer: ${control.summary}`);
+          continue;
+        }
+        const ok = req.approve
+          ? await req.approve({ title: `${req.agent.name} wants to run an action`, detail: control.summary })
+          : false;
+        await fetch(`${base}/runs/${runId}/approval`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({ request_id: control.requestId, execution_generation: control.generation, choice: ok ? "once" : "deny" }),
+        }).catch(() => {});
+      }
+      if (/approval/.test(status) && !pendingControls(run).length && !warned) {
+        warned = true;
+        console.warn(`[hermes] run ${runId} is waiting for approval but Relay couldn't read the request.`);
+      }
+    }
+  } catch (err) {
+    if (req.signal.aborted) void stop();
+    throw err;
+  }
+}
+
 // ---------------------------------------------------------------- demo
 const sleep = (ms: number, signal: AbortSignal) =>
   new Promise<void>((resolve, reject) => {
@@ -422,7 +563,7 @@ function demoReply(req: RunRequest): string {
   const { agent, prompt, purpose } = req;
   if (purpose === "plan") {
     const goal = /Goal: ([\s\S]*?)\n\n/.exec(prompt)?.[1] ?? prompt;
-    const steps = fallbackPlan(goal, req.team).map((s) => ({ agent: s.agentId, task: s.task }));
+    const steps = fallbackPlan(goal, req.team).map((s, i) => ({ step: i + 1, agent: s.agentId, task: s.task, after: i === 0 ? [] : [1] }));
     return JSON.stringify(steps);
   }
   const topic = prompt.split("\n")[0].replace(/^Goal: /, "").slice(0, 90);

@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import type { Approval } from "../approvals.js";
 import type { ChannelAdapter, Hub } from "../hub.js";
 import type { ChannelStatus } from "../types.js";
 
@@ -70,6 +71,14 @@ export class IMessageChannel implements ChannelAdapter {
     this.connected = connected;
     this.detail = detail;
     this.hub.emitChannels();
+  }
+
+  /** iMessage has no buttons: ask for a one-word reply instead. */
+  async sendApproval(chatGuid: string, approval: Approval): Promise<void> {
+    await this.send(
+      chatGuid,
+      `🛡 Needs your OK\n${approval.title}\n\n${approval.detail.slice(0, 700)}\n\nReply "yes ${approval.id}" to allow or "no ${approval.id}" to block. No answer in 15 min = no.`,
+    );
   }
 
   async send(chatGuid: string, text: string): Promise<void> {

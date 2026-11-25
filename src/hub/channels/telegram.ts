@@ -1,3 +1,4 @@
+import type { Approval } from "../approvals.js";
 import type { ChannelAdapter, Hub } from "../hub.js";
 import type { ChannelStatus } from "../types.js";
 
@@ -20,6 +21,33 @@ export function chunk(text: string, size = MAX_LEN): string[] {
 interface Update {
   update_id: number;
   message?: { chat: { id: number }; from?: { first_name?: string; username?: string }; text?: string };
+  callback_query?: {
+    id: string;
+    data?: string;
+    from?: { id: number };
+    message?: { message_id: number; chat: { id: number } };
+  };
+}
+
+/** Text of an approval message, before and after the decision. */
+export function approvalText(a: Approval): string {
+  const head =
+    a.status === "pending"
+      ? "🛡 Needs your OK"
+      : a.status === "approved"
+        ? "✅ Approved"
+        : a.status === "denied"
+          ? "❌ Denied"
+          : "⌛ No answer in time, so denied";
+  const mins = Math.max(1, Math.round((Date.parse(a.expiresAt) - Date.parse(a.createdAt)) / 60_000));
+  const foot = a.status === "pending" ? `\n\nNo answer in ${mins} min = deny.  (id ${a.id})` : `\n\n(id ${a.id})`;
+  return `${head}\n${a.title}\n\n${a.detail.slice(0, 900)}${foot}`;
+}
+
+/** Parse button data "ap:<id>:y|n". */
+export function parseApprovalButton(data: string | undefined): { id: string; approve: boolean } | null {
+  const m = /^ap:([0-9a-f]{6}):(y|n)$/.exec(data ?? "");
+  return m ? { id: m[1], approve: m[2] === "y" } : null;
 }
 
 /** Telegram bot via long polling: no public URL or webhook needed. */
@@ -30,6 +58,8 @@ export class TelegramChannel implements ChannelAdapter {
   private connected = false;
   private detail = "";
   private abort = new AbortController();
+  /** Approval id -> the messages that show it, so they can be updated after a decision. */
+  private readonly approvalMessages = new Map<string, { chatId: string; messageId: number }[]>();
 
   constructor(
     private readonly hub: Hub,
@@ -56,6 +86,39 @@ export class TelegramChannel implements ChannelAdapter {
   async send(chatId: string, text: string): Promise<void> {
     for (const part of chunk(text)) {
       await this.call("sendMessage", { chat_id: chatId, text: part, disable_web_page_preview: true });
+    }
+  }
+
+  approvalTargets(): string[] {
+    return [...this.allowed];
+  }
+
+  async sendApproval(chatId: string, approval: Approval): Promise<void> {
+    const msg = await this.call<{ message_id: number }>("sendMessage", {
+      chat_id: chatId,
+      text: approvalText(approval),
+      disable_web_page_preview: true,
+      reply_markup: {
+        inline_keyboard: [
+          [
+            { text: "✅ Approve", callback_data: `ap:${approval.id}:y` },
+            { text: "❌ Deny", callback_data: `ap:${approval.id}:n` },
+          ],
+        ],
+      },
+    });
+    const list = this.approvalMessages.get(approval.id) ?? [];
+    list.push({ chatId, messageId: msg.message_id });
+    this.approvalMessages.set(approval.id, list);
+  }
+
+  async updateApproval(approval: Approval): Promise<void> {
+    if (approval.status === "pending") return;
+    const list = this.approvalMessages.get(approval.id) ?? [];
+    this.approvalMessages.delete(approval.id);
+    for (const { chatId, messageId } of list) {
+      // Replacing the text without reply_markup also removes the buttons.
+      await this.call("editMessageText", { chat_id: chatId, message_id: messageId, text: approvalText(approval) }).catch(() => {});
     }
   }
 
@@ -99,7 +162,7 @@ export class TelegramChannel implements ChannelAdapter {
       try {
         const updates = await this.call<Update[]>(
           "getUpdates",
-          { offset: this.offset, timeout: 50, allowed_updates: ["message"] },
+          { offset: this.offset, timeout: 50, allowed_updates: ["message", "callback_query"] },
           AbortSignal.any([this.abort.signal, AbortSignal.timeout(65_000)]),
         );
         backoff = 1000;
@@ -117,7 +180,28 @@ export class TelegramChannel implements ChannelAdapter {
     }
   }
 
+  private async onButton(q: NonNullable<Update["callback_query"]>): Promise<void> {
+    const chatId = String(q.message?.chat.id ?? "");
+    const parsed = parseApprovalButton(q.data);
+    // Only the owner's chats can decide, whoever else might see the message.
+    if (!parsed || !this.allowed.has(chatId)) {
+      await this.call("answerCallbackQuery", { callback_query_id: q.id, text: "Not allowed." }).catch(() => {});
+      return;
+    }
+    const a = this.hub.decideApproval(parsed.id, parsed.approve, "telegram");
+    const text = !a
+      ? "That request is gone."
+      : a.decidedVia === "telegram" && (a.status === "approved" || a.status === "denied")
+        ? a.status === "approved"
+          ? "Approved"
+          : "Denied"
+        : `Already ${a.status}`;
+    // The message itself is updated by updateApproval() for every chat that got it.
+    await this.call("answerCallbackQuery", { callback_query_id: q.id, text }).catch(() => {});
+  }
+
   private async onMessage(update: Update): Promise<void> {
+    if (update.callback_query) return this.onButton(update.callback_query);
     const msg = update.message;
     if (!msg?.text) return;
     const chatId = String(msg.chat.id);

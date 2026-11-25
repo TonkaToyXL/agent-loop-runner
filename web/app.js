@@ -21,6 +21,7 @@ const S = {
   target: store.get("relay-target") || "auto",
   notes: [],
   handoffs: [],
+  approvals: [],
   pos: {},
   token: store.get("relay-token") || "",
   editing: null,
@@ -130,6 +131,7 @@ function applySnapshot(snap) {
   S.lb = snap.leaderboard;
   S.kpis = snap.kpis;
   S.channels = snap.channels;
+  S.approvals = snap.approvals ?? [];
   S.tasks = new Map(snap.tasks.map((t) => [t.id, t]));
   S.handoffs = seedHandoffs(snap.tasks);
   dirty.add("all");
@@ -181,6 +183,17 @@ function connect() {
     dirty.add("channels");
     flush();
   });
+  source.addEventListener("approval", (e) => {
+    const a = JSON.parse(e.data);
+    const i = S.approvals.findIndex((x) => x.id === a.id);
+    if (i >= 0) S.approvals[i] = a;
+    else S.approvals.push(a);
+    if (a.status === "pending" && typeof Notification !== "undefined" && Notification.permission === "granted" && document.hidden) {
+      try { new Notification("Relay needs your OK", { body: a.title }); } catch {}
+    }
+    dirty.add("approvals");
+    flush();
+  });
   source.addEventListener("baton", (e) => {
     const b = JSON.parse(e.data);
     if (b.from === b.to) return;
@@ -214,6 +227,8 @@ function flush() {
     if (all || dirty.has("channels")) renderChannels();
     if (tasks) { renderLanes(); renderThread(); }
     if (agents || tasks || dirty.has("handoffs")) renderHandoffs();
+    if (all || dirty.has("approvals")) { renderApprovals(); renderKpis(); }
+    if (dirty.has("approvals") && !tasks) renderThread();
     dirty.clear();
     booted = true;
   });
@@ -223,6 +238,9 @@ function flush() {
 function renderKpis() {
   const k = S.kpis;
   $("#kpis").innerHTML = [
+    ...(pendingApprovals().length
+      ? [`<button class="kpi ask" data-go-approvals><b>${pendingApprovals().length}</b><span>need${pendingApprovals().length === 1 ? "s" : ""} your OK</span></button>`]
+      : []),
     `<div class="kpi live"><b>${k.running ?? 0}</b><span>working now</span></div>`,
     `<div class="kpi"><b>${k.tasksToday ?? 0}</b><span>asks today</span></div>`,
     `<div class="kpi"><b>${fmtK(k.tokensToday)}</b><span>tokens today</span></div>`,
@@ -283,7 +301,7 @@ function animateBaton(b) {
   const a = S.pos[b.from];
   const z = S.pos[b.to];
   if (!layer || !a || !z || matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-  const color = b.kind === "return" ? colorOf(b.from) : b.kind === "reroute" ? "var(--warn)" : colorOf(b.to);
+  const color = b.kind === "return" || b.kind === "handoff" ? colorOf(b.from) : b.kind === "reroute" ? "var(--warn)" : colorOf(b.to);
   // Curve away from the center so passes between agents arc around it.
   const mx = (a.x + z.x) / 2, my = (a.y + z.y) / 2;
   const dx = mx - MAP.cx, dy = my - MAP.cy;
@@ -345,7 +363,7 @@ function renderHandoffs() {
     ? list
         .map((h) => {
           const t = S.tasks.get(h.taskId);
-          const verb = h.kind === "return" ? "returned" : h.kind === "reroute" ? "rerouted" : "";
+          const verb = h.kind === "return" ? "returned" : h.kind === "reroute" ? "rerouted" : h.kind === "handoff" ? "passed results" : "";
           return `<li class="${enter("handoffs", `${h.taskId}:${h.kind}:${h.from}`).trim()}">
             <span class="route"><span class="dot" style="--c:${colorOf(h.from)}"></span>${esc(nameOf(h.from))}
               <svg viewBox="0 0 16 16"><path d="M3 8h9M9 4.5 12.5 8 9 11.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -440,7 +458,7 @@ function tcard(t) {
   const tok = t.usage ? ` · ${fmtK(t.usage.input + t.usage.output)} tok` : "";
   const bad = t.status === "failed" || t.status === "blocked" || t.status === "cancelled";
   return `<div class="tcard ${bad ? "err" : ""}${enter("lanes", `${t.id}:${t.status}`)}" style="--c:${a?.color ?? "var(--accent)"}">
-    <span class="kind">${t.kind === "direct" ? CHANNEL_LABEL[t.channel] ?? "" : parent ? `team · ${t.kind}` : t.kind}${t.reroutedFrom ? " · rerouted" : ""}</span>
+    <span class="kind">${t.kind === "direct" ? CHANNEL_LABEL[t.channel] ?? "" : parent ? `team · ${t.step ? `step ${t.step}` : t.kind}` : t.kind}${t.after?.length ? ` · after ${t.after.join(", ")}` : ""}${t.reroutedFrom ? " · rerouted" : ""}${t.awaitingApproval ? ` · <b class="needs-ok">needs your OK</b>` : ""}</span>
     <div class="t">${esc(t.title)}</div>
     ${bad && t.error ? `<div class="e">${esc(t.error.slice(0, 140))}</div>` : ""}
     <div class="m"><span class="who"><span class="dot"></span>${esc(a?.name ?? t.agentId)}</span><span>${secs}${tok}</span></div>
@@ -541,6 +559,7 @@ function agentBubble(t) {
   const reroute = t.reroutedFrom ? `<div class="reroute">↪ Rerouted from ${esc(nameOf(t.reroutedFrom))} (at limit or paused)</div>` : "";
   let body;
   if (t.status === "done") body = `<div class="body">${md(t.result)}</div>`;
+  else if (t.awaitingApproval) body = `<div class="needs-ok">🛡 Waiting for your OK (see the card at the top of the thread, or Telegram)</div>`;
   else if (t.status === "running" || t.status === "queued") body = thinking(t, t.status === "queued" ? "waiting for a free slot" : "thinking");
   else body = `<div class="err-text">${esc(stateLabel(t))}: ${esc(t.error ?? "")}</div>`;
   return `<div class="msg bot"><div class="bubble" style="--c:${a?.color}">${head}${reroute}${body}${footer(t)}</div></div>`;
@@ -549,11 +568,13 @@ function agentBubble(t) {
 function goalBubble(t) {
   const lead = agentById(t.agentId);
   const kids = [...S.tasks.values()].filter((c) => c.parentId === t.id).sort((x, y) => Date.parse(x.createdAt) - Date.parse(y.createdAt));
-  const label = (c) => (c.kind === "plan" ? "Plan" : c.kind === "synthesis" ? "Wrap-up" : nameOf(c.agentId));
+  const label = (c) => (c.kind === "plan" ? "Plan" : c.kind === "synthesis" ? "Wrap-up" : `${c.step ? `${c.step} · ` : ""}${nameOf(c.agentId)}`);
+  const stepState = (c) =>
+    c.awaitingApproval ? "needs your OK" : c.status === "queued" && c.after?.length ? `waits for ${c.after.join(", ")}` : stateLabel(c);
   const steps = kids.length
     ? `<div class="steps">${kids
         .map((c) => `<details><summary><span class="dot" style="--c:${colorOf(c.agentId)}"></span><span class="sname">${esc(label(c))}</span>
-            <span class="stitle">${esc(c.kind === "subtask" ? c.title : nameOf(c.agentId))}</span><span class="sstate ${c.status}">${esc(stateLabel(c))}</span></summary>
+            <span class="stitle">${esc(c.kind === "subtask" ? c.title : nameOf(c.agentId))}</span><span class="sstate ${c.awaitingApproval ? "ask" : c.status}">${esc(stepState(c))}</span></summary>
             <div class="sbody body">${c.status === "done" ? (c.kind === "plan" ? `<pre><code>${esc(c.result)}</code></pre>` : md(c.result)) : c.error ? `<span class="err-text">${esc(c.error)}</span>` : "…"}</div></details>`)
         .join("")}</div>`
     : "";
@@ -889,6 +910,57 @@ $("#themeBtn").addEventListener("click", () => {
   store.set("relay-theme", next);
   applyTheme(next);
 });
+
+// ------------------------------------------------------------------ approvals
+function pendingApprovals() {
+  return S.approvals.filter((a) => a.status === "pending");
+}
+
+function untilText(iso) {
+  const s = Math.max(0, Math.round((Date.parse(iso) - Date.now()) / 1000));
+  return s >= 60 ? `${Math.ceil(s / 60)}m` : `${s}s`;
+}
+
+function renderApprovals() {
+  const open = pendingApprovals();
+  const el = $("#approvals");
+  el.innerHTML = open
+    .map((a) => `<div class="ask-card" style="--c:${colorOf(a.agentId)}">
+      <div class="ask-head"><span class="dot"></span><b>${esc(a.title)}</b></div>
+      <div class="ask-detail">${esc(a.detail)}</div>
+      <div class="ask-foot">
+        <span class="muted small">${a.source === "agent" ? "Asked mid-task" : "Relay checks before risky tasks"} · auto-deny in <span data-until="${a.expiresAt}">${untilText(a.expiresAt)}</span></span>
+        <span class="ask-btns"><button class="btn" data-decide="${a.id}" data-approve="0">Deny</button><button class="btn primary" data-decide="${a.id}" data-approve="1">Approve</button></span>
+      </div>
+    </div>`)
+    .join("");
+  const tab = $('#tabbar [data-go="thread"]');
+  if (tab) tab.dataset.badge = open.length ? String(open.length) : "";
+}
+
+$("#approvals").addEventListener("click", async (e) => {
+  const b = e.target.closest("[data-decide]");
+  if (!b) return;
+  b.disabled = true;
+  try {
+    const a = await api(`/api/approvals/${b.dataset.decide}`, { method: "POST", body: JSON.stringify({ approve: b.dataset.approve === "1" }) });
+    toast(a.status === "approved" ? "Approved" : a.status === "denied" ? "Denied" : `Already ${a.status}`);
+  } catch (err) {
+    b.disabled = false;
+    toast(err.message);
+  }
+});
+
+$("#kpis").addEventListener("click", (e) => {
+  if (!e.target.closest("[data-go-approvals]")) return;
+  setTab("thread");
+  $("#approvals").scrollIntoView({ behavior: "smooth", block: "start" });
+  if (typeof Notification !== "undefined" && Notification.permission === "default") Notification.requestPermission().catch(() => {});
+});
+
+setInterval(() => {
+  $$("[data-until]").forEach((el) => (el.textContent = untilText(el.dataset.until)));
+}, 1000);
 
 setInterval(() => {
   $$("[data-since]").forEach((el) => (el.textContent = fmtMs(Date.now() - Date.parse(el.dataset.since))));

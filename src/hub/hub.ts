@@ -2,7 +2,18 @@ import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { isReasoning } from "./config.js";
 import { checkHealth, coveredModel, resolveConnector, runAgent, type Purpose } from "./connectors.js";
-import { fallbackPlan, parsePlan, planPrompt, synthesisPrompt, type PlannerAgent, type PlanStep } from "./planner.js";
+import { ApprovalDesk, riskyAction, type Approval, type ApprovalRequest } from "./approvals.js";
+import {
+  fallbackPlan,
+  parsePlan,
+  planPrompt,
+  readySteps,
+  stepPrompt,
+  synthesisPrompt,
+  type PlannerAgent,
+  type PlanStep,
+  type StepResult,
+} from "./planner.js";
 import { HELP_TEXT, parseCommand, pickAgent } from "./router.js";
 import type { Store } from "./store.js";
 import type {
@@ -23,6 +34,12 @@ export interface ChannelAdapter {
   send(chatId: string, text: string): Promise<void>;
   start(): void;
   stop(): void;
+  /** Chats that always get approval requests (e.g. the owner's Telegram). */
+  approvalTargets?(): string[];
+  /** Send an approval request (with buttons where the app supports them). */
+  sendApproval?(chatId: string, approval: Approval): Promise<void>;
+  /** Update earlier approval messages once decided. */
+  updateApproval?(approval: Approval): Promise<void>;
 }
 
 export interface AgentView extends AgentConfig {
@@ -45,7 +62,7 @@ export interface AgentView extends AgentConfig {
   rate?: { remainingRequests?: number; remainingTokens?: number; at: string };
 }
 
-export type Baton = { from: string; to: string; taskId: string; kind: "delegate" | "return" | "reroute" };
+export type Baton = { from: string; to: string; taskId: string; kind: "delegate" | "return" | "reroute" | "handoff" };
 
 const TOP_LEVEL: TaskKind[] = ["direct", "goal"];
 const titleOf = (text: string) => {
@@ -71,12 +88,68 @@ export class Hub {
   private readonly waiters = new Map<string, (() => void)[]>();
   private readonly health = new Map<string, { ok: boolean; detail: string }>();
   private healthTimer: NodeJS.Timeout | null = null;
+  readonly approvals: ApprovalDesk;
 
   constructor(
     private readonly config: HubConfig,
     readonly store: Store,
+    approvalTimeoutMs = Number(process.env.RELAY_APPROVAL_TIMEOUT_MS) || 15 * 60_000,
   ) {
     this.bus.setMaxListeners(100);
+    this.approvals = new ApprovalDesk((a, created) => this.onApproval(a, created), approvalTimeoutMs);
+  }
+
+  // ------------------------------------------------------------------ approvals
+  /** Ask the owner. Resolves true only on an explicit approve; deny and timeout resolve false. */
+  async requestApproval(req: ApprovalRequest, task?: Task): Promise<boolean> {
+    const { approval, decision } = this.approvals.request(req);
+    if (task) {
+      task.awaitingApproval = approval.id;
+      this.touch(task);
+    }
+    const ok = await decision;
+    if (task) {
+      task.awaitingApproval = undefined;
+      this.touch(task);
+    }
+    return ok;
+  }
+
+  decideApproval(id: string, approve: boolean, via: string): Approval | undefined {
+    return this.approvals.decide(id, approve, via);
+  }
+
+  /** Where approval requests go: every owner chat (Telegram) plus the chat the task came from. */
+  private approvalRecipients(approval: Approval): { channel: ChannelAdapter; chatId: string }[] {
+    const out: { channel: ChannelAdapter; chatId: string }[] = [];
+    const seen = new Set<string>();
+    const add = (channel: ChannelAdapter | undefined, chatId: string | undefined) => {
+      if (!channel?.sendApproval || !chatId) return;
+      const key = `${channel.name}:${chatId}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      out.push({ channel, chatId });
+    };
+    for (const channel of this.channels.values()) for (const chatId of channel.approvalTargets?.() ?? []) add(channel, chatId);
+    const task = this.store.state.tasks.find((t) => t.id === approval.taskId);
+    const origin = task?.parentId ? this.store.state.tasks.find((t) => t.id === task.parentId)?.replyTo : task?.replyTo;
+    if (origin && origin.channel !== "web" && origin.channel !== "system") add(this.channels.get(origin.channel), origin.chatId);
+    return out;
+  }
+
+  private onApproval(approval: Approval, created: boolean): void {
+    this.emit("approval", approval);
+    if (created) {
+      console.log(`[approval] ${approval.id} requested: ${approval.title}`);
+      for (const { channel, chatId } of this.approvalRecipients(approval)) {
+        channel.sendApproval!(chatId, approval).catch((err) =>
+          console.error(`[${channel.name}] couldn't send approval:`, err instanceof Error ? err.message : err),
+        );
+      }
+    } else {
+      console.log(`[approval] ${approval.id} ${approval.status} (${approval.decidedVia})`);
+      for (const channel of this.channels.values()) channel.updateApproval?.(approval).catch(() => {});
+    }
   }
 
   // ------------------------------------------------------------------ agents
@@ -254,6 +327,7 @@ export class Hub {
         costMonth: views.reduce((n, v) => n + v.usage.costMonth, 0),
       },
       channels: [...this.channels.values()].map((c) => c.status()),
+      approvals: this.approvals.items.slice(-30),
     };
   }
 
@@ -304,6 +378,19 @@ export class Hub {
         const a = this.updateAgent(cmd.agentId, { reasoning: cmd.reasoning });
         return { reply: `${a.name} reasoning set to ${a.reasoning}.` };
       }
+      case "approvals": {
+        const open = this.approvals.pending();
+        if (!open.length) return { reply: "Nothing is waiting for your OK." };
+        return { reply: open.map((a) => `${a.id} · ${a.agentName}: ${a.title}\n  /approve ${a.id}   /deny ${a.id}`).join("\n\n") };
+      }
+      case "decide": {
+        const a = this.decideApproval(cmd.id, cmd.approve, origin.channel);
+        if (!a) return { reply: `No approval called ${cmd.id}. Send /approvals to see what's waiting.` };
+        if (a.decidedVia !== origin.channel || (a.status !== "approved" && a.status !== "denied")) {
+          return { reply: `${a.id} was already ${a.status}.` };
+        }
+        return { reply: a.status === "approved" ? `✅ Approved: ${a.title}` : `❌ Denied: ${a.title}` };
+      }
       case "lead": {
         this.setLead(cmd.agentId);
         return { reply: `${this.agent(cmd.agentId)!.name} now leads team goals.` };
@@ -317,6 +404,7 @@ export class Hub {
         if (!limit.ok) return { reply: `${target.name} hit its ${limit.reason}. Raise the limit or ask someone else.` };
         const task = this.submitDirect(cmd.agentId, cmd.text, origin, "explicit");
         const a = this.agent(task.agentId)!;
+        if (a.actsInWorld && riskyAction(cmd.text)) return { reply: `🛡 ${a.name} needs your OK before starting this. Check for the Approve button.`, taskId: task.id };
         return { reply: `→ ${a.name} is on it (${a.model} · ${a.reasoning}).`, taskId: task.id };
       }
       case "auto": {
@@ -325,6 +413,7 @@ export class Hub {
         const id = pickAgent(cmd.text, pool, fallback);
         const task = this.submitDirect(id, cmd.text, origin, "auto");
         const a = this.agent(task.agentId)!;
+        if (a.actsInWorld && riskyAction(cmd.text)) return { reply: `🛡 Routed to ${a.name}, which needs your OK before starting. Check for the Approve button.`, taskId: task.id };
         return { reply: `→ Routed to ${a.name} (${a.model} · ${a.reasoning}).`, taskId: task.id };
       }
       case "team": {
@@ -413,7 +502,10 @@ export class Hub {
     const task = this.store.state.tasks.find((t) => t.id === taskId);
     if (!task) return false;
     const ids = [task.id, ...this.store.state.tasks.filter((t) => t.parentId === task.id).map((t) => t.id)];
-    for (const id of ids) this.controllers.get(id)?.abort();
+    for (const id of ids) {
+      this.approvals.cancelForTask(id);
+      this.controllers.get(id)?.abort();
+    }
     return true;
   }
 
@@ -447,8 +539,8 @@ export class Hub {
       }
       if (controller.signal.aborted) throw new Error("Cancelled");
 
-      // 2. Delegate in parallel
-      const subtasks = steps.map((step) =>
+      // 2. Run the steps: each starts once the steps it builds on are finished.
+      const subtasks = steps.map((step, i) =>
         this.createTask({
           kind: "subtask",
           agentId: step.agentId,
@@ -456,23 +548,54 @@ export class Hub {
           prompt: step.task,
           channel: "system",
           routing: "auto",
+          step: i + 1,
+          after: step.after.map((d) => d + 1),
         }),
       );
-      for (const sub of subtasks) this.baton({ from: lead.id, to: sub.agentId, taskId: sub.id, kind: "delegate" });
-      const settled = await Promise.allSettled(
-        subtasks.map(async (sub) => {
-          const text = await this.execute(sub, "work", sub.prompt);
-          this.baton({ from: sub.agentId, to: lead.id, taskId: sub.id, kind: "return" });
-          return text;
-        }),
-      );
+      const usedLater = new Set(steps.flatMap((s) => s.after));
+      const results: StepResult[] = [];
+      const finished = new Set<number>();
+      const started = new Set<number>();
+      const running = new Map<number, Promise<void>>();
+      const nameOf = (i: number) => this.agent(subtasks[i].agentId)?.name ?? subtasks[i].agentId;
+
+      const launch = (i: number) => {
+        started.add(i);
+        const sub = subtasks[i];
+        const inputs = steps[i].after.map((d) => results[d]);
+        if (inputs.length && inputs.every((r) => !r.ok)) {
+          this.fail(sub, "blocked", "Skipped: every step it builds on failed.");
+          results[i] = { step: i + 1, agentName: nameOf(i), ok: false, text: sub.error ?? "skipped" };
+          finished.add(i);
+          return;
+        }
+        if (inputs.length) for (const d of steps[i].after) this.baton({ from: subtasks[d].agentId, to: sub.agentId, taskId: sub.id, kind: "handoff" });
+        else this.baton({ from: lead.id, to: sub.agentId, taskId: sub.id, kind: "delegate" });
+        const job = this.execute(sub, "work", stepPrompt(steps[i].task, inputs))
+          .then((text) => {
+            results[i] = { step: i + 1, agentName: nameOf(i), ok: true, text };
+            if (!usedLater.has(i)) this.baton({ from: sub.agentId, to: lead.id, taskId: sub.id, kind: "return" });
+          })
+          .catch(() => {
+            results[i] = { step: i + 1, agentName: nameOf(i), ok: false, text: String(sub.error ?? "failed") };
+          })
+          .finally(() => {
+            finished.add(i);
+            running.delete(i);
+          });
+        running.set(i, job);
+      };
+
+      while (finished.size < steps.length) {
+        if (controller.signal.aborted) throw new Error("Cancelled");
+        const ready = readySteps(steps, finished, started);
+        for (const i of ready) launch(i);
+        if (running.size) await Promise.race(running.values());
+        else if (!ready.length) break;
+      }
       if (controller.signal.aborted) throw new Error("Cancelled");
-      const parts = settled.map((s, i) => ({
-        agentName: this.agent(subtasks[i].agentId)?.name ?? subtasks[i].agentId,
-        ok: s.status === "fulfilled",
-        text: s.status === "fulfilled" ? s.value : String(subtasks[i].error ?? "failed"),
-      }));
-      if (!parts.some((p) => p.ok)) throw new Error("Every subtask failed: " + parts.map((p) => `${p.agentName}: ${p.text}`).join("; "));
+      const parts = steps.map((_, i) => results[i] ?? { step: i + 1, agentName: nameOf(i), ok: false, text: "not run" });
+      if (!parts.some((p) => p.ok)) throw new Error("Every step failed: " + parts.map((p) => `${p.agentName}: ${p.text}`).join("; "));
 
       // 3. Synthesize
       const synth = this.createTask({
@@ -489,6 +612,14 @@ export class Hub {
     } catch (err) {
       goal.status = controller.signal.aborted ? "cancelled" : "failed";
       goal.error = err instanceof Error ? err.message : String(err);
+      for (const t of this.store.state.tasks) {
+        if (t.parentId === goal.id && t.status === "queued") {
+          t.status = "cancelled";
+          t.error = "Team goal stopped before this step started.";
+          t.finishedAt = new Date().toISOString();
+          this.touch(t);
+        }
+      }
     } finally {
       this.controllers.delete(goal.id);
       goal.finishedAt = new Date().toISOString();
@@ -547,6 +678,33 @@ export class Hub {
 
     const controller = new AbortController();
     this.controllers.set(task.id, controller);
+
+    // Agents that can act for you (run commands, use your accounts) need your OK for risky-sounding work.
+    const risky = purpose === "work" && agent.actsInWorld ? riskyAction(task.prompt) : null;
+    if (risky) {
+      const ok = await this.requestApproval(
+        {
+          taskId: task.id,
+          agentId: agent.id,
+          agentName: agent.name,
+          source: "relay",
+          title: `${agent.name} may "${risky}" something for you`,
+          detail: task.prompt,
+        },
+        task,
+      );
+      if (controller.signal.aborted) {
+        this.controllers.delete(task.id);
+        throw this.fail(task, "failed", "Cancelled");
+      }
+      if (!ok) {
+        this.controllers.delete(task.id);
+        const a = this.approvals.items.find((x) => x.taskId === task.id && x.status !== "pending" && x.source === "relay");
+        const mins = a ? Math.max(1, Math.round((Date.parse(a.expiresAt) - Date.parse(a.createdAt)) / 60_000)) : 15;
+        throw this.fail(task, "blocked", a?.status === "expired" ? `No answer within ${mins} min, so it didn't run.` : "You denied this, so it didn't run.");
+      }
+    }
+
     await this.acquire(agent.id, agent.maxConcurrent);
     task.status = "running";
     task.startedAt = new Date().toISOString();
@@ -557,7 +715,17 @@ export class Hub {
 
     const started = Date.now();
     try {
-      const result = await runAgent({ agent, prompt, purpose, taskId: task.id, signal: controller.signal, team: this.team() });
+      const runner = agent;
+      const result = await runAgent({
+        agent,
+        prompt,
+        purpose,
+        taskId: task.id,
+        signal: controller.signal,
+        team: this.team(),
+        approve: (ask) =>
+          this.requestApproval({ taskId: task.id, agentId: runner.id, agentName: runner.name, source: "agent", ...ask }, task),
+      });
       task.usage = result.usage;
       task.servedModel = result.served;
       task.costUsd = costOf(result.usage, agent.pricing);

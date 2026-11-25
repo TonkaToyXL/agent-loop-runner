@@ -91,6 +91,7 @@ kbd { font: 11px var(--font-mono); padding: 1px 5px; border: 1px solid var(--lin
   scrollbar-gutter: stable;
 }
 .thread {
+  overflow: hidden;
   border-left: 1px solid var(--line);
   background: color-mix(in oklab, var(--bg-2) 92%, transparent);
   display: flex; flex-direction: column;
@@ -419,6 +420,23 @@ kbd { font: 11px var(--font-mono); padding: 1px 5px; border: 1px solid var(--lin
 .lock-card { width: min(360px, 100%); display: flex; flex-direction: column; gap: 12px; align-items: flex-start; }
 .lock-card h1 { font-size: 30px; }
 .lock-card p { margin: 0; }
+/* ------------------------------------------------------------ approvals */
+.approvals { display: flex; flex-direction: column; gap: 10px; padding: 0 14px; flex-shrink: 0; max-height: 46%; overflow-y: auto; }
+.approvals:not(:empty) { padding: 12px 14px; border-bottom: 1px solid var(--line); background: color-mix(in oklab, var(--warn) 6%, var(--bg-2)); }
+.ask-card { --c: var(--warn); border: 1px solid color-mix(in oklab, var(--warn) 45%, var(--line)); border-radius: 14px; background: var(--panel); padding: 12px 13px; display: flex; flex-direction: column; gap: 8px; animation: slideIn 0.3s ease-out; }
+.ask-head { display: flex; align-items: center; gap: 8px; font-size: 13.5px; }
+.ask-head b { font-weight: 600; }
+.ask-detail { font-size: 12.5px; color: var(--muted); white-space: pre-wrap; max-height: 5.4em; overflow: auto; overflow-wrap: anywhere; }
+.ask-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.ask-btns { display: flex; gap: 8px; }
+.ask-btns .btn { padding: 8px 16px; font-size: 13px; }
+.kpi.ask { cursor: pointer; border-color: color-mix(in oklab, var(--warn) 60%, transparent); background: color-mix(in oklab, var(--warn) 14%, var(--panel)); font: inherit; color: inherit; }
+.kpi.ask b { color: var(--warn); }
+.needs-ok { color: var(--warn); font-weight: 600; }
+.steps .sstate.ask { color: var(--warn); }
+.tabbar button { position: relative; }
+.tabbar button[data-badge]:not([data-badge=""])::after { content: attr(data-badge); position: absolute; top: 2px; right: calc(50% - 22px); min-width: 16px; height: 16px; padding: 0 4px; border-radius: 99px; background: var(--warn); color: #111; font: 700 10px/16px var(--font-ui); }
+
 .toast { position: fixed; left: 50%; bottom: 26px; transform: translate(-50%, 20px); opacity: 0; pointer-events: none; background: var(--text); color: var(--bg); padding: 9px 14px; border-radius: 12px; font-size: 13px; font-weight: 500; transition: 0.25s; z-index: 50; max-width: calc(100vw - 32px); }
 .toast.show { opacity: 1; transform: translate(-50%, 0); }
 

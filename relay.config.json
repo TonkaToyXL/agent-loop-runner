@@ -63,7 +63,8 @@
         "outputPerMTok": 0
       },
       "enabled": true,
-      "maxConcurrent": 2
+      "maxConcurrent": 2,
+      "actsInWorld": true
     },
     {
       "id": "muse",
@@ -182,11 +183,12 @@
           "baseUrl": "http://127.0.0.1:8642/v1",
           "baseUrlEnv": "HERMES_BASE_URL",
           "apiKeyEnv": "HERMES_API_KEY",
-          "timeoutMs": 600000,
+          "timeoutMs": 1800000,
           "reasoningIn": "model_options",
           "supportsProvider": true,
           "healthPath": "/health",
-          "billing": "local"
+          "billing": "local",
+          "runsApi": true
         }
       ],
       "limits": {
@@ -200,7 +202,8 @@
       },
       "enabled": true,
       "maxConcurrent": 2,
-      "provider": ""
+      "provider": "",
+      "actsInWorld": true
     },
     {
       "id": "cline",

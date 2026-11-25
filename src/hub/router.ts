@@ -12,6 +12,8 @@ export type Command =
   | { type: "model"; agentId: string; model: string }
   | { type: "reasoning"; agentId: string; reasoning: Reasoning }
   | { type: "lead"; agentId: string }
+  | { type: "approvals" }
+  | { type: "decide"; id: string; approve: boolean }
   | { type: "error"; message: string };
 
 export interface AgentRef {
@@ -37,6 +39,12 @@ export function parseCommand(input: string, agents: AgentRef[]): Command {
   const text = input.trim().replace(/^(\/\w+)@\w+/, "$1");
   if (!text) return { type: "error", message: "Empty message." };
 
+  // Approval answers: "/approve ab12cd", "yes ab12cd", "deny ab12cd", "no ab12cd".
+  const decision = /^\/?(approve|approved|yes|ok|allow|deny|denied|no|reject)\s+#?([0-9a-f]{6})$/i.exec(text);
+  if (decision) {
+    return { type: "decide", id: decision[2].toLowerCase(), approve: /^(approve|approved|yes|ok|allow)$/i.test(decision[1]) };
+  }
+
   if (text.startsWith("/")) {
     const [rawCmd, ...rest] = text.slice(1).split(/\s+/);
     const cmd = rawCmd.toLowerCase();
@@ -53,6 +61,12 @@ export function parseCommand(input: string, agents: AgentRef[]): Command {
       case "board":
       case "leaderboard":
         return { type: "board" };
+      case "approvals":
+      case "pending":
+        return { type: "approvals" };
+      case "approve":
+      case "deny":
+        return { type: "error", message: `Usage: /${cmd} <id>. Send /approvals to see what's waiting.` };
       case "team": {
         const goal = text.slice(rawCmd.length + 1).trim();
         return goal ? { type: "team", text: goal } : { type: "error", message: "Usage: /team <goal>" };
@@ -131,4 +145,6 @@ export const HELP_TEXT = [
   "/model <agent> <model-id>",
   "/reasoning <agent> off|low|medium|high|max",
   "/lead <agent>     choose who plans team goals",
+  "/approvals        what's waiting for your OK",
+  "/approve <id>     allow it   ·   /deny <id>  block it",
 ].join("\n");

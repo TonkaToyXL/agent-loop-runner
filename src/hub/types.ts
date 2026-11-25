@@ -40,6 +40,8 @@ export interface ConnectorConfig {
   supportsProvider?: boolean;
   /** openai: path on the base URL's host polled every 30s to show online/offline, e.g. /health. */
   healthPath?: string;
+  /** openai: use Hermes' Runs API (supports pausing for your approval); falls back to chat if unsupported. */
+  runsApi?: boolean;
   /** openai: extra request headers (non-secret), e.g. {"X-Response-Format": "openai"}. */
   headers?: Record<string, string>;
   /** openai: extra body fields, e.g. {"stream": false}. */
@@ -87,6 +89,8 @@ export interface AgentConfig {
   maxConcurrent: number;
   /** Hide this agent entirely unless one of its connectors is available (e.g. its CLI is installed). */
   optional: boolean;
+  /** Can act outside Relay (run commands, use accounts). Risky-sounding tasks need your OK first. */
+  actsInWorld: boolean;
 }
 
 export type EditableAgentFields = Pick<
@@ -139,6 +143,11 @@ export interface Task {
   routing: "explicit" | "auto";
   /** Set when the hub moved this task to another agent. */
   reroutedFrom?: string;
+  /** Team steps: 1-based step number and the steps it builds on. */
+  step?: number;
+  after?: number[];
+  /** Id of the approval this task is waiting on, if any. */
+  awaitingApproval?: string;
   replyTo?: ReplyTarget;
 }
 

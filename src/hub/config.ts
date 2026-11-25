@@ -40,6 +40,7 @@ export function normalizeAgent(raw: Partial<AgentConfig>, index: number): AgentC
     },
     enabled: raw.enabled ?? true,
     optional: raw.optional ?? false,
+    actsInWorld: raw.actsInWorld ?? false,
     maxConcurrent: Math.max(1, Math.floor(num(raw.maxConcurrent, 2))),
   };
 }

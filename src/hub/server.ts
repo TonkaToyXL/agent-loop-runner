@@ -135,6 +135,14 @@ export function createHubServer({ hub, token, imessage }: ServerOptions) {
           return send(res, 200, { ok: true });
         }
 
+        const decide = /^\/api\/approvals\/([0-9a-f]{6})$/.exec(path);
+        if (decide && req.method === "POST") {
+          const { approve } = await readJson<{ approve?: boolean }>(req);
+          if (typeof approve !== "boolean") return send(res, 400, { error: "approve must be true or false" });
+          const a = hub.decideApproval(decide[1], approve, "web");
+          return a ? send(res, 200, a) : send(res, 404, { error: "unknown approval" });
+        }
+
         const cancel = /^\/api\/tasks\/([\w-]+)\/cancel$/.exec(path);
         if (cancel && req.method === "POST") return send(res, hub.cancel(cancel[1]) ? 200 : 404, { ok: true });
 
