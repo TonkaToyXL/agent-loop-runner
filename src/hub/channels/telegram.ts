@@ -1,7 +1,7 @@
 import type { ChannelAdapter, Hub } from "../hub.js";
 import type { ChannelStatus } from "../types.js";
 
-const API = process.env.TELEGRAM_API_BASE ?? "https://api.telegram.org";
+const API = process.env.TELEGRAM_API_BASE?.trim() || "https://api.telegram.org";
 const MAX_LEN = 4000;
 
 export function chunk(text: string, size = MAX_LEN): string[] {

@@ -201,6 +201,9 @@ kbd { font: 11px var(--font-mono); padding: 1px 5px; border: 1px solid var(--lin
 .badge { font: 600 9.5px var(--font-mono); letter-spacing: 0.1em; text-transform: uppercase; padding: 3px 6px; border-radius: 6px; }
 .badge.lead { background: var(--accent); color: var(--accent-ink); }
 .badge.demo { border: 1px dashed var(--line-2); color: var(--muted); }
+.badge.bill { border: 1px solid var(--line-2); color: var(--muted); }
+.badge.bill.subscription, .badge.bill.local { border-color: color-mix(in oklab, var(--ok) 45%, transparent); color: var(--ok); }
+.badge.bill.metered { border-color: color-mix(in oklab, var(--warn) 50%, transparent); color: var(--warn); }
 .status {
   position: absolute; top: 0; right: 0;
   display: inline-flex; align-items: center; gap: 6px;

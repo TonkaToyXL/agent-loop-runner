@@ -6,7 +6,7 @@ import { resolveWebhook } from "./connectors.js";
 import type { IMessageChannel, BlueBubblesMessage } from "./channels/imessage.js";
 import type { Hub } from "./hub.js";
 
-const WEB_ROOT = resolve(process.env.RELAY_WEB_ROOT ?? "web");
+const WEB_ROOT = resolve(process.env.RELAY_WEB_ROOT?.trim() || "web");
 const MIME: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
   ".css": "text/css; charset=utf-8",

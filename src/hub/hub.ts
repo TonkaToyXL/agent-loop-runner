@@ -31,6 +31,8 @@ export interface AgentView extends AgentConfig {
   connectorLabel: string;
   supportsProvider: boolean;
   sendsReasoning: boolean;
+  billing?: "subscription" | "metered" | "local";
+  blocked: boolean;
   /** undefined when the connector has no health check. */
   online?: boolean;
   healthDetail?: string;
@@ -79,7 +81,19 @@ export class Hub {
 
   // ------------------------------------------------------------------ agents
   agents(): AgentConfig[] {
-    return this.config.agents.map((a) => ({ ...a, ...this.store.state.overrides[a.id] }));
+    return this.config.agents
+      .map((a) => ({ ...a, ...this.store.state.overrides[a.id] }))
+      .filter((a) => !a.optional || resolveConnector(a).live);
+  }
+
+  /**
+   * Agents the hub may pick on its own (auto-routing and team plans).
+   * Once any agent is live, demo agents are left out so fake answers never mix into real work.
+   */
+  private routable(): AgentConfig[] {
+    const enabled = this.agents().filter((a) => a.enabled);
+    const live = enabled.filter((a) => resolveConnector(a).live && this.health.get(a.id)?.ok !== false);
+    return live.length ? live : enabled;
   }
 
   agent(id: string): AgentConfig | undefined {
@@ -87,12 +101,14 @@ export class Hub {
   }
 
   get leadId(): string {
-    const lead = this.store.state.lead;
-    return lead && this.agent(lead) ? lead : this.config.lead;
+    const chosen = this.store.state.lead && this.agent(this.store.state.lead) ? this.store.state.lead : this.config.lead;
+    const pool = this.routable();
+    return pool.some((a) => a.id === chosen) || !pool.length ? chosen : pool[0].id;
   }
 
   private team(): PlannerAgent[] {
-    return this.agents().map(({ id, name, skills, tagline, enabled }) => ({ id, name, skills, tagline, enabled }));
+    const ok = new Set(this.routable().map((a) => a.id));
+    return this.agents().map(({ id, name, skills, tagline }) => ({ id, name, skills, tagline, enabled: ok.has(id) }));
   }
 
   limitFor(agent: AgentConfig, now = new Date()): LimitState {
@@ -187,10 +203,12 @@ export class Hub {
       connectorLabel: connector.label,
       supportsProvider: Boolean(connector.config.supportsProvider),
       sendsReasoning: Boolean(connector.config.reasoningParam || connector.config.reasoningIn),
+      billing: connector.billing,
+      blocked: Boolean(connector.blocked),
       online: health?.ok,
       healthDetail: health?.detail,
       lastServed,
-      status: !agent.enabled
+      status: !agent.enabled || connector.blocked
         ? "paused"
         : running > 0
           ? "working"
@@ -288,13 +306,17 @@ export class Hub {
         const target = this.agent(cmd.agentId)!;
         const limit = this.limitFor(target);
         if (!target.enabled) return { reply: `${target.name} is paused. Turn it back on in the dashboard, or try @team.` };
+        const conn = resolveConnector(target);
+        if (conn.blocked) return { reply: `${target.name} is off: its only connection is pay-per-use, and Relay blocks paid APIs. Try @team or another agent.` };
         if (!limit.ok) return { reply: `${target.name} hit its ${limit.reason}. Raise the limit or ask someone else.` };
         const task = this.submitDirect(cmd.agentId, cmd.text, origin, "explicit");
         const a = this.agent(task.agentId)!;
         return { reply: `→ ${a.name} is on it (${a.model} · ${a.reasoning}).`, taskId: task.id };
       }
       case "auto": {
-        const id = pickAgent(cmd.text, agents, this.leadId);
+        const pool = this.routable();
+        const fallback = pool.some((a) => a.id === this.leadId) ? this.leadId : pool[0]?.id ?? this.leadId;
+        const id = pickAgent(cmd.text, pool, fallback);
         const task = this.submitDirect(id, cmd.text, origin, "auto");
         const a = this.agent(task.agentId)!;
         return { reply: `→ Routed to ${a.name} (${a.model} · ${a.reasoning}).`, taskId: task.id };
@@ -477,7 +499,7 @@ export class Hub {
 
   /** Find someone else with capacity, best skill match first. */
   private alternateFor(task: Task, exclude: string): AgentConfig | undefined {
-    const open = this.agents().filter((a) => a.id !== exclude && a.enabled && this.limitFor(a).ok);
+    const open = this.routable().filter((a) => a.id !== exclude && this.limitFor(a).ok);
     if (!open.length) return undefined;
     const id = pickAgent(task.prompt, open, open[0].id);
     return open.find((a) => a.id === id);

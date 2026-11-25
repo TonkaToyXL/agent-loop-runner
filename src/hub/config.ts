@@ -39,11 +39,12 @@ export function normalizeAgent(raw: Partial<AgentConfig>, index: number): AgentC
       outputPerMTok: num(raw.pricing?.outputPerMTok, 0),
     },
     enabled: raw.enabled ?? true,
+    optional: raw.optional ?? false,
     maxConcurrent: Math.max(1, Math.floor(num(raw.maxConcurrent, 2))),
   };
 }
 
-export function loadConfig(path = process.env.RELAY_CONFIG ?? "relay.config.json"): HubConfig {
+export function loadConfig(path = process.env.RELAY_CONFIG?.trim() || "relay.config.json"): HubConfig {
   const full = resolve(path);
   if (!existsSync(full)) throw new Error(`Config not found: ${full}`);
   const raw = JSON.parse(readFileSync(full, "utf8")) as Partial<HubConfig>;

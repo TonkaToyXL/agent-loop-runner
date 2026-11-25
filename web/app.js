@@ -375,6 +375,12 @@ function meter(label, used, cap, fmt, share) {
 }
 
 const STATUS_TEXT = { idle: "idle", working: "working", limited: "at limit", paused: "paused", offline: "offline" };
+const BILL = { subscription: "Your plan", local: "Local", metered: "Pay-per-use" };
+const BILL_HELP = {
+  subscription: "Runs on a subscription you already have. No extra charges from Relay.",
+  local: "Runs on your own machine with that agent's own setup.",
+  metered: "Billed per use by the provider.",
+};
 const modelName = (a) => (a.provider ? `${a.provider}/${a.model}` : a.model);
 function connText(a) {
   if (!a.live || a.online === undefined) return a.connectorLabel;
@@ -396,7 +402,7 @@ function renderCrew() {
             <text x="26" y="27">${esc(a.name[0])}</text>
           </svg>
           <div class="agent-id" style="padding-right:76px">
-            <div class="agent-name">${esc(a.name)} ${a.isLead ? '<span class="badge lead">Lead</span>' : ""}${a.live ? "" : '<span class="badge demo">Demo</span>'}</div>
+            <div class="agent-name">${esc(a.name)} ${a.isLead ? '<span class="badge lead">Lead</span>' : ""}${a.live ? (a.billing ? `<span class="badge bill ${a.billing}" title="${esc(BILL_HELP[a.billing])}">${BILL[a.billing]}</span>` : "") : `<span class="badge demo">${a.connectorLabel.startsWith("Off") ? "Off" : "Demo"}</span>`}</div>
             <div class="agent-tag" title="${esc(a.tagline)}">${esc(a.tagline)}</div>
           </div>
           <span class="status ${a.status}"><i></i>${working}</span>
@@ -755,7 +761,7 @@ function openEditor(id) {
       <button class="icon-btn x" data-close aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
     </div>
     <form class="drawer-body" id="editForm">
-      <div class="conn-box">${a.live ? (a.online === false ? `<span class="err-text">●</span> <b>${esc(a.connectorLabel)}</b> is ${esc(a.healthDetail || "offline")}. Start it, and Relay picks it up within 30s.` : `● Connected via <b>${esc(a.connectorLabel)}</b>${a.lastServed ? ` · last answer from <b>${esc(a.lastServed)}</b>` : ""}`) : `◌ <b>Demo mode.</b> ${esc(a.connectorLabel.replace(/^Demo · /, "To go live: "))} in <code>.env</code>, then restart the hub.`}</div>
+      <div class="conn-box">${a.live ? (a.online === false ? `<span class="err-text">●</span> <b>${esc(a.connectorLabel)}</b> is ${esc(a.healthDetail || "offline")}. Start it, and Relay picks it up within 30s.` : `● Connected via <b>${esc(a.connectorLabel)}</b>${a.lastServed ? ` · last answer from <b>${esc(a.lastServed)}</b>` : ""}${a.billing ? `<br><span class="small">${esc(BILL_HELP[a.billing])}</span>` : ""}`) : (a.connectorLabel.startsWith("Off") ? `◌ <b>Off.</b> ${esc(a.connectorLabel.replace(/^Off · /, ""))}. Relay won't use paid APIs unless you set <code>RELAY_ALLOW_METERED=true</code>.` : `◌ <b>Demo mode.</b> ${esc(a.connectorLabel.replace(/^Demo · /, "To go live: "))}, then restart the hub. Demo agents never join real team work.`)}</div>
       <div class="field">
         <label for="fModel">Model</label>
         <input class="input mono" id="fModel" list="modelList" value="${esc(a.model)}" spellcheck="false" />

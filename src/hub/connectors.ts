@@ -1,7 +1,11 @@
+import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { accessSync, constants, mkdirSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { delimiter, join } from "node:path";
 import { fallbackPlan, type PlannerAgent } from "./planner.js";
 import { estimateTokens } from "./usage.js";
-import type { AgentConfig, ConnectorConfig, RateInfo, TokenUsage } from "./types.js";
+import type { AgentConfig, Billing, ConnectorConfig, RateInfo, TokenUsage } from "./types.js";
 
 export type Purpose = "plan" | "work" | "synthesis";
 
@@ -26,23 +30,59 @@ export interface ResolvedConnector {
   config: ConnectorConfig;
   live: boolean;
   label: string;
+  billing?: Billing;
+  /** True when the only working connection is pay-per-use and Relay is blocking it. */
+  blocked?: boolean;
 }
 
 const env = (name?: string) => (name ? process.env[name]?.trim() || "" : "");
 
+export const meteredAllowed = () => /^(1|true|yes)$/i.test(env("RELAY_ALLOW_METERED"));
+
+const commandCache = new Map<string, boolean>();
+/** True when `command` is an executable on PATH (or an absolute path). Cached per process. */
+export function hasCommand(command: string): boolean {
+  if (commandCache.has(command)) return commandCache.get(command)!;
+  const dirs = command.includes("/") ? [""] : (process.env.PATH ?? "").split(delimiter).filter(Boolean);
+  const found = dirs.some((dir) => {
+    try {
+      accessSync(dir ? join(dir, command) : command, constants.X_OK);
+      return true;
+    } catch {
+      return false;
+    }
+  });
+  commandCache.set(command, found);
+  return found;
+}
+
+function available(config: ConnectorConfig): boolean {
+  if (!(config.requiresEnv ?? []).every((name) => env(name))) return false;
+  if (config.kind === "cli" && (!config.command || !hasCommand(config.command))) return false;
+  return true;
+}
+
 export function resolveConnector(agent: AgentConfig): ResolvedConnector {
+  let blocked: ConnectorConfig | undefined;
   for (const config of agent.connectors) {
     if (config.kind === "demo") return { config, live: false, label: "Demo" };
-    if ((config.requiresEnv ?? []).every((name) => env(name))) {
-      return { config, live: true, label: config.label };
+    if (!available(config)) continue;
+    if (config.billing === "metered" && !meteredAllowed()) {
+      blocked ??= config;
+      continue;
     }
+    return { config, live: true, label: config.label, billing: config.billing };
   }
-  const hint = agent.connectors[0]?.requiresEnv?.join(" + ");
-  return {
-    config: { kind: "demo", label: "Demo" },
-    live: false,
-    label: hint ? `Demo · set ${hint}` : "Demo",
-  };
+  if (blocked) {
+    return { config: { kind: "demo", label: "Demo" }, live: false, blocked: true, label: `Off · ${blocked.label} is pay-per-use (blocked)` };
+  }
+  // Only pay-per-use options exist and they're blocked: say so instead of asking for keys.
+  if (agent.connectors.length && agent.connectors.every((c) => c.billing === "metered") && !meteredAllowed()) {
+    return { config: { kind: "demo", label: "Demo" }, live: false, blocked: true, label: `Off · ${agent.connectors[0].label} is pay-per-use (blocked)` };
+  }
+  const free = agent.connectors.find((c) => c.billing !== "metered") ?? agent.connectors[0];
+  const hint = free?.kind === "cli" ? `install ${free.command}` : free?.requiresEnv?.length ? `set ${free.requiresEnv.join(" + ")}` : "";
+  return { config: { kind: "demo", label: "Demo" }, live: false, label: hint ? `Demo · ${hint}` : "Demo" };
 }
 
 // ---------------------------------------------------------------- webhook
@@ -81,13 +121,14 @@ function waitForWebhook(taskId: string, timeoutMs: number, signal: AbortSignal) 
 async function runWebhook(req: RunRequest, config: ConnectorConfig): Promise<RunResult> {
   const url = env(config.webhookUrlEnv);
   const secret = env(config.apiKeyEnv);
-  const publicUrl = (process.env.RELAY_PUBLIC_URL ?? `http://127.0.0.1:${process.env.PORT ?? 4747}`).replace(/\/$/, "");
+  const publicUrl = (process.env.RELAY_PUBLIC_URL?.trim() || `http://127.0.0.1:${process.env.PORT?.trim() || 4747}`).replace(/\/$/, "");
   const wait = waitForWebhook(req.taskId, config.timeoutMs ?? 540_000, req.signal);
 
   const headers: Record<string, string> = { "content-type": "application/json" };
+  const headerName = (env(config.webhookHeaderEnv) || config.webhookHeader || "").toLowerCase();
   if (secret) {
-    if (config.webhookHeader) headers[config.webhookHeader] = secret;
-    else headers.authorization = `Bearer ${secret}`;
+    if (headerName && headerName !== "authorization") headers[headerName] = secret;
+    else headers.authorization = /^(bearer|basic)\s/i.test(secret) ? secret : `Bearer ${secret}`;
   }
   let res: Response;
   try {
@@ -225,6 +266,98 @@ async function runOpenAI(req: RunRequest, config: ConnectorConfig): Promise<RunR
   };
 }
 
+// ---------------------------------------------------------------- cli (local, signed-in tools)
+const MAX_STDOUT = 4 * 1024 * 1024;
+
+interface ClaudeJson {
+  result?: string;
+  is_error?: boolean;
+  subtype?: string;
+  usage?: { input_tokens?: number; output_tokens?: number; cache_read_input_tokens?: number; cache_creation_input_tokens?: number };
+  modelUsage?: Record<string, unknown>;
+}
+
+/** Parse a CLI's stdout into a result. Exported for tests. */
+export function parseCliOutput(stdout: string, format: ConnectorConfig["outputFormat"], label: string): Omit<RunResult, "rate"> & { usage?: TokenUsage } {
+  if (format === "claude-json") {
+    let data: ClaudeJson;
+    try {
+      data = JSON.parse(stdout.trim().split("\n").filter(Boolean).at(-1) ?? "") as ClaudeJson;
+    } catch {
+      throw new Error(`${label} printed something Relay couldn't read`);
+    }
+    const text = (data.result ?? "").trim();
+    if (data.is_error) throw new Error(`${label}: ${text || data.subtype || "error"}`);
+    if (!text) throw new Error(`${label} returned an empty reply`);
+    const u = data.usage;
+    const served = data.modelUsage ? Object.keys(data.modelUsage)[0] : undefined;
+    return {
+      text,
+      served,
+      usage: u
+        ? { input: (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0), output: u.output_tokens ?? 0 }
+        : { input: 0, output: estimateTokens(text) },
+    };
+  }
+  const text = stdout.trim();
+  if (!text) throw new Error(`${label} returned an empty reply`);
+  return { text, usage: { input: 0, output: estimateTokens(text) } };
+}
+
+async function runCli(req: RunRequest, config: ConnectorConfig): Promise<RunResult> {
+  const template = config.args ?? [];
+  const promptInArgs = template.some((a) => a.includes("{prompt}"));
+  const args = template.map((a) =>
+    a.replaceAll("{model}", req.agent.model).replaceAll("{system}", req.agent.system).replaceAll("{prompt}", req.prompt),
+  );
+  // An empty working folder, so the tool doesn't pick up whatever project Relay runs from.
+  const cwd = join(tmpdir(), "relay-cli", req.agent.id);
+  mkdirSync(cwd, { recursive: true });
+  const child = spawn(config.command!, args, { cwd, env: process.env, stdio: ["pipe", "pipe", "pipe"] });
+  let stdout = "";
+  let stderr = "";
+  child.stdout.on("data", (d: Buffer) => {
+    if (stdout.length < MAX_STDOUT) stdout += d.toString("utf8");
+  });
+  child.stderr.on("data", (d: Buffer) => {
+    stderr = (stderr + d.toString("utf8")).slice(-4000);
+  });
+  child.stdin.on("error", () => {});
+  child.stdin.end(promptInArgs ? "" : req.prompt);
+
+  const timeoutMs = config.timeoutMs ?? 600_000;
+  const code = await new Promise<number | null>((resolve, reject) => {
+    const kill = (why: string) => {
+      child.kill("SIGTERM");
+      setTimeout(() => child.kill("SIGKILL"), 3000).unref();
+      reject(new Error(why));
+    };
+    const timer = setTimeout(() => kill(`${config.label} took longer than ${Math.round(timeoutMs / 1000)}s`), timeoutMs);
+    const onAbort = () => kill("Cancelled");
+    req.signal.addEventListener("abort", onAbort, { once: true });
+    child.on("error", (err) => {
+      clearTimeout(timer);
+      reject(new Error(`${config.label} couldn't start: ${err.message}`));
+    });
+    child.on("close", (c) => {
+      clearTimeout(timer);
+      req.signal.removeEventListener("abort", onAbort);
+      resolve(c);
+    });
+  });
+  if (code !== 0) {
+    // Claude prints JSON errors on stdout; prefer that message when present.
+    try {
+      return parseCliOutput(stdout, config.outputFormat, config.label) as RunResult;
+    } catch (err) {
+      const tail = stderr.trim().split("\n").slice(-3).join(" ").slice(0, 300);
+      throw new Error(`${config.label} exited with code ${code}${tail ? `: ${tail}` : err instanceof Error ? `: ${err.message}` : ""}`);
+    }
+  }
+  const parsed = parseCliOutput(stdout, config.outputFormat, config.label);
+  return { ...parsed, usage: parsed.usage ?? { input: estimateTokens(req.prompt), output: estimateTokens(parsed.text) } };
+}
+
 // ---------------------------------------------------------------- demo
 const sleep = (ms: number, signal: AbortSignal) =>
   new Promise<void>((resolve, reject) => {
@@ -280,6 +413,7 @@ export async function runAgent(req: RunRequest): Promise<RunResult & { connector
   let result: RunResult;
   if (config.kind === "openai") result = await runOpenAI(req, config);
   else if (config.kind === "webhook") result = await runWebhook(req, config);
+  else if (config.kind === "cli") result = await runCli(req, config);
   else result = await runDemo(req);
   return { ...result, connector };
 }

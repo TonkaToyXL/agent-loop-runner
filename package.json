@@ -5,8 +5,11 @@
   "main": "index.js",
   "type": "module",
   "scripts": {
+    "setup:mac": "bash scripts/setup-mac.sh",
     "hub": "tsx src/hub/main.ts",
     "setup:hermes": "bash scripts/setup-hermes.sh",
+    "setup:telegram": "bash scripts/setup-telegram.sh",
+    "setup:grok": "bash scripts/setup-grok.sh",
     "babysit-pr": "tsx src/babysit-pr.ts",
     "build": "tsc",
     "typecheck": "tsc --noEmit",

@@ -1,7 +1,10 @@
 export const REASONING_LEVELS = ["off", "low", "medium", "high", "max"] as const;
 export type Reasoning = (typeof REASONING_LEVELS)[number];
 
-export type ConnectorKind = "openai" | "webhook" | "demo";
+export type ConnectorKind = "openai" | "webhook" | "cli" | "demo";
+
+/** subscription: runs on a plan you already pay for. metered: billed per use. local: runs on your machine. */
+export type Billing = "subscription" | "metered" | "local";
 
 /**
  * How the hub reaches an agent. An agent can list several connectors; the first
@@ -11,6 +14,14 @@ export type ConnectorKind = "openai" | "webhook" | "demo";
 export interface ConnectorConfig {
   kind: ConnectorKind;
   label: string;
+  /** How this connection is paid for. Metered connectors are skipped unless RELAY_ALLOW_METERED=true. */
+  billing?: Billing;
+  /** cli: executable to run (looked up on PATH). */
+  command?: string;
+  /** cli: arguments. {model}, {system} and {prompt} are filled in; without {prompt} the prompt goes to stdin. */
+  args?: string[];
+  /** cli: how to read stdout. */
+  outputFormat?: "text" | "claude-json";
   /** Env vars that must be non-empty for this connector to be used. */
   requiresEnv?: string[];
   /** openai: base URL such as https://api.x.ai/v1. */
@@ -31,6 +42,8 @@ export interface ConnectorConfig {
   webhookUrlEnv?: string;
   /** webhook: header that carries the secret (default Authorization: Bearer). */
   webhookHeader?: string;
+  /** webhook: env var that overrides webhookHeader. */
+  webhookHeaderEnv?: string;
   timeoutMs?: number;
 }
 
@@ -62,6 +75,8 @@ export interface AgentConfig {
   pricing: AgentPricing;
   enabled: boolean;
   maxConcurrent: number;
+  /** Hide this agent entirely unless one of its connectors is available (e.g. its CLI is installed). */
+  optional: boolean;
 }
 
 export type EditableAgentFields = Pick<

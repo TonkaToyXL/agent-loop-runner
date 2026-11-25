@@ -16,7 +16,7 @@ export interface PersistedState {
 }
 
 export function defaultStatePath(): string {
-  return process.env.RELAY_STATE ?? join(homedir(), ".local/share/agent-relay/hub/state.json");
+  return process.env.RELAY_STATE?.trim() || join(homedir(), ".local/share/agent-relay/hub/state.json");
 }
 
 /** Small JSON store with debounced, atomic writes. Fine for one user and thousands of tasks. */

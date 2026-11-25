@@ -31,15 +31,6 @@
       "system": "You are Grok, the team's real-time scout. You are strongest at news, X posts, trends, and fast research. Be direct and cite sources when you have them.",
       "connectors": [
         {
-          "kind": "openai",
-          "label": "xAI API",
-          "requiresEnv": [
-            "XAI_API_KEY"
-          ],
-          "baseUrl": "https://api.x.ai/v1",
-          "apiKeyEnv": "XAI_API_KEY"
-        },
-        {
           "kind": "webhook",
           "label": "Grok Bot webhook",
           "requiresEnv": [
@@ -47,7 +38,19 @@
           ],
           "webhookUrlEnv": "GROK_WEBHOOK_URL",
           "apiKeyEnv": "GROK_WEBHOOK_KEY",
-          "timeoutMs": 540000
+          "timeoutMs": 540000,
+          "billing": "subscription",
+          "webhookHeaderEnv": "GROK_WEBHOOK_HEADER"
+        },
+        {
+          "kind": "openai",
+          "label": "xAI API",
+          "requiresEnv": [
+            "XAI_API_KEY"
+          ],
+          "baseUrl": "https://api.x.ai/v1",
+          "apiKeyEnv": "XAI_API_KEY",
+          "billing": "metered"
         }
       ],
       "limits": {
@@ -102,7 +105,8 @@
             "MUSE_API_KEY"
           ],
           "baseUrlEnv": "MUSE_BASE_URL",
-          "apiKeyEnv": "MUSE_API_KEY"
+          "apiKeyEnv": "MUSE_API_KEY",
+          "billing": "metered"
         }
       ],
       "limits": {
@@ -160,7 +164,8 @@
           "timeoutMs": 600000,
           "reasoningIn": "model_options",
           "supportsProvider": true,
-          "healthPath": "/health"
+          "healthPath": "/health",
+          "billing": "local"
         }
       ],
       "limits": {
@@ -175,6 +180,66 @@
       "enabled": true,
       "maxConcurrent": 2,
       "provider": ""
+    },
+    {
+      "id": "claude",
+      "name": "Claude",
+      "color": "#b69cff",
+      "tagline": "Careful thinker for writing, analysis, and code review",
+      "model": "sonnet",
+      "modelOptions": [
+        "sonnet",
+        "opus",
+        "haiku"
+      ],
+      "reasoning": "medium",
+      "skills": [
+        "analyze",
+        "analysis",
+        "review",
+        "explain",
+        "summarize",
+        "summary",
+        "edit",
+        "rewrite",
+        "compare",
+        "reason",
+        "essay",
+        "email",
+        "draft"
+      ],
+      "system": "You are Claude, the team's careful thinker. You are strongest at analysis, reviewing and improving work, clear writing, and explaining trade-offs. Answer directly; do not use tools unless asked.",
+      "connectors": [
+        {
+          "kind": "cli",
+          "label": "Claude Code (your plan)",
+          "billing": "subscription",
+          "command": "claude",
+          "args": [
+            "-p",
+            "--output-format",
+            "json",
+            "--model",
+            "{model}",
+            "--append-system-prompt",
+            "{system}"
+          ],
+          "outputFormat": "claude-json",
+          "timeoutMs": 600000
+        }
+      ],
+      "limits": {
+        "dailyRequests": 100,
+        "dailyTokens": 0,
+        "monthlyBudgetUsd": 0
+      },
+      "pricing": {
+        "inputPerMTok": 0,
+        "outputPerMTok": 0
+      },
+      "enabled": true,
+      "maxConcurrent": 1,
+      "optional": true
     }
   ]
 }

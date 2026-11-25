@@ -16,8 +16,8 @@ const list = (value?: string) =>
     .map((s) => s.trim())
     .filter(Boolean);
 
-const host = process.env.HOST ?? "127.0.0.1";
-const port = Number(process.env.PORT ?? 4747);
+const host = process.env.HOST?.trim() || "127.0.0.1";
+const port = Number(process.env.PORT?.trim() || 4747);
 const token = process.env.HUB_TOKEN?.trim() ?? "";
 const loopback = host === "127.0.0.1" || host === "localhost" || host === "::1";
 

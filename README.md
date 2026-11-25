@@ -18,26 +18,35 @@ One place to run all your AI agents together. Talk to Grok, Muse, and Hermes fro
 - **Phone control** through Telegram and iMessage, with allowlists.
 - **Works before you add keys.** Agents without keys run in a labeled demo mode so you can try the whole flow first.
 
-## Quick start
+## Set up on a Mac (one command)
+
+On an always-on Mac such as a Mac mini:
 
 ```bash
-npm install
-cp .env.example .env      # fill in what you use; every line is optional
-npm run hub
+git clone https://github.com/TonkaToyXL/agent-loop-runner.git ~/agent-loop-runner
+cd ~/agent-loop-runner
+npm run setup:mac
 ```
 
-Open http://127.0.0.1:4747.
+It installs what Relay needs, connects the agents you already use, links Telegram, blocks pay-per-use APIs, and keeps Relay running in the background (it starts at login and restarts if it stops). Run it again any time to add something. Each piece also has its own command: `npm run setup:hermes`, `setup:grok`, `setup:telegram`.
+
+To try it without connecting anything: `npm install && npm run hub`, then open http://127.0.0.1:4747. Unconnected agents answer in a labeled demo mode and never join real team work.
+
+## No surprise bills
+
+Relay uses the subscriptions and tools you already have. Pay-per-use APIs are **blocked by default**, even if a key is in `.env`; set `RELAY_ALLOW_METERED=true` only if you want them. Every agent card shows how it's paid for.
+
+| Agent | How Relay reaches it | Cost |
+|---|---|---|
+| **Grok** | A Grok Bot routine with a Webhook trigger | Your Grok subscription (Grok Bot usage) |
+| **Hermes** | Hermes Agent's built-in API server on your Mac | Whatever Hermes already uses |
+| **Claude** | Claude Code signed in on your Mac (`claude -p`) | Your Claude plan |
+| **Muse** | Meta's Model API | Pay-per-use, so **off** by default. The Muse app can't be controlled by other apps. |
+| Grok via xAI API | Optional fallback | Pay-per-use, blocked by default |
+
+Agents are defined in [`relay.config.json`](./relay.config.json). Any OpenAI-compatible endpoint (Ollama, LM Studio, OpenRouter) or local command-line assistant can be added as another entry. Mark each connection's `billing` as `subscription`, `local`, or `metered`.
 
 ## Connect your agents
-
-Agents are defined in [`relay.config.json`](./relay.config.json): name, color, model, reasoning, strengths, limits, and how to reach them. Keys live only in `.env`. Each agent uses the first connector whose env vars are set, otherwise demo mode.
-
-| Agent | Connector | `.env` |
-|---|---|---|
-| **Grok** | xAI API (OpenAI-compatible) | `XAI_API_KEY` |
-| | or your Grok Bot routine's webhook | `GROK_WEBHOOK_URL`, `GROK_WEBHOOK_KEY` |
-| **Muse** | Muse Spark via Meta's Model API | `MUSE_BASE_URL`, `MUSE_API_KEY` |
-| **Hermes** | Hermes Agent's built-in API server | `HERMES_BASE_URL`, `HERMES_API_KEY` (or run `npm run setup:hermes`) |
 
 **Hermes Agent.** On the computer that runs Hermes, from this folder:
 
@@ -49,17 +58,20 @@ It turns on Hermes' API server with a random key (backing up `~/.hermes/.env` fi
 
 Once connected, Hermes' card shows online/offline, the reasoning level is sent with each request, and each reply shows the model that actually answered. Hermes uses its own default model unless you set a **Provider** in its editor (for example `openrouter`); then the Model field picks the exact model Hermes runs.
 
-**Muse.** Relay calls Muse Spark through Meta's API. It does not drive the Muse phone app. Copy the OpenAI-compatible base URL and the exact model ID from Meta's developer docs, then fix the model in the dashboard if it differs from `muse-spark-1.1`.
+**Muse.** Relay can only reach Muse Spark through Meta's pay-per-use Model API, so Muse stays off unless you set `MUSE_BASE_URL`, `MUSE_API_KEY`, and `RELAY_ALLOW_METERED=true`. Relay can't drive the Muse phone app.
 
-**Grok Bot webhook.** Relay POSTs `{request_id, task, context, callback_url, callback_token}` to your webhook. Tell the routine to answer by POSTing `{"result": "..."}` to `callback_url` with header `x-relay-token: <callback_token>`. A webhook that answers right away with `{"result": "..."}` works too. If the routine runs on another machine, set `RELAY_PUBLIC_URL` to an address it can reach.
+**Grok Bot.** `npm run setup:grok` walks you through it: create a new Grok Bot routine named Relay with a Webhook trigger, paste the instructions it prints (also copied to your clipboard), then paste the routine's webhook URL, key, and key header. The routine answers by running `scripts/relay-reply.sh`, which only ever posts to Relay's own callback address. The routine's computer must be the Mac running Relay, or set `RELAY_PUBLIC_URL` to an address it can reach.
 
-**Any other agent** with an OpenAI-compatible endpoint (OpenRouter, Ollama, LM Studio) is one more entry in `relay.config.json`. Set `reasoningParam: "reasoning_effort"` on a connector only if that model accepts it.
+**Claude.** If Claude Code is installed and signed in (`claude` once in Terminal), Claude joins the crew automatically and runs on your Claude plan. Pick `sonnet`, `opus`, or `haiku` in its editor.
+
+**Other agents.** Add an entry to `relay.config.json` with an `openai` connector (any OpenAI-compatible URL) or a `cli` connector (a local command that takes the prompt on stdin). Set `reasoningParam: "reasoning_effort"` on an `openai` connector only if that model accepts it.
 
 ## Telegram
 
-1. Message [@BotFather](https://t.me/BotFather), run `/newbot`, copy the token into `TELEGRAM_BOT_TOKEN`.
-2. Start the hub and message your bot. It replies with your chat id.
-3. Put that id in `TELEGRAM_ALLOWED_CHAT_IDS` and restart. Anyone else gets refused.
+Free. Run `npm run setup:telegram` (or let `setup:mac` do it):
+
+1. In Telegram, message [@BotFather](https://t.me/BotFather), send `/newbot`, and paste the token when asked.
+2. Send your new bot any message while the script waits. It allowlists that chat automatically. Anyone else gets refused.
 
 Uses long polling, so no public URL is needed.
 
@@ -91,7 +103,7 @@ Same everywhere: dashboard, Telegram, iMessage.
 
 ## Use the dashboard from your phone
 
-Keep `HOST=127.0.0.1` unless you need remote access. For phone access, use a private network such as Tailscale, set `HOST=0.0.0.0` and a long `HUB_TOKEN`. The hub refuses to listen beyond localhost without a token. The dashboard installs as a home-screen app.
+Telegram is the easiest way to use Relay from your phone. For the full dashboard on your phone, install Tailscale (free for personal use) on the Mac and phone and say yes to the phone-dashboard step in `npm run setup:mac`. It sets `HOST=0.0.0.0` and a password (`HUB_TOKEN`). The hub refuses to listen beyond localhost without one. The dashboard installs as a home-screen app.
 
 ## Data
 

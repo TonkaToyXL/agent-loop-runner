@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { normalizeAgent } from "./config.js";
-import { buildChatBody, parseChatResponse } from "./connectors.js";
+import { buildChatBody, parseChatResponse, parseCliOutput, resolveConnector } from "./connectors.js";
 import type { ConnectorConfig } from "./types.js";
 
 const hermesConn: ConnectorConfig = { kind: "openai", label: "Hermes", reasoningIn: "model_options", supportsProvider: true };
@@ -63,5 +63,84 @@ describe("parseChatResponse", () => {
   it("rejects empty replies and leaves usage undefined when not reported", () => {
     expect(() => parseChatResponse({ choices: [] }, "X")).toThrow("X returned an empty reply");
     expect(parseChatResponse({ choices: [{ message: { content: "a" } }] }, "X").usage).toBeUndefined();
+  });
+});
+
+describe("resolveConnector billing guard", () => {
+  const grok = () =>
+    normalizeAgent(
+      {
+        id: "grok",
+        model: "grok-4",
+        connectors: [
+          { kind: "webhook", label: "Grok Bot webhook", billing: "subscription", requiresEnv: ["T_GROK_HOOK"] },
+          { kind: "openai", label: "xAI API", billing: "metered", requiresEnv: ["T_XAI_KEY"] },
+        ],
+      },
+      0,
+    );
+  const withEnv = (vars: Record<string, string | undefined>, fn: () => void) => {
+    const saved = Object.fromEntries(Object.keys(vars).map((k) => [k, process.env[k]]));
+    Object.assign(process.env, vars);
+    for (const [k, v] of Object.entries(vars)) if (v === undefined) delete process.env[k];
+    try {
+      fn();
+    } finally {
+      for (const [k, v] of Object.entries(saved)) if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  };
+
+  it("blocks a pay-per-use key by default, even when it is set", () => {
+    withEnv({ T_XAI_KEY: "sk-paid", T_GROK_HOOK: undefined, RELAY_ALLOW_METERED: undefined }, () => {
+      const r = resolveConnector(grok());
+      expect(r).toMatchObject({ live: false, blocked: true });
+      expect(r.label).toBe("Off · xAI API is pay-per-use (blocked)");
+    });
+  });
+
+  it("uses the paid API only when explicitly allowed", () => {
+    withEnv({ T_XAI_KEY: "sk-paid", T_GROK_HOOK: undefined, RELAY_ALLOW_METERED: "true" }, () => {
+      expect(resolveConnector(grok())).toMatchObject({ live: true, label: "xAI API", billing: "metered" });
+    });
+  });
+
+  it("prefers the subscription webhook when both are set", () => {
+    withEnv({ T_XAI_KEY: "sk-paid", T_GROK_HOOK: "https://hook", RELAY_ALLOW_METERED: "true" }, () => {
+      expect(resolveConnector(grok())).toMatchObject({ live: true, label: "Grok Bot webhook", billing: "subscription" });
+    });
+  });
+
+  it("reports a missing CLI as an install hint", () => {
+    const a = normalizeAgent(
+      { id: "c", model: "m", connectors: [{ kind: "cli", label: "Tool", billing: "subscription", command: "relay-test-missing-cli-xyz" }] },
+      0,
+    );
+    expect(resolveConnector(a)).toMatchObject({ live: false, label: "Demo · install relay-test-missing-cli-xyz" });
+  });
+});
+
+describe("parseCliOutput", () => {
+  it("reads Claude Code JSON results, tokens, and model", () => {
+    const out = JSON.stringify({
+      type: "result",
+      is_error: false,
+      result: " hi ",
+      usage: { input_tokens: 5, output_tokens: 7, cache_read_input_tokens: 100 },
+      modelUsage: { "claude-x": {} },
+    });
+    expect(parseCliOutput(`noise\n${out}\n`, "claude-json", "Claude")).toEqual({ text: "hi", served: "claude-x", usage: { input: 105, output: 7 } });
+  });
+
+  it("surfaces Claude errors and unreadable output", () => {
+    expect(() => parseCliOutput(JSON.stringify({ is_error: true, result: "Not logged in" }), "claude-json", "Claude")).toThrow(
+      "Claude: Not logged in",
+    );
+    expect(() => parseCliOutput("plain text", "claude-json", "Claude")).toThrow("couldn't read");
+  });
+
+  it("passes plain text through", () => {
+    expect(parseCliOutput("  answer \n", "text", "Tool").text).toBe("answer");
+    expect(() => parseCliOutput("   ", "text", "Tool")).toThrow("empty reply");
   });
 });

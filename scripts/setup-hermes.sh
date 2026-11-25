@@ -8,43 +8,12 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
-RELAY_DIR="$(pwd)"
+# shellcheck source=scripts/lib.sh
+source scripts/lib.sh
 HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}"
 HERMES_ENV="$HERMES_HOME/.env"
-RELAY_ENV="$RELAY_DIR/.env"
 
-say()  { printf '  %s\n' "$*"; }
-ok()   { printf '  \033[32m✓\033[0m %s\n' "$*"; }
-warn() { printf '  \033[33m!\033[0m %s\n' "$*"; }
-die()  { printf '  \033[31m✗\033[0m %s\n' "$*" >&2; exit 1; }
-
-# Read KEY from a dotenv file (last match wins, quotes stripped).
-get_kv() {
-  [ -f "$1" ] || return 0
-  awk -v k="$2" '
-    $0 ~ "^[[:space:]]*(export[[:space:]]+)?" k "[[:space:]]*=" {
-      sub("^[[:space:]]*(export[[:space:]]+)?" k "[[:space:]]*=[[:space:]]*", "")
-      gsub(/^["'\'']|["'\'']$/, "")
-      v = $0
-    }
-    END { if (v != "") print v }' "$1"
-}
-
-# Set KEY=VALUE in a dotenv file: replace existing lines, else append. Portable (no sed -i).
-set_kv() {
-  local file="$1" key="$2" value="$3" tmp
-  tmp="$(mktemp "${file}.XXXXXX")"
-  awk -v k="$key" -v v="$value" '
-    $0 ~ "^[[:space:]]*(export[[:space:]]+)?" k "[[:space:]]*=" { if (!done) print k "=" v; done = 1; next }
-    { print }
-    END { if (!done) print k "=" v }' "$file" > "$tmp"
-  chmod 600 "$tmp"
-  mv "$tmp" "$file"
-}
-
-echo
-echo "  Relay ← Hermes setup"
-echo
+title "Hermes"
 
 # ---- 1. prerequisites
 command -v node >/dev/null || die "Node.js is not installed. Install Node 22.13+ from https://nodejs.org, then run this again."
@@ -70,7 +39,7 @@ fi
 
 KEY="$(get_kv "$HERMES_ENV" API_SERVER_KEY)"
 if [ -z "$KEY" ] || [ "$KEY" = "change-me-local-dev" ]; then
-  if command -v openssl >/dev/null; then KEY="$(openssl rand -hex 32)"; else KEY="$(node -e 'console.log(require("crypto").randomBytes(32).toString("hex"))')"; fi
+  KEY="$(random_hex 32)"
   set_kv "$HERMES_ENV" API_SERVER_KEY "$KEY"
   ok "Created a new Hermes API key (stored in $HERMES_ENV, not shown)"
   KEY_CHANGED=1
@@ -89,11 +58,7 @@ HOST="$(get_kv "$HERMES_ENV" API_SERVER_HOST)"; HOST="${HOST:-127.0.0.1}"
 BASE="http://$HOST:$PORT"
 
 # ---- 3. Relay settings
-if [ ! -f "$RELAY_ENV" ]; then
-  cp .env.example "$RELAY_ENV"
-  ok "Created Relay's .env from .env.example"
-fi
-chmod 600 "$RELAY_ENV"
+ensure_relay_env
 set_kv "$RELAY_ENV" HERMES_BASE_URL "$BASE/v1"
 set_kv "$RELAY_ENV" HERMES_API_KEY "$KEY"
 ok "Saved Hermes URL and key in Relay's .env"
@@ -109,24 +74,28 @@ else
   if healthy || pgrep -f "hermes.*gateway" >/dev/null 2>&1; then
     say "The Hermes gateway is running with old settings and needs a restart."
     say "This briefly disconnects Hermes from its chat apps (a few seconds)."
-    reply="y"
-    if [ -t 0 ]; then read -r -p "  Restart the Hermes gateway now? [Y/n] " reply || true; fi
-    if [[ "${reply:-y}" =~ ^[Yy]?$|^[Yy][Ee][Ss]$ ]]; then
+    if ask "Restart the Hermes gateway now?" y; then
       if "$HERMES_BIN" gateway restart; then ok "Restarted the Hermes gateway"; else warn "'hermes gateway restart' failed. Restart Hermes yourself, then run this script again."; fi
     else
       warn "Skipped. Restart Hermes yourself (hermes gateway restart), then run this script again."
       exit 0
     fi
   else
-    say "Hermes' gateway isn't running. Start it in another Terminal tab:"
-    echo
-    echo "      hermes gateway"
-    echo
+    say "Hermes' gateway isn't running."
+    if ask "Start it in the background now?" y; then
+      mkdir -p "$HOME/Library/Logs" 2>/dev/null || true
+      HLOG="$HOME/Library/Logs/hermes-gateway.log"; [ -d "$HOME/Library/Logs" ] || HLOG="$HERMES_HOME/relay-gateway.log"
+      nohup "$HERMES_BIN" gateway >> "$HLOG" 2>&1 &
+      ok "Started the Hermes gateway (log: $HLOG)"
+      warn "It runs until this Mac restarts. To keep it always on, use Hermes' own start-at-login option."
+    else
+      say "Start it in another Terminal tab with:  hermes gateway"
+    fi
   fi
   printf '  Waiting for Hermes on %s ' "$BASE"
-  for _ in $(seq 1 60); do healthy && break; printf '.'; sleep 2; done
+  for _ in $(seq 1 45); do healthy && break; printf '.'; sleep 2; done
   echo
-  healthy || die "Hermes didn't come up on $BASE within 2 minutes. Start it with 'hermes gateway' and run this again."
+  healthy || die "Hermes didn't come up on $BASE within 90 seconds. Start it with 'hermes gateway', then run: npm run setup:hermes"
 fi
 
 # ---- 5. Verify the key
@@ -138,10 +107,9 @@ case "$code" in
 esac
 
 echo
-echo "  Hermes is connected. Next:"
-echo
-echo "      npm run hub"
-echo
-echo "  Then open http://127.0.0.1:4747. Hermes' card should say 'Hermes API server · online'."
-echo "  Send:  @hermes reply with one word: ready"
-echo
+ok "Hermes is connected."
+if [ -z "${RELAY_SETUP_ALL:-}" ]; then
+  echo
+  say "Next: npm run hub, open http://127.0.0.1:4747, and send:  @hermes reply with one word: ready"
+  echo
+fi
