@@ -323,14 +323,6 @@ interface AgyJson {
   usage?: { input_tokens?: number; output_tokens?: number; thinking_tokens?: number; cache_read_tokens?: number };
 }
 
-interface ClaudeJson {
-  result?: string;
-  is_error?: boolean;
-  subtype?: string;
-  usage?: { input_tokens?: number; output_tokens?: number; cache_read_input_tokens?: number; cache_creation_input_tokens?: number };
-  modelUsage?: Record<string, unknown>;
-}
-
 /** Parse a CLI's stdout into a result. Exported for tests. */
 export function parseCliOutput(stdout: string, format: ConnectorConfig["outputFormat"], label: string): Omit<RunResult, "rate"> & { usage?: TokenUsage } {
   if (format === "agy-json") {
@@ -350,26 +342,6 @@ export function parseCliOutput(stdout: string, format: ConnectorConfig["outputFo
     return {
       text,
       usage: u ? { input: u.input_tokens ?? 0, output: (u.output_tokens ?? 0) + (u.thinking_tokens ?? 0) } : { input: 0, output: estimateTokens(text) },
-    };
-  }
-  if (format === "claude-json") {
-    let data: ClaudeJson;
-    try {
-      data = JSON.parse(stdout.trim().split("\n").filter(Boolean).at(-1) ?? "") as ClaudeJson;
-    } catch {
-      throw new Error(`${label} printed something Relay couldn't read`);
-    }
-    const text = (data.result ?? "").trim();
-    if (data.is_error) throw new Error(`${label}: ${text || data.subtype || "error"}`);
-    if (!text) throw new Error(`${label} returned an empty reply`);
-    const u = data.usage;
-    const served = data.modelUsage ? Object.keys(data.modelUsage)[0] : undefined;
-    return {
-      text,
-      served,
-      usage: u
-        ? { input: (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0), output: u.output_tokens ?? 0 }
-        : { input: 0, output: estimateTokens(text) },
     };
   }
   const text = stdout.trim();
@@ -420,7 +392,7 @@ async function runCli(req: RunRequest, config: ConnectorConfig): Promise<RunResu
     });
   });
   if (code !== 0) {
-    // Claude prints JSON errors on stdout; prefer that message when present.
+    // Some CLIs print JSON errors on stdout; prefer that message when present.
     try {
       return parseCliOutput(stdout, config.outputFormat, config.label) as RunResult;
     } catch (err) {

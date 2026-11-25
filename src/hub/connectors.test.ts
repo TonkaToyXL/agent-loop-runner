@@ -121,24 +121,6 @@ describe("resolveConnector billing guard", () => {
 });
 
 describe("parseCliOutput", () => {
-  it("reads Claude Code JSON results, tokens, and model", () => {
-    const out = JSON.stringify({
-      type: "result",
-      is_error: false,
-      result: " hi ",
-      usage: { input_tokens: 5, output_tokens: 7, cache_read_input_tokens: 100 },
-      modelUsage: { "claude-x": {} },
-    });
-    expect(parseCliOutput(`noise\n${out}\n`, "claude-json", "Claude")).toEqual({ text: "hi", served: "claude-x", usage: { input: 105, output: 7 } });
-  });
-
-  it("surfaces Claude errors and unreadable output", () => {
-    expect(() => parseCliOutput(JSON.stringify({ is_error: true, result: "Not logged in" }), "claude-json", "Claude")).toThrow(
-      "Claude: Not logged in",
-    );
-    expect(() => parseCliOutput("plain text", "claude-json", "Claude")).toThrow("couldn't read");
-  });
-
   it("passes plain text through", () => {
     expect(parseCliOutput("  answer \n", "text", "Tool").text).toBe("answer");
     expect(() => parseCliOutput("   ", "text", "Tool")).toThrow("empty reply");

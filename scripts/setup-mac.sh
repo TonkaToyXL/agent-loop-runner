@@ -43,13 +43,9 @@ else
 fi
 
 title "Claude"
-if command -v claude >/dev/null; then
-  ok "Claude Code is installed. Claude joins the crew on your Claude plan."
-  say "If you haven't yet, run 'claude' once in Terminal and sign in with your Claude account."
-else
-  say "Claude Code isn't installed. To add Claude on your existing plan later:"
-  say "  npm install -g @anthropic-ai/claude-code   then run 'claude' once to sign in."
-fi
+say "Not connected, on purpose. Anthropic's terms for Pro/Max plans don't allow"
+say "bot- or script-driven access except with a pay-per-use API key, so Relay"
+say "leaves Claude out to keep your account safe. Keep using Claude in its own apps."
 
 bash scripts/setup-antigravity.sh || warn "Gemini setup didn't finish. Rerun with: npm run setup:antigravity"
 

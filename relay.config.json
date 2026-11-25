@@ -203,66 +203,6 @@
       "provider": ""
     },
     {
-      "id": "claude",
-      "name": "Claude",
-      "color": "#b69cff",
-      "tagline": "Careful thinker for writing, analysis, and code review",
-      "model": "sonnet",
-      "modelOptions": [
-        "sonnet",
-        "opus",
-        "haiku"
-      ],
-      "reasoning": "medium",
-      "skills": [
-        "analyze",
-        "analysis",
-        "review",
-        "explain",
-        "summarize",
-        "summary",
-        "edit",
-        "rewrite",
-        "compare",
-        "reason",
-        "essay",
-        "email",
-        "draft"
-      ],
-      "system": "You are Claude, the team's careful thinker. You are strongest at analysis, reviewing and improving work, clear writing, and explaining trade-offs. Answer directly; do not use tools unless asked.",
-      "connectors": [
-        {
-          "kind": "cli",
-          "label": "Claude Code (your plan)",
-          "billing": "subscription",
-          "command": "claude",
-          "args": [
-            "-p",
-            "--output-format",
-            "json",
-            "--model",
-            "{model}",
-            "--append-system-prompt",
-            "{system}"
-          ],
-          "outputFormat": "claude-json",
-          "timeoutMs": 600000
-        }
-      ],
-      "limits": {
-        "dailyRequests": 100,
-        "dailyTokens": 0,
-        "monthlyBudgetUsd": 0
-      },
-      "pricing": {
-        "inputPerMTok": 0,
-        "outputPerMTok": 0
-      },
-      "enabled": true,
-      "maxConcurrent": 1,
-      "optional": true
-    },
-    {
       "id": "cline",
       "name": "Cline",
       "color": "#7ee0a8",

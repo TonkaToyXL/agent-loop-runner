@@ -40,7 +40,6 @@ Relay uses the subscriptions and tools you already have. Pay-per-use APIs are **
 |---|---|---|
 | **Grok** | A Grok Bot routine with a Webhook trigger | Your Grok subscription (Grok Bot usage) |
 | **Hermes** | Hermes Agent's built-in API server on your Mac | Whatever Hermes already uses |
-| **Claude** | Claude Code signed in on your Mac (`claude -p`) | Your Claude plan |
 | **Muse** | Muse Spark 1.3 through ClinePass | Your ClinePass ($9.99/mo flat). Without ClinePass, Muse is off: Meta's own API is pay-per-use, and the Muse app can't be controlled by other apps. |
 | **Gemini** | Google's Antigravity CLI (`agy -p`), run unmodified on your Mac | Your Google AI Pro plan. Opt-in; see below. |
 | **Cline** | Open models (Kimi K3.1 Pro, GLM 5.3, DeepSeek, Qwen…) through ClinePass | Your ClinePass |
@@ -68,7 +67,7 @@ Once connected, Hermes' card shows online/offline, the reasoning level is sent w
 
 **Gemini (Google AI Pro).** Gemini CLI stopped serving AI Pro accounts in June 2026; Google's Antigravity CLI replaced it. `npm run setup:antigravity` turns Gemini on after you confirm. Relay only runs the official `agy` command in headless mode from an empty folder with its sandbox on, and never reads your Google sign-in. Antigravity's terms forbid third-party tools that use your Antigravity login (Google has banned accounts for proxies that do), so never point other tools at it. A reply on Google's developer forum says scripted `agy -p` runs under your own account are allowed, but the terms don't say so outright; opt in only if you're comfortable with that.
 
-**Claude.** If Claude Code is installed and signed in (`claude` once in Terminal), Claude joins the crew automatically and runs on your Claude plan. Pick `sonnet`, `opus`, or `haiku` in its editor.
+**Claude (not included).** Anthropic's Consumer Terms for Free, Pro, and Max plans prohibit accessing Claude "through automated or non-human means, whether through a bot, script, or otherwise" except with an API key or where Anthropic explicitly permits it, and Claude Code's legal page says plan sign-in is for ordinary, individual use. A bot-driven crew isn't clearly covered, so Relay doesn't run Claude on a subscription. The only clearly allowed route is a pay-per-use Anthropic API key.
 
 **Other agents.** Add an entry to `relay.config.json` with an `openai` connector (any OpenAI-compatible URL) or a `cli` connector (a local command that takes the prompt on stdin). Set `reasoningParam: "reasoning_effort"` on an `openai` connector only if that model accepts it.
 
