@@ -35,39 +35,35 @@ function characterPortraitSvg(id, working = false, name = "?", color = "var(--ac
     case "grok":
       return `<svg class="${cls}" viewBox="0 0 80 80" aria-hidden="true">
         <rect width="80" height="80" fill="url(#avBgGrok)"/>
+        <g class="bg-spin">
+          <circle cx="40" cy="36" r="28" fill="none" stroke="#5ee0ff" stroke-opacity="${working ? 0.42 : 0.2}" stroke-width="1.2" stroke-dasharray="6 7"/>
+          <circle cx="68" cy="36" r="2" fill="#5ee0ff" opacity="${working ? 1 : 0.75}"/>
+        </g>
         ${working ? `
-          <circle class="radar-ring" cx="40" cy="36" r="24" fill="none" stroke="#5ee0ff" stroke-width="1.3"/>
-          <circle class="radar-ring r2" cx="40" cy="36" r="24" fill="none" stroke="#5ee0ff" stroke-width="1"/>
-        ` : `<circle cx="40" cy="36" r="27" fill="none" stroke="#5ee0ff" stroke-opacity="0.14" stroke-width="1"/>
-          <circle cx="40" cy="36" r="19" fill="none" stroke="#5ee0ff" stroke-opacity="0.12" stroke-width="1"/>`}
+          <circle class="radar-ring" cx="40" cy="36" r="23" fill="none" stroke="#5ee0ff" stroke-width="1.5"/>
+          <circle class="radar-ring r2" cx="40" cy="36" r="23" fill="none" stroke="#5ee0ff" stroke-width="1.1"/>
+        ` : `<circle cx="40" cy="36" r="19" fill="none" stroke="#5ee0ff" stroke-opacity="0.15" stroke-width="1"/>`}
         <g class="char-body">
-          <!-- Tech collar & shoulders -->
           <path d="M13 80 C15 62, 26 57, 40 57 C54 57, 65 62, 67 80 Z" fill="url(#avSuit)"/>
-          <path d="M27 57 L34 65 L40 62 L46 65 L53 57" fill="none" stroke="#5ee0ff" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" opacity="${working ? 1 : 0.65}"/>
+          <path d="M27 57 L34 65 L40 62 L46 65 L53 57" fill="none" stroke="#5ee0ff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" opacity="${working ? 1 : 0.78}"/>
           <rect x="34" y="48" width="12" height="12" rx="5" fill="#c79578"/>
-          <!-- Head -->
           <path d="M25 32 C25 20, 31 15, 40 15 C49 15, 55 20, 55 32 C55 45, 48 53, 40 53 C32 53, 25 45, 25 32 Z" fill="url(#avSkinCool)"/>
-          <!-- Swept dark hair -->
           <path d="M23 32 C22 18, 30 11, 41 11 C52 11, 58 18, 57 32 C55 24, 50 20, 42 20 C35 20, 30 22, 25 27 Z" fill="#1e222d"/>
-          <path d="M31 14 C37 12, 46 13, 52 18" fill="none" stroke="#5ee0ff" stroke-opacity="${working ? 0.55 : 0.22}" stroke-width="1.4" stroke-linecap="round"/>
-          <!-- Brows -->
-          <path d="M29 30 Q33 ${working ? 28.5 : 29} 37 30" fill="none" stroke="#222531" stroke-width="1.8" stroke-linecap="round"/>
-          <path d="M43 30 Q47 ${working ? 28.5 : 29} 51 30" fill="none" stroke="#222531" stroke-width="1.8" stroke-linecap="round"/>
-          <!-- Eyes -->
+          <path d="M31 14 C37 12, 46 13, 52 18" fill="none" stroke="#5ee0ff" stroke-opacity="${working ? 0.72 : 0.35}" stroke-width="1.6" stroke-linecap="round"/>
+          <path d="M29 30 Q33 ${working ? 28.4 : 29} 37 30" fill="none" stroke="#222531" stroke-width="1.8" stroke-linecap="round"/>
+          <path d="M43 30 Q47 ${working ? 28.4 : 29} 51 30" fill="none" stroke="#222531" stroke-width="1.8" stroke-linecap="round"/>
           <g class="${working ? "eyes-scan" : "eyes-idle"}">
             <ellipse cx="33.5" cy="35" rx="2.3" ry="${working ? 2.1 : 2.5}" fill="#0f1822"/>
             <ellipse cx="46.5" cy="35" rx="2.3" ry="${working ? 2.1 : 2.5}" fill="#0f1822"/>
-            <circle cx="34.2" cy="34.2" r="0.9" fill="#8cf0ff"/>
-            <circle cx="47.2" cy="34.2" r="0.9" fill="#8cf0ff"/>
+            <circle cx="34.2" cy="34.2" r="0.95" fill="#8cf0ff"/>
+            <circle cx="47.2" cy="34.2" r="0.95" fill="#8cf0ff"/>
           </g>
-          <!-- Electric cyan AR visor -->
           <path d="M24 32.5 C24 30.5, 26 29.5, 30 29.5 L50 29.5 C54 29.5, 56 30.5, 56 32.5 L54.5 38.5 C53.8 40.5, 51 41.2, 46.5 40.8 L42.5 39.2 C41 38.6, 39 38.6, 37.5 39.2 L33.5 40.8 C29 41.2, 26.2 40.5, 25.5 38.5 Z"
-            fill="url(#avVisorCyan)" fill-opacity="${working ? 0.72 : 0.44}" stroke="#5ee0ff" stroke-width="${working ? 1.7 : 1.2}"/>
+            fill="url(#avVisorCyan)" fill-opacity="${working ? 0.74 : 0.46}" stroke="#5ee0ff" stroke-width="${working ? 1.8 : 1.3}"/>
           ${working
-            ? `<rect class="visor-beam" x="37" y="30.5" width="6" height="9.2" rx="2" fill="#e6fcff" opacity="0.9"/>`
-            : `<path d="M28 32.2 L35 32.2" stroke="#e6fcff" stroke-opacity="0.55" stroke-width="1.3" stroke-linecap="round"/>`}
-          <!-- Mouth -->
-          <path d="${working ? "M35.5 45.8 Q40.5 48.2 45 45.2" : "M36 46 Q40 48 44 46"}" fill="none" stroke="#8b5a46" stroke-width="1.6" stroke-linecap="round"/>
+            ? `<rect class="visor-beam" x="37" y="30.4" width="6.5" height="9.4" rx="2" fill="#e6fcff" opacity="0.95"/>`
+            : `<rect class="visor-sheen" x="36" y="30.5" width="8" height="9.2" rx="2" fill="url(#avGlint)"/>`}
+          <path d="${working ? "M35.5 45.8 Q40.5 48.4 45 45.2" : "M36 46 Q40 48.2 44 46"}" fill="none" stroke="#8b5a46" stroke-width="1.6" stroke-linecap="round"/>
         </g>
       </svg>`;
 
@@ -75,80 +71,71 @@ function characterPortraitSvg(id, working = false, name = "?", color = "var(--ac
       return `<svg class="${cls}" viewBox="0 0 80 80" aria-hidden="true">
         <rect width="80" height="80" fill="url(#avBgMuse)"/>
         ${working ? `
-          <g fill="#ffb547">
-            <circle class="spark" cx="17" cy="48" r="2.2" fill="#ff6f61"/>
-            <circle class="spark s2" cx="63" cy="44" r="2.4" fill="#ffb547"/>
-            <path class="spark s3" d="M22 25 L23.5 21 L25 25 L29 26.5 L25 28 L23.5 32 L22 28 L18 26.5 Z" fill="#ff9b8a"/>
-            <path class="spark s4" d="M58 22 L59.3 18.5 L60.6 22 L64 23.3 L60.6 24.6 L59.3 28 L58 24.6 L54.6 23.3 Z" fill="#ffd166"/>
+          <g>
+            <circle class="spark" cx="16" cy="50" r="2.4" fill="#ff6f61"/>
+            <circle class="spark s2" cx="64" cy="46" r="2.5" fill="#ffb547"/>
+            <path class="spark s3" d="M21 26 L22.6 21.5 L24.2 26 L28.5 27.6 L24.2 29.2 L22.6 33.5 L21 29.2 L16.5 27.6 Z" fill="#ff9b8a"/>
+            <path class="spark s4" d="M58 23 L59.5 18.8 L61 23 L65 24.5 L61 26 L59.5 30 L58 26 L54 24.5 Z" fill="#ffd166"/>
           </g>
-        ` : `<circle cx="19" cy="46" r="1.4" fill="#ff9b8a" opacity="0.45"/>
-          <circle cx="61" cy="36" r="1.6" fill="#ffb547" opacity="0.4"/>
-          <circle cx="57" cy="52" r="1.1" fill="#ff6f61" opacity="0.4"/>`}
+        ` : `<g>
+          <circle class="spark-idle" cx="18" cy="48" r="1.8" fill="#ff9b8a"/>
+          <circle class="spark-idle s2" cx="62" cy="40" r="2" fill="#ffb547"/>
+          <circle class="spark-idle s3" cx="56" cy="55" r="1.5" fill="#ff6f61"/>
+        </g>`}
         <g class="char-body">
-          <!-- Flowing hair back -->
           <path d="M21 34 C20 18, 28 11, 40 11 C52 11, 60 18, 59 35 C60 44, 57 52, 53 56 L27 56 C23 52, 20 44, 21 34 Z" fill="#231c26"/>
-          <!-- Sculptural jacket -->
           <path d="M13 80 C16 61, 27 56, 40 56 C53 56, 64 61, 67 80 Z" fill="url(#avSuit)"/>
-          <path d="M24 62 C30 58, 34 62, 40 68 C46 62, 50 58, 56 62" fill="none" stroke="#ff6f61" stroke-width="1.6" stroke-linecap="round" opacity="${working ? 1 : 0.7}"/>
-          <!-- Neck & glowing prism pendant -->
+          <path d="M24 62 C30 58, 34 62, 40 68 C46 62, 50 58, 56 62" fill="none" stroke="#ff6f61" stroke-width="1.7" stroke-linecap="round" opacity="${working ? 1 : 0.78}"/>
           <rect x="34.5" y="48" width="11" height="12" rx="5" fill="#d79b79"/>
-          <polygon class="prism-glow" points="40,62 44.5,68.5 40,73 35.5,68.5" fill="url(#avCoral)" stroke="#ffe0d6" stroke-width="0.9"/>
-          <!-- Face -->
+          <polygon class="prism-glow" points="40,61.5 45,68.5 40,73.5 35,68.5" fill="url(#avCoral)" stroke="#ffe5dc" stroke-width="1"/>
           <path d="M26 32 C26 21, 32 16, 40 16 C48 16, 54 21, 54 32 C54 44, 47.5 52, 40 52 C32.5 52, 26 44, 26 32 Z" fill="url(#avSkinWarm)"/>
-          <!-- Swept fringe -->
           <path d="M24 31 C25 18, 34 12, 45 14 C52 15, 56 21, 56 29 C51 22, 45 20, 38 22 C33 23, 28 26, 24 31 Z" fill="#2a202e"/>
-          <path d="M30 16 C37 13, 47 14, 52 20" fill="none" stroke="#ff9b8a" stroke-opacity="${working ? 0.65 : 0.28}" stroke-width="1.3" stroke-linecap="round"/>
-          <!-- Brows & expressive eyes -->
-          <path d="M30 30 Q33.5 ${working ? 27.8 : 29} 37 30" fill="none" stroke="#2c202c" stroke-width="1.5" stroke-linecap="round"/>
-          <path d="M43 30 Q46.5 ${working ? 27.8 : 29} 50 30" fill="none" stroke="#2c202c" stroke-width="1.5" stroke-linecap="round"/>
+          <path d="M30 16 C37 13, 47 14, 52 20" fill="none" stroke="#ff9b8a" stroke-opacity="${working ? 0.78 : 0.4}" stroke-width="1.5" stroke-linecap="round"/>
+          <path d="M30 30 Q33.5 ${working ? 27.6 : 29} 37 30" fill="none" stroke="#2c202c" stroke-width="1.5" stroke-linecap="round"/>
+          <path d="M43 30 Q46.5 ${working ? 27.6 : 29} 50 30" fill="none" stroke="#2c202c" stroke-width="1.5" stroke-linecap="round"/>
           <g class="eyes-idle">
             <ellipse cx="33.5" cy="35" rx="${working ? 2.8 : 2.5}" ry="${working ? 3 : 2.6}" fill="#221822"/>
             <ellipse cx="46.5" cy="35" rx="${working ? 2.8 : 2.5}" ry="${working ? 3 : 2.6}" fill="#221822"/>
-            <circle cx="34.5" cy="34" r="1.1" fill="${working ? "#ffd166" : "#fff2ed"}"/>
-            <circle cx="47.5" cy="34" r="1.1" fill="${working ? "#ffd166" : "#fff2ed"}"/>
+            <circle cx="34.5" cy="34" r="1.15" fill="${working ? "#ffd166" : "#fff2ed"}"/>
+            <circle cx="47.5" cy="34" r="1.15" fill="${working ? "#ffd166" : "#fff2ed"}"/>
           </g>
-          <!-- Warm cheeks & smile -->
-          <ellipse cx="29.5" cy="39.5" rx="2.6" ry="1.3" fill="#ff6f61" opacity="${working ? 0.38 : 0.22}"/>
-          <ellipse cx="50.5" cy="39.5" rx="2.6" ry="1.3" fill="#ff6f61" opacity="${working ? 0.38 : 0.22}"/>
-          <path d="${working ? "M34.5 44.5 Q40 49.5 45.5 44.5" : "M35.5 45 Q40 48.2 44.5 45"}" fill="none" stroke="#9e5348" stroke-width="1.7" stroke-linecap="round"/>
+          <ellipse cx="29.5" cy="39.5" rx="2.8" ry="1.4" fill="#ff6f61" opacity="${working ? 0.42 : 0.24}"/>
+          <ellipse cx="50.5" cy="39.5" rx="2.8" ry="1.4" fill="#ff6f61" opacity="${working ? 0.42 : 0.24}"/>
+          <path d="${working ? "M34.2 44.5 Q40 49.8 45.8 44.5" : "M35.5 45 Q40 48.3 44.5 45"}" fill="none" stroke="#9e5348" stroke-width="1.7" stroke-linecap="round"/>
         </g>
       </svg>`;
 
     case "hermes":
       return `<svg class="${cls}" viewBox="0 0 80 80" aria-hidden="true">
         <rect width="80" height="80" fill="url(#avBgHermes)"/>
-        <circle cx="40" cy="37" r="28" fill="none" stroke="#f6c445" stroke-opacity="${working ? 0.35 : 0.14}" stroke-width="1.1" stroke-dasharray="${working ? "6 6" : "2 5"}"/>
+        <g class="bg-spin">
+          <circle cx="40" cy="37" r="29" fill="none" stroke="#f6c445" stroke-opacity="${working ? 0.55 : 0.22}" stroke-width="1.3" stroke-dasharray="10 8"/>
+          <circle cx="40" cy="8" r="2.1" fill="#ffe28a" opacity="${working ? 1 : 0.7}"/>
+        </g>
         <g class="char-body">
-          <!-- Golden winged helm crests -->
-          <g class="${working ? "wing" : ""}">
-            <path d="M23 32 L12 22 L17 29 L11 28 L19 35 L14 36 L23 38 Z" fill="url(#avGold)" opacity="${working ? 1 : 0.82}"/>
-            <path d="M57 32 L68 22 L63 29 L69 28 L61 35 L66 36 L57 38 Z" fill="url(#avGold)" opacity="${working ? 1 : 0.82}"/>
+          <g class="${working ? "wing" : "wing-idle"}">
+            <path d="M23 32 L11 21 L17 29 L10 28 L19 35 L13.5 36.5 L23 38 Z" fill="url(#avGold)"/>
+            <path d="M57 32 L69 21 L63 29 L70 28 L61 35 L66.5 36.5 L57 38 Z" fill="url(#avGold)"/>
           </g>
-          <!-- Operator jacket -->
           <path d="M13 80 C16 61, 27 56, 40 56 C53 56, 64 61, 67 80 Z" fill="url(#avSuit)"/>
-          <path d="M29 58 L40 67 L51 58" fill="none" stroke="#f6c445" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
-          <path d="M35 68 L40 72 L45 68" fill="none" stroke="#f6c445" stroke-width="1.4" stroke-linecap="round" opacity="0.7"/>
+          <path d="M29 58 L40 67 L51 58" fill="none" stroke="#f6c445" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M35 68 L40 72 L45 68" fill="none" stroke="#ffe28a" stroke-width="1.5" stroke-linecap="round" opacity="0.82"/>
           <rect x="34" y="48" width="12" height="12" rx="5" fill="#c7956d"/>
-          <!-- Head -->
           <path d="M25 32 C25 20, 31 15, 40 15 C49 15, 55 20, 55 32 C55 44.5, 48 52.5, 40 52.5 C32 52.5, 25 44.5, 25 32 Z" fill="url(#avSkinOlive)"/>
-          <!-- Clean styled hair -->
           <path d="M23.5 31 C23 18, 30 11, 40 11 C50 11, 57 18, 56.5 31 C53 23, 47 19.5, 40 19.5 C33 19.5, 27 23, 23.5 31 Z" fill="#231e19"/>
-          <!-- Brows & eyes -->
-          <path d="M29.5 30 Q33.5 ${working ? 29.2 : 29} 37 30.2" fill="none" stroke="#261e16" stroke-width="1.7" stroke-linecap="round"/>
-          <path d="M43 30.2 Q46.5 ${working ? 29.2 : 29} 50.5 30" fill="none" stroke="#261e16" stroke-width="1.7" stroke-linecap="round"/>
+          <path d="M29.5 30 Q33.5 ${working ? 29 : 29} 37 30.2" fill="none" stroke="#261e16" stroke-width="1.7" stroke-linecap="round"/>
+          <path d="M43 30.2 Q46.5 ${working ? 29 : 29} 50.5 30" fill="none" stroke="#261e16" stroke-width="1.7" stroke-linecap="round"/>
           <g class="${working ? "eyes-scan" : "eyes-idle"}">
             <ellipse cx="33.5" cy="35" rx="2.4" ry="2.4" fill="#1e1812"/>
             <ellipse cx="46.5" cy="35" rx="2.4" ry="2.4" fill="#1e1812"/>
-            <circle cx="34.3" cy="34.2" r="0.9" fill="#ffe28a"/>
-            <circle cx="47.3" cy="34.2" r="0.9" fill="#ffe28a"/>
+            <circle cx="34.3" cy="34.2" r="0.95" fill="#ffe28a"/>
+            <circle cx="47.3" cy="34.2" r="0.95" fill="#ffe28a"/>
           </g>
           ${working ? `
-            <!-- Active golden HUD band -->
-            <rect x="23.5" y="30.5" width="33" height="9" rx="4.5" fill="url(#avVisorGold)" fill-opacity="0.48" stroke="#f6c445" stroke-width="1.3"/>
-            <line class="hud-tick" x1="27" y1="35" x2="53" y2="35" stroke="#fff4cc" stroke-width="1.2" stroke-dasharray="4 4"/>
+            <rect x="23.5" y="30.5" width="33" height="9" rx="4.5" fill="url(#avVisorGold)" fill-opacity="0.52" stroke="#f6c445" stroke-width="1.4"/>
+            <line class="hud-tick" x1="27" y1="35" x2="53" y2="35" stroke="#fff4cc" stroke-width="1.4" stroke-dasharray="4 4"/>
           ` : ""}
-          <!-- Mouth -->
-          <path d="${working ? "M35.5 45.8 Q40 47.4 44.5 45.4" : "M35.5 45.5 Q40 48 44.5 45.5"}" fill="none" stroke="#8a5a3a" stroke-width="1.6" stroke-linecap="round"/>
+          <path d="${working ? "M35.5 45.8 Q40 47.6 44.5 45.4" : "M35.5 45.5 Q40 48.1 44.5 45.5"}" fill="none" stroke="#8a5a3a" stroke-width="1.6" stroke-linecap="round"/>
         </g>
       </svg>`;
 
@@ -156,75 +143,65 @@ function characterPortraitSvg(id, working = false, name = "?", color = "var(--ac
       return `<svg class="${cls}" viewBox="0 0 80 80" aria-hidden="true">
         <rect width="80" height="80" fill="url(#avBgCline)"/>
         <g class="char-body">
-          <!-- Tech hoodie shoulders -->
           <path d="M12 80 C14 60, 25 54, 40 54 C55 54, 66 60, 68 80 Z" fill="url(#avSuit)"/>
-          <path d="M25 56 C27 65, 32 70, 40 70 C48 70, 53 65, 55 56" fill="none" stroke="#7ee0a8" stroke-width="1.6" opacity="${working ? 1 : 0.65}"/>
-          <!-- Outer cyber-hoodie & sleek bot shell -->
-          <path d="M19 42 C19 20, 27 12, 40 12 C53 12, 61 20, 61 42 C61 52, 54 58, 40 58 C26 58, 19 52, 19 42 Z" fill="url(#avBotShell)" stroke="#7ee0a8" stroke-opacity="${working ? 0.72 : 0.3}" stroke-width="1.4"/>
-          <!-- Dark glossy visor screen -->
-          <rect x="24" y="23" width="32" height="26" rx="10" fill="#0d1413" stroke="#7ee0a8" stroke-opacity="${working ? 0.85 : 0.35}" stroke-width="1.2"/>
+          <path d="M25 56 C27 65, 32 70, 40 70 C48 70, 53 65, 55 56" fill="none" stroke="#7ee0a8" stroke-width="1.7" opacity="${working ? 1 : 0.72}"/>
+          <path d="M19 42 C19 20, 27 12, 40 12 C53 12, 61 20, 61 42 C61 52, 54 58, 40 58 C26 58, 19 52, 19 42 Z" fill="url(#avBotShell)" stroke="#7ee0a8" stroke-opacity="${working ? 0.85 : 0.38}" stroke-width="1.5"/>
+          <rect x="24" y="23" width="32" height="26" rx="10" fill="#0c1513" stroke="#7ee0a8" stroke-opacity="${working ? 0.92 : 0.45}" stroke-width="1.3"/>
           ${working ? `
-            <!-- Scrolling code lines inside visor -->
-            <g stroke="#7ee0a8" stroke-opacity="0.55" stroke-width="1.4" stroke-linecap="round">
-              <line class="code-line" x1="28" y1="28" x2="35" y2="28"/>
-              <line class="code-line c2" x1="45" y1="28" x2="52" y2="28"/>
-              <line class="code-line c3" x1="29" y1="44" x2="51" y2="44"/>
+            <g stroke="#7ee0a8" stroke-opacity="0.72" stroke-width="1.5" stroke-linecap="round">
+              <line class="code-line" x1="28" y1="28" x2="36" y2="28"/>
+              <line class="code-line c2" x1="44" y1="28" x2="52" y2="28"/>
+              <line class="code-line c3" x1="29" y1="44.5" x2="51" y2="44.5"/>
             </g>
-            <!-- Intense angled focused mint eyes -->
-            <path d="M29 33 L36 35.5 L29 38" fill="none" stroke="#7ee0a8" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
-            <path d="M51 33 L44 35.5 L51 38" fill="none" stroke="#7ee0a8" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
-            <circle cx="40" cy="41.5" r="1.4" fill="#c8ffdf"/>
+            <path d="M29 33 L36 35.8 L29 38.6" fill="none" stroke="#7ee0a8" stroke-width="2.7" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M51 33 L44 35.8 L51 38.6" fill="none" stroke="#7ee0a8" stroke-width="2.7" stroke-linecap="round" stroke-linejoin="round"/>
+            <circle cx="40" cy="41.5" r="1.5" fill="#d9ffea"/>
           ` : `
-            <!-- Friendly blinking glowing mint eyes -->
             <g class="eyes-glance">
-              <rect x="30.5" y="31.5" width="5.2" height="7.5" rx="2.6" fill="#7ee0a8"/>
-              <rect x="44.3" y="31.5" width="5.2" height="7.5" rx="2.6" fill="#7ee0a8"/>
-              <circle cx="32.2" cy="33.5" r="1.1" fill="#eafff3"/>
-              <circle cx="46" cy="33.5" r="1.1" fill="#eafff3"/>
+              <rect x="30.2" y="31.2" width="5.4" height="7.8" rx="2.7" fill="#7ee0a8"/>
+              <rect x="44.4" y="31.2" width="5.4" height="7.8" rx="2.7" fill="#7ee0a8"/>
+              <circle cx="32.1" cy="33.3" r="1.2" fill="#eafff3"/>
+              <circle cx="46.3" cy="33.3" r="1.2" fill="#eafff3"/>
             </g>
-            <path d="M36.5 42.5 Q40 44.8 43.5 42.5" fill="none" stroke="#7ee0a8" stroke-width="1.6" stroke-linecap="round" opacity="0.85"/>
+            <path d="M36.5 42.5 Q40 44.8 43.5 42.5" fill="none" stroke="#7ee0a8" stroke-width="1.6" stroke-linecap="round" opacity="0.88"/>
+            <rect class="cursor-blink" x="48" y="43.5" width="4" height="1.8" rx="0.8" fill="#7ee0a8"/>
           `}
-          <!-- Ear nodes -->
-          <rect x="16" y="31" width="3.5" height="11" rx="1.8" fill="#7ee0a8" opacity="${working ? 0.95 : 0.55}"/>
-          <rect x="60.5" y="31" width="3.5" height="11" rx="1.8" fill="#7ee0a8" opacity="${working ? 0.95 : 0.55}"/>
+          <rect class="ear-pulse" x="15.5" y="31" width="3.8" height="11" rx="1.9" fill="#7ee0a8"/>
+          <rect class="ear-pulse" x="60.7" y="31" width="3.8" height="11" rx="1.9" fill="#7ee0a8"/>
         </g>
       </svg>`;
 
     case "zen":
       return `<svg class="${cls}" viewBox="0 0 80 80" aria-hidden="true">
         <rect width="80" height="80" fill="url(#avBgZen)"/>
-        <circle cx="40" cy="36" r="27" fill="none" stroke="#b78bff" stroke-opacity="${working ? 0.45 : 0.16}" stroke-width="1.2" stroke-dasharray="${working ? "8 5" : "2 6"}"/>
+        <g class="bg-spin">
+          <circle cx="40" cy="36" r="28" fill="none" stroke="#b78bff" stroke-opacity="${working ? 0.55 : 0.22}" stroke-width="1.3" stroke-dasharray="8 6"/>
+        </g>
+        <circle class="orb-a" cx="15" cy="35" r="${working ? 3.2 : 2.6}" fill="url(#avOrbViolet)"/>
+        <circle class="orb-b" cx="65" cy="37" r="${working ? 3.2 : 2.6}" fill="url(#avOrbViolet)"/>
         ${working ? `
-          <circle class="spark" cx="16" cy="40" r="2.2" fill="#d8b8ff"/>
-          <circle class="spark s2" cx="64" cy="36" r="2.3" fill="#b78bff"/>
-          <circle class="spark s3" cx="22" cy="20" r="1.8" fill="#e9d5ff"/>
-          <circle class="spark s4" cx="59" cy="22" r="1.8" fill="#c084fc"/>
-        ` : `<circle cx="18" cy="34" r="1.5" fill="#d8b8ff" opacity="0.45"/>
-          <circle cx="62" cy="34" r="1.5" fill="#b78bff" opacity="0.45"/>`}
+          <circle class="spark" cx="20" cy="22" r="2" fill="#e9d5ff"/>
+          <circle class="spark s2" cx="60" cy="22" r="2.2" fill="#c084fc"/>
+        ` : ""}
         <g class="char-body">
-          <!-- High minimalist strategist collar -->
           <path d="M13 80 C16 60, 27 55, 40 55 C53 55, 64 60, 67 80 Z" fill="url(#avSuit)"/>
-          <path d="M27 56 L40 69 L53 56" fill="none" stroke="url(#avViolet)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
-          <circle class="prism-glow" cx="40" cy="69" r="2.4" fill="#d8b8ff"/>
+          <path d="M27 56 L40 69 L53 56" fill="none" stroke="url(#avViolet)" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>
+          <circle class="prism-glow" cx="40" cy="69" r="2.6" fill="#e9d5ff"/>
           <rect x="34.5" y="48" width="11" height="11" rx="5" fill="#cfa487"/>
-          <!-- Head -->
           <path d="M25.5 32 C25.5 20, 31.5 15, 40 15 C48.5 15, 54.5 20, 54.5 32 C54.5 44, 48 52, 40 52 C32 52, 25.5 44, 25.5 32 Z" fill="url(#avSkinCool)"/>
-          <!-- Clean futuristic hair + forehead focus gem -->
           <path d="M24 31 C24 18, 31 11, 40 11 C49 11, 56 18, 56 31 C52 22, 46 19, 40 19 C34 19, 28 22, 24 31 Z" fill="#1c1829"/>
-          <polygon points="40,21.5 42.2,24.5 40,27.5 37.8,24.5" fill="url(#avViolet)" opacity="${working ? 1 : 0.78}"/>
-          <!-- Brows & eyes -->
+          <polygon class="prism-glow" points="40,21.2 42.5,24.5 40,27.8 37.5,24.5" fill="url(#avViolet)"/>
           <path d="M30 30.5 Q33.5 ${working ? 29 : 29.8} 37 30.5" fill="none" stroke="#241c33" stroke-width="1.5" stroke-linecap="round"/>
           <path d="M43 30.5 Q46.5 ${working ? 29 : 29.8} 50 30.5" fill="none" stroke="#241c33" stroke-width="1.5" stroke-linecap="round"/>
           <g class="${working ? "eyes-scan" : "eyes-idle"}">
             <ellipse cx="33.5" cy="35" rx="2.4" ry="2.4" fill="#181226"/>
             <ellipse cx="46.5" cy="35" rx="2.4" ry="2.4" fill="#181226"/>
-            <circle cx="34.3" cy="34.2" r="1" fill="${working ? "#e9d5ff" : "#d8b8ff"}"/>
-            <circle cx="47.3" cy="34.2" r="1" fill="${working ? "#e9d5ff" : "#d8b8ff"}"/>
+            <circle cx="34.3" cy="34.2" r="1.05" fill="#f3e8ff"/>
+            <circle cx="47.3" cy="34.2" r="1.05" fill="#f3e8ff"/>
           </g>
           ${working ? `
-            <path class="hud-tick" d="M24 35 Q40 31 56 35" fill="none" stroke="#d8b8ff" stroke-width="1.3" stroke-dasharray="4 4"/>
+            <path class="hud-tick" d="M24 35 Q40 30.5 56 35" fill="none" stroke="#e9d5ff" stroke-width="1.5" stroke-dasharray="4 4"/>
           ` : ""}
-          <!-- Calm focused expression -->
           <path d="${working ? "M36 45.6 Q40 47.4 44 45.6" : "M36 45.5 Q40 47.8 44 45.5"}" fill="none" stroke="#8b6254" stroke-width="1.5" stroke-linecap="round"/>
         </g>
       </svg>`;
@@ -270,11 +247,12 @@ const ago = (t) => {
 const clock = (iso) => new Date(iso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 const think = (level) => {
   if (level === "auto") {
-    return `<span class="think" aria-hidden="true"><s class="on"></s><s class="on"></s><s></s><s class="on"></s></span>`;
+    return `<span class="think auto" aria-hidden="true"><s></s><s></s><s></s><s></s></span>`;
   }
   const n = Math.max(0, ["off", "low", "medium", "high", "max"].indexOf(level));
   return `<span class="think" aria-hidden="true">${[1, 2, 3, 4].map((i) => `<s class="${i <= n ? "on" : ""}"></s>`).join("")}</span>`;
 };
+const levelLabel = (lvl) => (lvl === "auto" ? "Auto" : lvl);
 const CHANNEL_LABEL = { web: "web", telegram: "telegram", imessage: "imessage", system: "hub" };
 
 function shortModel(id, a) {
@@ -477,12 +455,20 @@ function seedHandoffs(tasks) {
 }
 
 let source = null;
+let uiVersion = null;
 function connect() {
   source?.close();
   const qs = S.token ? `?token=${encodeURIComponent(S.token)}` : "";
   source = new EventSource(`/api/events${qs}`);
   let first = true;
-  source.addEventListener("hello", () => {
+  source.addEventListener("hello", (e) => {
+    try {
+      const data = JSON.parse(e.data || "{}");
+      if (data.uiVersion) {
+        if (uiVersion && uiVersion !== data.uiVersion) return location.reload();
+        uiVersion = data.uiVersion;
+      }
+    } catch {}
     if (!first) api("/api/state").then(applySnapshot).catch(() => {});
     first = false;
   });
@@ -806,7 +792,7 @@ function renderCrew() {
         : `<div class="model-static" title="${esc(a.model)}">${esc(shortModel(a.model, a))}</div>`;
 
       const reasoningControl = `<select class="inline-select reasoning" data-reasoning-for="${a.id}" aria-label="Reasoning level for ${esc(a.name)}">
-        ${LEVELS.map((lvl) => `<option value="${lvl}" ${a.reasoning === lvl ? "selected" : ""}>${lvl}</option>`).join("")}
+        ${LEVELS.map((lvl) => `<option value="${lvl}" ${a.reasoning === lvl ? "selected" : ""}>${levelLabel(lvl)}</option>`).join("")}
       </select>`;
 
       const reqCap = a.limits.dailyRequests;
@@ -1202,7 +1188,7 @@ function renderActiveBar() {
   const modelSel = opts.length > 1
     ? `<select class="inline-select" data-model-for="${a.id}" style="--c:${a.color}" aria-label="Model for ${esc(a.name)}">${modelOptionsMarkup(a)}</select>`
     : `<span class="chip">${esc(shortModel(a.model, a))}</span>`;
-  const rSel = `<select class="inline-select reasoning" data-reasoning-for="${a.id}" style="--c:${a.color}" aria-label="Reasoning for ${esc(a.name)}">${LEVELS.map((l) => `<option value="${l}" ${a.reasoning === l ? "selected" : ""}>${l}</option>`).join("")}</select>`;
+  const rSel = `<select class="inline-select reasoning" data-reasoning-for="${a.id}" style="--c:${a.color}" aria-label="Reasoning for ${esc(a.name)}">${LEVELS.map((l) => `<option value="${l}" ${a.reasoning === l ? "selected" : ""}>${levelLabel(l)}</option>`).join("")}</select>`;
   bar.innerHTML = `<div class="active-bar-who">
       <span class="dot" style="--c:${a.color}"></span>
       <b>${esc(a.name)}</b>

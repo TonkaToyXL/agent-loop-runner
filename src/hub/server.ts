@@ -1,4 +1,5 @@
 import { timingSafeEqual } from "node:crypto";
+import { statSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { extname, join, normalize, resolve, sep } from "node:path";
@@ -63,6 +64,16 @@ export interface ServerOptions {
   imessage?: IMessageChannel;
 }
 
+function webAssetVersion(): string {
+  try {
+    const a = statSync(join(WEB_ROOT, "app.js")).mtimeMs;
+    const b = statSync(join(WEB_ROOT, "app.css")).mtimeMs;
+    return `${Math.floor(a)}-${Math.floor(b)}`;
+  } catch {
+    return "0";
+  }
+}
+
 export function createHubServer({ hub, token, imessage }: ServerOptions) {
   const authorized = (req: IncomingMessage, url: URL): boolean => {
     if (!token) return true;
@@ -111,7 +122,7 @@ export function createHubServer({ hub, token, imessage }: ServerOptions) {
             connection: "keep-alive",
             "x-accel-buffering": "no",
           });
-          res.write(`event: hello\ndata: {}\n\n`);
+          res.write(`event: hello\ndata: ${JSON.stringify({ uiVersion: webAssetVersion() })}\n\n`);
           const onEvent = (e: { type: string; data: unknown }) => res.write(`event: ${e.type}\ndata: ${JSON.stringify(e.data)}\n\n`);
           const ping = setInterval(() => res.write(`: ping\n\n`), 25_000);
           hub.bus.on("event", onEvent);
@@ -165,7 +176,7 @@ export function createHubServer({ hub, token, imessage }: ServerOptions) {
       if (!file.startsWith(WEB_ROOT + sep)) return send(res, 403, { error: "forbidden" });
       try {
         const data = await readFile(file);
-        res.writeHead(200, { "content-type": MIME[extname(file)] ?? "application/octet-stream", "cache-control": "no-cache" });
+        res.writeHead(200, { "content-type": MIME[extname(file)] ?? "application/octet-stream", "cache-control": "no-store" });
         res.end(data);
       } catch {
         send(res, 404, { error: "not found" });
