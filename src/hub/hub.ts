@@ -6,7 +6,7 @@ import { EventEmitter } from "node:events";
 import { join, resolve } from "node:path";
 import { isReasoning } from "./config.js";
 import { errorText, PublicError } from "./errors.js";
-import { checkHealth, coveredModel, fetchModelOptions, resolveConnector, runAgent, type DiscoveredModels, type Purpose } from "./connectors.js";
+import { checkHealth, coveredModel, fetchModelOptions, pickModelForTask, resolveConnector, runAgent, type DiscoveredModels, type Purpose } from "./connectors.js";
 import { ApprovalDesk, riskyAction, type Approval, type ApprovalRequest } from "./approvals.js";
 import { digestPrompt, fetchRecent, formatList, mailConfig, span } from "./mail/inbox.js";
 import {
@@ -587,8 +587,10 @@ export class Hub {
         if (!limit.ok) return { reply: `${target.name} hit its ${limit.reason}. Raise the limit or ask someone else.` };
         const task = this.submitDirect(cmd.agentId, cmd.text, origin, "explicit");
         const a = this.agent(task.agentId)!;
+        const picked = a.model === "auto" ? pickModelForTask(a, resolveConnector(a).config, cmd.text) : null;
+        const modelLabel = picked ? `auto → ${picked.model}` : a.model;
         if (a.actsInWorld && riskyAction(cmd.text)) return { reply: `🛡 ${a.name} needs your OK before starting this. Check for the Approve button.`, taskId: task.id };
-        return { reply: `→ ${a.name} is on it (${a.model} · ${a.reasoning}).`, taskId: task.id };
+        return { reply: `→ ${a.name} is on it (${modelLabel} · ${a.reasoning}).`, taskId: task.id };
       }
       case "auto": {
         const pool = this.routable();
@@ -596,8 +598,10 @@ export class Hub {
         const id = pickAgent(cmd.text, pool, fallback);
         const task = this.submitDirect(id, cmd.text, origin, "auto");
         const a = this.agent(task.agentId)!;
+        const picked = a.model === "auto" ? pickModelForTask(a, resolveConnector(a).config, cmd.text) : null;
+        const modelLabel = picked ? `auto → ${picked.model}` : a.model;
         if (a.actsInWorld && riskyAction(cmd.text)) return { reply: `🛡 Routed to ${a.name}, which needs your OK before starting. Check for the Approve button.`, taskId: task.id };
-        return { reply: `→ Routed to ${a.name} (${a.model} · ${a.reasoning}).`, taskId: task.id };
+        return { reply: `→ Routed to ${a.name} (${modelLabel} · ${a.reasoning}).`, taskId: task.id };
       }
       case "team": {
         const task = this.submitGoal(cmd.text, origin);
@@ -953,19 +957,21 @@ export class Hub {
       this.controllers.delete(task.id);
       throw this.fail(task, "blocked", `${agent.name}: ${latest.reason} while this was waiting.`);
     }
+    const autoPicked = agent.model === "auto" ? pickModelForTask(agent, resolveConnector(agent).config, prompt) : null;
+    const effectiveAgent = autoPicked && autoPicked.model !== agent.model ? { ...agent, model: autoPicked.model } : agent;
     this.inFlight.set(agent.id, (this.inFlight.get(agent.id) ?? 0) + 1);
     task.status = "running";
     task.startedAt = new Date().toISOString();
-    task.model = agent.model;
-    task.reasoning = agent.reasoning;
+    task.model = effectiveAgent.model;
+    task.reasoning = effectiveAgent.reasoning;
     this.touch(task);
     this.emitAgents();
 
     const started = Date.now();
     try {
-      const runner = agent;
+      const runner = effectiveAgent;
       const result = await runAgent({
-        agent,
+        agent: effectiveAgent,
         prompt,
         purpose,
         taskId: task.id,
@@ -976,18 +982,18 @@ export class Hub {
         ask: (q) => this.askOwner({ taskId: task.id, agentId: runner.id, agentName: runner.name, source: "agent", ...q }, task),
       });
       task.usage = result.usage;
-      task.servedModel = result.served;
-      task.costUsd = costOf(result.usage, agent.pricing);
+      task.servedModel = result.served ?? (autoPicked ? effectiveAgent.model : undefined);
+      task.costUsd = costOf(result.usage, effectiveAgent.pricing);
       task.result = result.text;
       task.status = "done";
-      this.record(task, agent, true, Date.now() - started);
+      this.record(task, effectiveAgent, true, Date.now() - started);
       if (result.rate) this.store.state.rates[agent.id] = result.rate;
       return result.text;
     } catch (err) {
       const message = errorText(err);
       task.status = controller.signal.aborted ? "cancelled" : "failed";
       task.error = message;
-      this.record(task, agent, false, Date.now() - started);
+      this.record(task, effectiveAgent, false, Date.now() - started);
       throw err;
     } finally {
       this.inFlight.set(agent.id, Math.max(0, (this.inFlight.get(agent.id) ?? 1) - 1));

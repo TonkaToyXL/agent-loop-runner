@@ -195,6 +195,16 @@ export function baseUrlOf(config: ConnectorConfig): string {
  */
 export function coveredModel(agent: AgentConfig, config: ConnectorConfig): { model: string; error?: string } {
   const model = config.model || agent.model;
+  if (model === "auto") {
+    const safe = safeAutoCandidates(agent, config);
+    if (!safe.length) {
+      return {
+        model,
+        error: `Auto model mode needs at least one model covered by ${config.label}${config.modelPrefix ? ` (${config.modelPrefix}*)` : ""}.`,
+      };
+    }
+    return { model };
+  }
   if (config.modelPrefix && !model.startsWith(config.modelPrefix) && !meteredAllowed()) {
     return {
       model,
@@ -202,6 +212,79 @@ export function coveredModel(agent: AgentConfig, config: ConnectorConfig): { mod
     };
   }
   return { model };
+}
+
+function safeAutoCandidates(agent: AgentConfig, config: ConnectorConfig): string[] {
+  return agent.modelOptions.filter(
+    (m) => m && m !== "auto" && (!config.modelPrefix || m.startsWith(config.modelPrefix) || meteredAllowed()),
+  );
+}
+
+/**
+ * When an agent's model is set to "auto", pick the best covered model from its modelOptions
+ * based on the task's shape (fast/simple, UI/frontend, analysis/review, deep coding, creative).
+ * Pure, zero-cost, and strictly limited to billing-covered options. Exported for tests.
+ */
+export function pickModelForTask(
+  agent: AgentConfig,
+  config: ConnectorConfig,
+  prompt: string,
+): { model: string; reason?: string } {
+  const fixed = config.model || agent.model;
+  if (fixed !== "auto") return { model: fixed };
+  const candidates = safeAutoCandidates(agent, config);
+  if (!candidates.length) return { model: fixed };
+
+  const prefer = (...needles: string[]) => {
+    for (const needle of needles) {
+      const hit = candidates.find((c) => c.toLowerCase().includes(needle));
+      if (hit) return hit;
+    }
+    return candidates[0];
+  };
+
+  const text = prompt.trim();
+  const hasCodeFence = text.includes("```");
+  const isReviewOrMath =
+    /\b(review|critique|audit|security|vulnerabilit(?:y|ies)|sql|query|database|schema|algorithm|complexity|big-?o|math|proof|calculate|compare|evaluate|benchmark|trade-?offs?)\b/i.test(
+      text,
+    );
+  const isUi =
+    /\b(css|html|svg|tailwind|frontend|front-end|ui|ux|layout|responsive|component|react|animation|keyframe|dashboard|design|stylesheet)\b/i.test(
+      text,
+    );
+  const isCreative =
+    !hasCodeFence &&
+    /\b(tagline|taglines|slogan|slogans|headline|headlines|copywriting|caption|captions|story|hook|hooks|brainstorm|creative|poem|naming)\b/i.test(
+      text,
+    );
+  const isDeepCode =
+    hasCodeFence ||
+    text.length >= 280 ||
+    /\b(refactor|architect|architecture|debug|fix\s+(?:this|the|a|my)|stack\s*trace|exception|typescript|python|rust|golang|backend|endpoint|async|concurren(?:cy|t)|race\s+condition|unit\s+test|test\s+suite|implement|build\s+a|migration)\b/i.test(
+      text,
+    );
+  const isQuick =
+    !hasCodeFence &&
+    (/\b(regex|regexp|one-?liner|one word|quick|brief|short|tldr|tl;dr|syntax|convert|format|cron|what is|what's|explain simply)\b/i.test(text) ||
+      text.length <= 120);
+
+  if (isCreative && !isReviewOrMath) {
+    return { model: prefer("muse-spark", "kimi-k3.1-pro", "glm-5.3"), reason: "creative" };
+  }
+  if (isReviewOrMath) {
+    return { model: prefer("deepseek-v4-pro", "qwen3.8-max", "kimi-k3.1-pro"), reason: "review & analysis" };
+  }
+  if (isUi) {
+    return { model: prefer("glm-5.3", "kimi-k3.1-pro", "qwen3.8-max"), reason: "UI & frontend" };
+  }
+  if (isDeepCode) {
+    return { model: prefer("kimi-k3.1-pro", "qwen3.8-max", "deepseek-v4-pro"), reason: "deep coding" };
+  }
+  if (isQuick) {
+    return { model: prefer("deepseek-v4.1-flash", "glm-5.3-flash", "mimo-v2.6-flash", "minimax-m3.1-flash"), reason: "fast task" };
+  }
+  return { model: prefer("kimi-k3.1-pro", "glm-5.3", "deepseek-v4-pro"), reason: "general" };
 }
 
 export function buildChatBody(agent: AgentConfig, config: ConnectorConfig, prompt: string): Record<string, unknown> {
@@ -338,11 +421,13 @@ async function runOpenAI(req: RunRequest, config: ConnectorConfig): Promise<RunR
   const key = env(config.apiKeyEnv);
   const covered = coveredModel(req.agent, config);
   if (covered.error) throw new Error(covered.error);
+  const chosen = pickModelForTask(req.agent, config, req.prompt);
+  const effectiveAgent = chosen.model !== req.agent.model ? { ...req.agent, model: chosen.model } : req.agent;
   if (config.runsApi) {
     const headers = { ...config.headers, "content-type": "application/json", ...(key ? { authorization: `Bearer ${key}` } : {}) };
-    if (await hermesSupportsRuns(base, headers, req.signal)) return runHermesRun(req, config, base, headers);
+    if (await hermesSupportsRuns(base, headers, req.signal)) return runHermesRun({ ...req, agent: effectiveAgent }, config, base, headers);
   }
-  const body = buildChatBody(req.agent, config, req.prompt);
+  const body = buildChatBody(effectiveAgent, config, req.prompt);
   const timeout = AbortSignal.timeout(config.timeoutMs ?? 300_000);
   let res: Response;
   try {

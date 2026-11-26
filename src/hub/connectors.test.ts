@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { normalizeAgent } from "./config.js";
-import { buildChatBody, coveredModel, networkReason, parseChatResponse, parseCliOutput, parseModelOptions, resolveConnector } from "./connectors.js";
+import { buildChatBody, coveredModel, networkReason, parseChatResponse, parseCliOutput, parseModelOptions, pickModelForTask, resolveConnector } from "./connectors.js";
 import type { ConnectorConfig } from "./types.js";
 
 const hermesConn: ConnectorConfig = { kind: "openai", label: "Hermes", reasoningIn: "model_options", supportsProvider: true };
@@ -214,5 +214,61 @@ describe("parseModelOptions", () => {
     expect(parseModelOptions(null)).toBeNull();
     expect(parseModelOptions({ providers: [{ slug: "nous", is_current: true, authenticated: false, models: ["a"] }] })).toBeNull();
     expect(parseModelOptions({ providers: [{ slug: "nous", is_current: true, authenticated: true, models: [] }] })).toBeNull();
+  });
+});
+
+describe("pickModelForTask (auto model mode)", () => {
+  const cp: ConnectorConfig = {
+    kind: "openai",
+    label: "ClinePass",
+    billing: "subscription",
+    modelPrefix: "cline-pass/",
+  };
+  const cline = () =>
+    normalizeAgent(
+      {
+        id: "cline",
+        model: "auto",
+        modelOptions: [
+          "auto",
+          "anthropic/claude-opus-5",
+          "cline-pass/kimi-k3.1-pro",
+          "cline-pass/glm-5.3",
+          "cline-pass/deepseek-v4-pro",
+          "cline-pass/deepseek-v4.1-flash",
+          "cline-pass/qwen3.8-max",
+          "cline-pass/muse-spark-1.3-contributor",
+        ],
+      },
+      0,
+    );
+
+  it("allows auto only when billing-covered models exist", () => {
+    const saved = process.env.RELAY_ALLOW_METERED;
+    delete process.env.RELAY_ALLOW_METERED;
+    try {
+      expect(coveredModel(cline(), cp).error).toBeUndefined();
+      const unsafe = normalizeAgent({ id: "cline", model: "auto", modelOptions: ["auto", "anthropic/claude-opus-5"] }, 0);
+      expect(coveredModel(unsafe, cp).error).toMatch(/Auto model mode needs/);
+    } finally {
+      if (saved !== undefined) process.env.RELAY_ALLOW_METERED = saved;
+    }
+  });
+
+  it("picks the right covered ClinePass model for each task shape and never picks uncovered models", () => {
+    const saved = process.env.RELAY_ALLOW_METERED;
+    delete process.env.RELAY_ALLOW_METERED;
+    try {
+      const a = cline();
+      expect(pickModelForTask(a, cp, "write a regex for a US ZIP code").model).toBe("cline-pass/deepseek-v4.1-flash");
+      expect(pickModelForTask(a, cp, "review these 3 taglines and critique their clarity").model).toBe("cline-pass/deepseek-v4-pro");
+      expect(pickModelForTask(a, cp, "fix the responsive CSS grid layout for this dashboard component").model).toBe("cline-pass/glm-5.3");
+      expect(pickModelForTask(a, cp, "debug and refactor this TypeScript async queue race condition").model).toBe("cline-pass/kimi-k3.1-pro");
+      expect(pickModelForTask(a, cp, "write 3 punchy taglines for Relay").model).toBe("cline-pass/muse-spark-1.3-contributor");
+      // Explicit model stays fixed
+      expect(pickModelForTask({ ...a, model: "cline-pass/qwen3.8-max" }, cp, "write a regex").model).toBe("cline-pass/qwen3.8-max");
+    } finally {
+      if (saved !== undefined) process.env.RELAY_ALLOW_METERED = saved;
+    }
   });
 });
