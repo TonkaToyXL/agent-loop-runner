@@ -237,6 +237,7 @@ const CHANNEL_LABEL = { web: "web", telegram: "telegram", imessage: "imessage", 
 
 function shortModel(id, a) {
   if (!id) return "";
+  if (id === "auto") return "Auto (match task)";
   if (id === "hermes-agent") {
     const def = a?.discoveredDefaultModel;
     return def ? `Default (${def.split("/").pop()})` : "Hermes default";

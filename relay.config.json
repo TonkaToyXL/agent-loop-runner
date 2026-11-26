@@ -210,8 +210,9 @@
       "name": "Cline",
       "color": "#7ee0a8",
       "tagline": "Open-model coder on your ClinePass",
-      "model": "cline-pass/kimi-k3.1-pro",
+      "model": "auto",
       "modelOptions": [
+        "auto",
         "cline-pass/kimi-k3.1-pro",
         "cline-pass/kimi-k3",
         "cline-pass/glm-5.3",
