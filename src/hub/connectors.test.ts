@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { normalizeAgent } from "./config.js";
-import { buildChatBody, coveredModel, networkReason, parseChatResponse, parseCliOutput, resolveConnector } from "./connectors.js";
+import { buildChatBody, coveredModel, networkReason, parseChatResponse, parseCliOutput, parseModelOptions, resolveConnector } from "./connectors.js";
 import type { ConnectorConfig } from "./types.js";
 
 const hermesConn: ConnectorConfig = { kind: "openai", label: "Hermes", reasoningIn: "model_options", supportsProvider: true };
@@ -188,5 +188,31 @@ describe("opt-in connectors", () => {
       if (saved === undefined) delete process.env.T_OPT_IN;
       else process.env.T_OPT_IN = saved;
     }
+  });
+});
+
+describe("parseModelOptions", () => {
+  it("keeps only the currently active authenticated provider's models", () => {
+    const parsed = parseModelOptions({
+      provider: "nous",
+      model: "openai/gpt-6.2-sol",
+      providers: [
+        { slug: "anthropic", name: "Anthropic", is_current: false, authenticated: true, models: ["claude-opus-5"] },
+        { slug: "nous", name: "Nous Portal", is_current: true, authenticated: true, models: ["openai/gpt-6.2-sol", "z-ai/glm-5.3", "openai/gpt-6.2-sol"] },
+        { slug: "openrouter", name: "OpenRouter", is_current: false, authenticated: false, models: ["x/y"] },
+      ],
+    });
+    expect(parsed).toEqual({
+      provider: "nous",
+      providerName: "Nous Portal",
+      defaultModel: "openai/gpt-6.2-sol",
+      models: ["openai/gpt-6.2-sol", "z-ai/glm-5.3"],
+    });
+  });
+
+  it("returns null for empty or unauthenticated payloads", () => {
+    expect(parseModelOptions(null)).toBeNull();
+    expect(parseModelOptions({ providers: [{ slug: "nous", is_current: true, authenticated: false, models: ["a"] }] })).toBeNull();
+    expect(parseModelOptions({ providers: [{ slug: "nous", is_current: true, authenticated: true, models: [] }] })).toBeNull();
   });
 });

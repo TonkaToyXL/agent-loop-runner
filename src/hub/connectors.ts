@@ -277,6 +277,61 @@ export async function checkHealth(config: ConnectorConfig): Promise<{ ok: boolea
   }
 }
 
+export interface DiscoveredModels {
+  provider: string;
+  providerName: string;
+  defaultModel?: string;
+  models: string[];
+}
+
+/**
+ * Parse Hermes's GET /api/model/options payload. Only exposes models from the provider
+ * that is already active (`is_current: true`), so Relay never silently switches to another
+ * provider or triggers unexpected billing. Exported for tests.
+ */
+export function parseModelOptions(raw: unknown): DiscoveredModels | null {
+  if (!raw || typeof raw !== "object") return null;
+  const data = raw as {
+    provider?: unknown;
+    model?: unknown;
+    providers?: { slug?: unknown; name?: unknown; is_current?: unknown; authenticated?: unknown; models?: unknown }[];
+  };
+  const providers = Array.isArray(data.providers) ? data.providers : [];
+  const current =
+    providers.find((p) => p && p.is_current === true && p.authenticated !== false) ??
+    providers.find((p) => p && typeof data.provider === "string" && p.slug === data.provider && p.authenticated === true);
+  if (!current || typeof current.slug !== "string" || !current.slug.trim()) return null;
+  const models = Array.isArray(current.models)
+    ? Array.from(new Set(current.models.filter((m): m is string => typeof m === "string" && m.trim().length > 0).map((m) => m.trim())))
+    : [];
+  if (!models.length) return null;
+  return {
+    provider: current.slug.trim(),
+    providerName: typeof current.name === "string" && current.name.trim() ? current.name.trim() : current.slug.trim(),
+    defaultModel: typeof data.model === "string" && data.model.trim() ? data.model.trim() : undefined,
+    models,
+  };
+}
+
+/** Fetch live model options for provider-backed local servers (e.g. Hermes /api/model/options). */
+export async function fetchModelOptions(config: ConnectorConfig): Promise<DiscoveredModels | null> {
+  if (config.kind !== "openai" || !config.supportsProvider) return null;
+  const base = baseUrlOf(config);
+  if (!base) return null;
+  try {
+    const url = new URL("/api/model/options", base);
+    const key = env(config.apiKeyEnv);
+    const res = await fetch(url, {
+      headers: key ? { authorization: `Bearer ${key}` } : undefined,
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!res.ok) return null;
+    return parseModelOptions(await res.json());
+  } catch {
+    return null;
+  }
+}
+
 async function runOpenAI(req: RunRequest, config: ConnectorConfig): Promise<RunResult> {
   const base = baseUrlOf(config);
   if (!base) throw new Error(`No base URL for ${req.agent.name}`);

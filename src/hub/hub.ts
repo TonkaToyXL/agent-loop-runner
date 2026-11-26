@@ -4,7 +4,7 @@ import { hostname } from "node:os";
 import { EventEmitter } from "node:events";
 import { isReasoning } from "./config.js";
 import { errorText, PublicError } from "./errors.js";
-import { checkHealth, coveredModel, resolveConnector, runAgent, type Purpose } from "./connectors.js";
+import { checkHealth, coveredModel, fetchModelOptions, resolveConnector, runAgent, type DiscoveredModels, type Purpose } from "./connectors.js";
 import { ApprovalDesk, riskyAction, type Approval, type ApprovalRequest } from "./approvals.js";
 import { digestPrompt, fetchRecent, formatList, mailConfig, span } from "./mail/inbox.js";
 import {
@@ -57,6 +57,9 @@ export interface AgentView extends AgentConfig {
   /** undefined when the connector has no health check. */
   online?: boolean;
   healthDetail?: string;
+  discoveredProvider?: string;
+  discoveredProviderName?: string;
+  discoveredDefaultModel?: string;
   lastServed?: string;
   status: "idle" | "working" | "limited" | "paused" | "offline";
   running: number;
@@ -93,6 +96,7 @@ export class Hub {
   /** Requests started but not yet recorded in usage, per agent. */
   private readonly inFlight = new Map<string, number>();
   private readonly health = new Map<string, { ok: boolean; detail: string }>();
+  private readonly discoveredModels = new Map<string, DiscoveredModels>();
   private healthTimer: NodeJS.Timeout | null = null;
   private readonly healthFails = new Map<string, number>();
   private readonly healthAlerted = new Map<string, "down" | "up">();
@@ -302,6 +306,13 @@ export class Hub {
     const clean: Partial<EditableAgentFields> = {};
     if (typeof patch.model === "string" && patch.model.trim()) clean.model = patch.model.trim().slice(0, 120);
     if (typeof patch.provider === "string") clean.provider = patch.provider.trim().slice(0, 60);
+    else if (clean.model) {
+      const discovered = this.discoveredModels.get(id);
+      if (discovered) {
+        if (clean.model === "hermes-agent") clean.provider = "";
+        else if (!base.provider && discovered.models.includes(clean.model)) clean.provider = discovered.provider;
+      }
+    }
     if (patch.reasoning !== undefined) {
       if (!isReasoning(patch.reasoning)) throw new PublicError("reasoning must be off, low, medium, high or max");
       clean.reasoning = patch.reasoning;
@@ -364,6 +375,13 @@ export class Hub {
           changed = true;
           console.log(`[health] ${agent.name}: ${next.ok ? "online" : `offline (${next.detail})`}`);
         }
+        if (next.ok && connector.config.supportsProvider && (!this.discoveredModels.has(agent.id) || prev?.ok === false)) {
+          const discovered = await fetchModelOptions(connector.config);
+          if (discovered) {
+            this.discoveredModels.set(agent.id, discovered);
+            changed = true;
+          }
+        }
       }
       if (changed) this.emitAgents();
     };
@@ -391,9 +409,14 @@ export class Hub {
     const usage = agentUsage(this.store.state.usage, agent.id, now);
     const limit = limitState(usage, agent.limits);
     const health = this.health.get(agent.id);
+    const discovered = this.discoveredModels.get(agent.id);
+    const modelOptions = discovered
+      ? Array.from(new Set([agent.model, ...agent.modelOptions, ...discovered.models]))
+      : agent.modelOptions;
     const lastServed = [...mine].reverse().find((t) => t.servedModel)?.servedModel;
     return {
       ...agent,
+      modelOptions,
       isLead: agent.id === this.leadId,
       live: connector.live,
       connectorLabel: connector.label,
@@ -403,6 +426,9 @@ export class Hub {
       blocked: Boolean(connector.blocked),
       online: health?.ok,
       healthDetail: health?.detail,
+      discoveredProvider: discovered?.provider,
+      discoveredProviderName: discovered?.providerName,
+      discoveredDefaultModel: discovered?.defaultModel,
       lastServed,
       status: !agent.enabled || connector.blocked
         ? "paused"
