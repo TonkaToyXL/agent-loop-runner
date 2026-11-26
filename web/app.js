@@ -53,7 +53,7 @@ function renderPortraitContent(agent, working = false) {
 function mapPortraitMarkup(a, working) {
   const url = working ? (a.avatarWorking || a.avatarIdle) : a.avatarIdle;
   if (url) {
-    return `<image href="${esc(url)}" x="-24" y="-24" width="48" height="48" preserveAspectRatio="xMidYMid slice" clip-path="url(#mapAvatarClip)"/>`;
+    return `<circle r="24" fill="#0b0d12"/><image href="${esc(url)}" x="-24" y="-24" width="48" height="48" preserveAspectRatio="xMidYMid slice" clip-path="url(#mapAvatarClip)"/>`;
   }
   return `<g clip-path="url(#mapAvatarClip)"><svg x="-24" y="-24" width="48" height="48" viewBox="0 0 80 80">${fallbackAvatarSvg(a.name, a.color, working).replace(/^<svg[^>]*>|<\/svg>$/g, "")}</svg></g>`;
 }
