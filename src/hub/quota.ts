@@ -296,24 +296,10 @@ export async function fetchProviderQuota(
   }
 
   if (key === "codex") {
-    const auth = readCodexAuth();
-    if (!auth) return { provider: "ChatGPT", live: false, note: "Sign in via Codex CLI", updatedAt: new Date().toISOString() };
-    try {
-      const headers: Record<string, string> = {
-        authorization: `Bearer ${auth.accessToken}`,
-        "user-agent": "codex-cli",
-        ...(auth.accountId ? { "chatgpt-account-id": auth.accountId } : {}),
-      };
-      const payload = await fetchJson("https://chatgpt.com/backend-api/wham/usage", headers);
-      return parseCodexQuota(payload) ?? {
-        provider: "ChatGPT",
-        live: false,
-        note: "Shared with your Codex CLI quota",
-        updatedAt: new Date().toISOString(),
-      };
-    } catch {
-      return { provider: "ChatGPT", live: false, note: "Shared with your Codex CLI quota", updatedAt: new Date().toISOString() };
-    }
+    // ChatGPT has no documented usage API for third-party apps. Relay does not call its internal
+    // endpoints with your login (account risk); check usage in Codex CLI (/status) instead.
+    const note = readCodexAuth() ? "Shared with your Codex CLI quota (see /status in Codex)" : "Sign in via Codex CLI";
+    return { provider: "ChatGPT", live: false, note, updatedAt: new Date().toISOString() };
   }
 
   if (key === "opencode-zen") {

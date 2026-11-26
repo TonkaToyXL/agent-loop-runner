@@ -383,6 +383,10 @@
           "requiresEnv": [
             "RELAY_ENABLE_CODEX"
           ],
+          "dropEnv": [
+            "CODEX_API_KEY",
+            "OPENAI_API_KEY"
+          ],
           "command": "codex",
           "args": [
             "exec",
