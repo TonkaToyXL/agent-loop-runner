@@ -765,7 +765,7 @@ kbd { font: 11px var(--font-mono); padding: 1px 5px; border: 1px solid var(--lin
   .lanes { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 720px) {
-  .crew { grid-template-columns: 1fr; }
+  .crew { grid-template-columns: minmax(0, 1fr); }
 }
 @media (max-width: 960px) {
   body { font-size: 14.5px; }
