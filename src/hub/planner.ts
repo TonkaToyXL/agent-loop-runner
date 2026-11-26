@@ -42,6 +42,8 @@ export function planPrompt(goal: string, agents: PlannerAgent[]): string {
     '  or review a draft), list those step numbers in "after". A step only sees results of steps in "after".',
     "- Match each agent's unique role: use Grok for live X/news/web trends, Muse for creative copy/taglines,",
     "  Cline or Zen for code/reviews/analysis, and Hermes for local Mac/file/terminal work or coordination.",
+    "- Conserve tight-quota plans (like ChatGPT Plus): only assign ChatGPT when high-leverage strategy or a",
+    "  second opinion truly adds value; prefer Cline, Zen, Muse, Grok, or Hermes for routine steps.",
     "- Avoid duplicate steps or unnecessary extra steps. Only point \"after\" back to earlier steps.",
     "",
     "Team:",

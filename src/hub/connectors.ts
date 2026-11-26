@@ -270,10 +270,29 @@ function classifyTask(prompt: string): "quick" | "creative" | "ui" | "review" | 
 /**
  * Pick the best reasoning effort for a task when an agent's reasoning is set to "auto".
  * Balances speed/cost on simple asks with deeper thinking on coding, reviews, and hard problems.
+ * When `conserveQuota` is true (e.g. $20 ChatGPT Plus), steps down effort one notch and caps auto at "high".
  */
-export function pickReasoningForTask(reasoning: Reasoning, prompt: string): Exclude<Reasoning, "auto"> {
+export function pickReasoningForTask(
+  reasoning: Reasoning,
+  prompt: string,
+  conserveQuota = false,
+): Exclude<Reasoning, "auto"> {
   if (reasoning !== "auto") return reasoning;
   const kind = classifyTask(prompt);
+  if (conserveQuota) {
+    switch (kind) {
+      case "quick":
+      case "creative":
+      case "ui":
+      case "general":
+        return "low";
+      case "review":
+      case "deep":
+        return "medium";
+      case "hard":
+        return "high";
+    }
+  }
   switch (kind) {
     case "quick":
       return "low";
@@ -301,7 +320,8 @@ export function pickModelForTask(
   prompt: string,
   exclude: Iterable<string> = [],
 ): TaskRoutingChoice {
-  const reasoning = pickReasoningForTask(agent.reasoning, prompt);
+  const conserve = Boolean(config.conserveQuota);
+  const reasoning = pickReasoningForTask(agent.reasoning, prompt, conserve);
   const fixed = config.model || agent.model;
   if (fixed !== "auto") return { model: fixed, reasoning };
   const skip = new Set(exclude);
@@ -317,6 +337,17 @@ export function pickModelForTask(
   };
 
   const kind = classifyTask(prompt);
+  if (conserve) {
+    switch (kind) {
+      case "hard":
+        return { model: prefer("gpt-6.1-terra", "gpt-6.1-sol", "gpt-6-astra"), reasoning, reason: "hard reasoning (quota-capped)" };
+      case "review":
+      case "deep":
+        return { model: prefer("gpt-6.1-sol", "gpt-6-astra", "gpt-6-sol"), reasoning, reason: "balanced review/code" };
+      default:
+        return { model: prefer("gpt-6-astra", "gpt-6-luna", "gpt-6.1-sol"), reasoning, reason: "quota-friendly default" };
+    }
+  }
   switch (kind) {
     case "creative":
       return { model: prefer("muse-spark", "gpt-6.1-sol", "kimi-k3.1-pro", "glm-5.3", "gpt-6-sol"), reasoning, reason: "creative" };

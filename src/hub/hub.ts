@@ -981,7 +981,9 @@ export class Hub {
     const basePool = textOpen.length ? textOpen : allOpen;
     const avoid = new Set(opts.avoidIds ?? []);
     const independent = avoid.size ? basePool.filter((a) => !avoid.has(a.id)) : [];
-    const open = independent.length ? independent : basePool;
+    const pool = independent.length ? independent : basePool;
+    const abundant = pool.filter((a) => !resolveConnector(a).config.conserveQuota);
+    const open = abundant.length ? abundant : pool;
     if (!open.length) return undefined;
     const id = pickAgent(task.prompt, open, open[0].id);
     return open.find((a) => a.id === id);

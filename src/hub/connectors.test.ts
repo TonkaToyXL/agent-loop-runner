@@ -324,14 +324,30 @@ describe("pickModelForTask (auto model mode)", () => {
     });
     expect(() => parseCliOutput(errOut, "codex-jsonl", "Codex CLI")).toThrow("Model not supported");
 
-    const codexConn: ConnectorConfig = { kind: "cli", label: "Codex CLI", billing: "subscription", command: "codex" };
+    const codexConn: ConnectorConfig = {
+      kind: "cli",
+      label: "Codex CLI",
+      billing: "subscription",
+      command: "codex",
+      conserveQuota: true,
+    };
     const chatgpt = normalizeAgent(
       { id: "chatgpt", model: "auto", reasoning: "auto", modelOptions: ["auto", "gpt-6-astra", "gpt-6.1-sol", "gpt-6.1-terra"] },
       0,
     );
     expect(pickModelForTask(chatgpt, codexConn, "write a quick regex")).toMatchObject({ model: "gpt-6-astra", reasoning: "low" });
+    expect(pickModelForTask(chatgpt, codexConn, "explain how DNS works")).toMatchObject({ model: "gpt-6-astra", reasoning: "low" });
+    expect(pickModelForTask(chatgpt, codexConn, "review this SQL query for slow joins")).toMatchObject({
+      model: "gpt-6.1-sol",
+      reasoning: "medium",
+    });
     expect(pickModelForTask(chatgpt, codexConn, "do a thorough security audit and architecture review")).toMatchObject({
       model: "gpt-6.1-terra",
+      reasoning: "high",
+    });
+    // Explicit reasoning override still works when the user asks for it
+    expect(pickModelForTask({ ...chatgpt, reasoning: "max" }, codexConn, "quick check")).toMatchObject({
+      model: "gpt-6-astra",
       reasoning: "max",
     });
   });

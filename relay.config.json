@@ -346,7 +346,7 @@
       "id": "chatgpt",
       "name": "ChatGPT",
       "color": "#10a37f",
-      "tagline": "Generalist & coder on your ChatGPT subscription",
+      "tagline": "Strategy & second opinion ($20 Plus — saved for key asks)",
       "model": "auto",
       "modelOptions": [
         "auto",
@@ -362,19 +362,10 @@
         "chatgpt",
         "openai",
         "codex",
-        "reason",
-        "reasoning",
         "strategy",
-        "plan",
-        "explain",
-        "summarize",
-        "summary",
-        "architecture",
-        "review",
-        "code",
-        "debug"
+        "second-opinion"
       ],
-      "system": "You are ChatGPT (via Codex CLI), a sharp generalist, strategist, and coder on the team. Be concise, accurate, and directly useful.",
+      "system": "You are ChatGPT (via Codex CLI), reserved for high-leverage strategy, judgment, and second opinions on the team. Be concise, sharp, and directly useful.",
       "connectors": [
         {
           "kind": "cli",
@@ -402,11 +393,12 @@
           "outputFormat": "codex-jsonl",
           "modelArg": "-m",
           "reasoningArg": "model_reasoning_effort",
+          "conserveQuota": true,
           "timeoutMs": 300000
         }
       ],
       "limits": {
-        "dailyRequests": 100,
+        "dailyRequests": 25,
         "dailyTokens": 0,
         "monthlyBudgetUsd": 0
       },

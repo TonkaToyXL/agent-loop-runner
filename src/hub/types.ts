@@ -26,6 +26,8 @@ export interface ConnectorConfig {
   modelArg?: string;
   /** cli: Codex-style -c <key>="<effort>" config key for reasoning effort. */
   reasoningArg?: string;
+  /** Prefer lighter models & lower auto-reasoning effort to preserve tight subscription quotas (e.g. $20 ChatGPT Plus). */
+  conserveQuota?: boolean;
   /** Env vars that must be non-empty for this connector to be used. */
   requiresEnv?: string[];
   /** cli: environment variables removed before starting the command (e.g. pay-per-use API keys a subscription CLI would otherwise bill). */
