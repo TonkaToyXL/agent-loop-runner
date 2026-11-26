@@ -36,11 +36,12 @@
     <main class="main" id="main">
       <section class="panel mission" data-tab="crew">
         <div class="mission-map">
-          <svg id="map" viewBox="0 0 340 322" role="img" aria-label="Crew map: who is handing work to whom"></svg>
+          <svg id="map" viewBox="0 0 340 342" role="img" aria-label="Crew map: click any assistant to chat or watch live handoffs"></svg>
+          <div class="map-caption" id="mapCaption"></div>
         </div>
         <div class="mission-feed">
           <div class="section-head">
-            <h2>Handoffs</h2>
+            <h2>Live activity</h2>
             <span class="muted small" id="leadLabel"></span>
           </div>
           <ol class="handoffs" id="handoffs"></ol>
@@ -49,8 +50,8 @@
 
       <section data-tab="crew">
         <div class="section-head pad-x">
-          <h2>Crew</h2>
-          <span class="muted small">Tap a card to change model, reasoning, or limits</span>
+          <h2>Your assistants</h2>
+          <span class="muted small">Switch models right on each card, or click Settings for limits</span>
         </div>
         <div class="crew" id="crew"></div>
       </section>
@@ -79,7 +80,10 @@
 
     <aside class="thread" data-tab="thread" id="threadPane">
       <div class="thread-head">
-        <h2>Thread</h2>
+        <div class="thread-title">
+          <h2>Thread</h2>
+          <div class="crew-strip" id="crewStrip" aria-label="Active assistants"></div>
+        </div>
         <div class="seg small" id="threadFilter">
           <button data-f="all" class="on">All</button>
           <button data-f="web">Web</button>
@@ -91,6 +95,7 @@
       <div class="thread-body" id="thread"></div>
       <form class="composer" id="composer" autocomplete="off">
         <div class="targets" id="targets"></div>
+        <div class="active-bar" id="activeBar"></div>
         <div class="slash" id="slash" hidden></div>
         <div class="compose-row">
           <textarea id="input" rows="1" placeholder="Ask anyone…" aria-label="Message"></textarea>
@@ -98,7 +103,7 @@
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h13M13 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
           </button>
         </div>
-        <div class="compose-hint"><kbd>@grok</kbd> one agent · <kbd>@team</kbd> split the work · <kbd>/</kbd> commands</div>
+        <div class="compose-hint"><kbd>@grok</kbd> one assistant · <kbd>@team</kbd> split the work · <kbd>/</kbd> commands</div>
       </form>
     </aside>
 
@@ -111,7 +116,7 @@
   </div>
 
   <div class="scrim" id="scrim" hidden></div>
-  <aside class="drawer" id="drawer" aria-hidden="true" aria-label="Edit agent"></aside>
+  <aside class="drawer" id="drawer" aria-hidden="true" aria-label="Assistant settings"></aside>
 
   <div class="lock" id="lock" hidden>
     <form class="lock-card" id="lockForm">

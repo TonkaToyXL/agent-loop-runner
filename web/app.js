@@ -27,6 +27,52 @@ const S = {
   editing: null,
 };
 
+// ------------------------------------------------------------------ assistant emblems
+function avatarSvg(id, name = "?") {
+  switch (id) {
+    case "hermes":
+      // Winged relay chevron
+      return `<svg class="emblem" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M4 13.5 12 6l8 7.5M7 17.5 12 13l5 4.5" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"/>
+        <circle cx="12" cy="5.5" r="1.6" fill="currentColor"/>
+      </svg>`;
+    case "grok":
+      // Live signal compass spark
+      return `<svg class="emblem" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M12 3.5 14.3 9.7 20.5 12 14.3 14.3 12 20.5 9.7 14.3 3.5 12 9.7 9.7Z" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/>
+        <circle cx="12" cy="12" r="2" fill="currentColor"/>
+      </svg>`;
+    case "muse":
+      // Prism / creative quill diamond
+      return `<svg class="emblem" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M12 3.5 19 10.5 12 20.5 5 10.5Z" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/>
+        <path d="M5 10.5h14M12 3.5v17" fill="none" stroke="currentColor" stroke-width="1.4" opacity="0.6"/>
+      </svg>`;
+    case "cline":
+      // Precision code chevrons
+      return `<svg class="emblem" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M8.5 7.5 4 12l4.5 4.5M15.5 7.5 20 12l-4.5 4.5M13.5 6l-3 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>`;
+    default:
+      return `<svg class="emblem" viewBox="0 0 24 24" aria-hidden="true"><text x="12" y="13" text-anchor="middle" dominant-baseline="central" fill="currentColor" style="font:800 15px var(--font-display)">${esc(name[0] || "?")}</text></svg>`;
+  }
+}
+
+function mapEmblemPaths(id, color, name) {
+  switch (id) {
+    case "hermes":
+      return `<path d="M-8 2 0-6 8 2M-5 6 0 1 5 6" fill="none" stroke="${color}" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"/><circle cy="-7" r="1.7" fill="${color}"/>`;
+    case "grok":
+      return `<path d="M0-9 2.3-2.3 9 0 2.3 2.3 0 9-2.3 2.3-9 0-2.3-2.3Z" fill="none" stroke="${color}" stroke-width="1.8" stroke-linejoin="round"/><circle r="2" fill="${color}"/>`;
+    case "muse":
+      return `<path d="M0-9 7-1 0 9-7-1Z" fill="none" stroke="${color}" stroke-width="1.8" stroke-linejoin="round"/><path d="M-7-1h14" stroke="${color}" stroke-width="1.3" opacity="0.65"/>`;
+    case "cline":
+      return `<path d="M-3.5-5-8.5 0-3.5 5M3.5-5 8.5 0 3.5 5M1.5-6-1.5 6" fill="none" stroke="${color}" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>`;
+    default:
+      return `<text y="1" text-anchor="middle" dominant-baseline="central" style="font:800 18px var(--font-display)" fill="${color}">${esc(name[0] || "?")}</text>`;
+  }
+}
+
 // ------------------------------------------------------------------ helpers
 const agentById = (id) => S.agents.find((a) => a.id === id);
 const nameOf = (id) => (id === "you" ? "You" : agentById(id)?.name ?? id);
@@ -44,6 +90,47 @@ const think = (level) => {
   return `<span class="think" aria-hidden="true">${[1, 2, 3, 4].map((i) => `<s class="${i <= n ? "on" : ""}"></s>`).join("")}</span>`;
 };
 const CHANNEL_LABEL = { web: "web", telegram: "telegram", imessage: "imessage", system: "hub" };
+
+function shortModel(id, a) {
+  if (!id) return "";
+  if (id === "hermes-agent") {
+    const def = a?.discoveredDefaultModel;
+    return def ? `Default (${def.split("/").pop()})` : "Hermes default";
+  }
+  return id.replace(/^cline-pass\//, "");
+}
+
+function modelOptionsMarkup(a) {
+  const opts = Array.from(new Set([a.model, ...(a.modelOptions ?? [])]));
+  if (a.discoveredProvider && opts.includes("hermes-agent")) {
+    const rest = opts.filter((m) => m !== "hermes-agent");
+    const defLabel = a.discoveredDefaultModel
+      ? `Hermes default (${a.discoveredDefaultModel.split("/").pop()})`
+      : "Hermes default";
+    const provLabel = `${a.discoveredProviderName || a.discoveredProvider} (active)`;
+    return `<option value="hermes-agent" ${a.model === "hermes-agent" ? "selected" : ""}>${esc(defLabel)}</option>` +
+      (rest.length
+        ? `<optgroup label="${esc(provLabel)}">${rest
+            .map((m) => `<option value="${esc(m)}" ${a.model === m ? "selected" : ""}>${esc(m)}</option>`)
+            .join("")}</optgroup>`
+        : "");
+  }
+  return opts
+    .map((m) => `<option value="${esc(m)}" ${a.model === m ? "selected" : ""}>${esc(shortModel(m, a))}</option>`)
+    .join("");
+}
+
+function activeTaskFor(agentId) {
+  const list = [...S.tasks.values()].filter((t) => t.agentId === agentId && t.kind !== "goal" && (t.status === "running" || t.status === "queued"));
+  return list.find((t) => t.status === "running") ?? list[0] ?? null;
+}
+
+function lastTaskFor(agentId) {
+  const done = [...S.tasks.values()]
+    .filter((t) => t.agentId === agentId && t.kind !== "goal" && t.finishedAt)
+    .sort((x, y) => Date.parse(y.finishedAt) - Date.parse(x.finishedAt));
+  return done[0] ?? null;
+}
 
 function toast(text) {
   const el = $("#toast");
@@ -111,6 +198,56 @@ async function api(path, opts = {}) {
   return data;
 }
 
+async function quickUpdateAgent(id, patch, selectEl) {
+  const a = agentById(id);
+  if (!a) return;
+  if (selectEl) selectEl.disabled = true;
+  try {
+    const updated = await api(`/api/agents/${id}`, { method: "PATCH", body: JSON.stringify(patch) });
+    const idx = S.agents.findIndex((x) => x.id === id);
+    if (idx >= 0) S.agents[idx] = updated;
+    dirty.add("agents");
+    flush();
+    if (patch.model) {
+      toast(`${updated.name} switched to ${shortModel(updated.model, updated)}`);
+    } else if (patch.reasoning) {
+      toast(`${updated.name} reasoning set to ${updated.reasoning}`);
+    }
+    requestAnimationFrame(() => {
+      $$(`[data-model-for="${id}"], [data-reasoning-for="${id}"]`).forEach((el) => {
+        el.classList.add("saved");
+        setTimeout(() => el.classList.remove("saved"), 900);
+      });
+    });
+  } catch (err) {
+    toast(err.message);
+    dirty.add("agents");
+    flush();
+  } finally {
+    if (selectEl) selectEl.disabled = false;
+  }
+}
+
+function modelPatchFor(agent, nextModel) {
+  const patch = { model: nextModel };
+  if (agent.supportsProvider && agent.discoveredProvider) {
+    patch.provider = nextModel === "hermes-agent" ? "" : agent.discoveredProvider;
+  }
+  return patch;
+}
+
+function focusAgent(id, { switchTab = false } = {}) {
+  S.target = id;
+  store.set("relay-target", id);
+  renderTargets();
+  renderCrewStrip();
+  renderActiveBar();
+  renderCrew();
+  renderMap();
+  if (switchTab && matchMedia("(max-width: 960px)").matches) setTab("thread");
+  $("#input")?.focus();
+}
+
 function showLock() {
   $("#lock").hidden = false;
   setTimeout(() => $("#lockInput").focus(), 50);
@@ -159,7 +296,6 @@ function connect() {
   source = new EventSource(`/api/events${qs}`);
   let first = true;
   source.addEventListener("hello", () => {
-    // After a reconnect, resync anything we missed.
     if (!first) api("/api/state").then(applySnapshot).catch(() => {});
     first = false;
   });
@@ -223,11 +359,11 @@ function flush() {
     const all = dirty.has("all");
     const agents = all || dirty.has("agents");
     const tasks = all || dirty.has("tasks");
-    if (agents) { renderKpis(); renderCrew(); renderRanks(); renderTargets(); renderMap(); }
+    if (agents) { renderKpis(); renderCrew(); renderRanks(); renderTargets(); renderCrewStrip(); renderActiveBar(); renderMap(); }
     if (all || dirty.has("channels")) renderChannels();
-    if (tasks) { renderLanes(); renderThread(); }
+    if (tasks) { renderLanes(); renderThread(); if (!agents) { renderCrew(); renderMap(); renderCrewStrip(); renderActiveBar(); } }
     if (agents || tasks || dirty.has("handoffs")) renderHandoffs();
-    if (all || dirty.has("approvals")) { renderApprovals(); renderKpis(); }
+    if (all || dirty.has("approvals")) { renderApprovals(); renderKpis(); if (!agents && !tasks) renderCrew(); }
     if (dirty.has("approvals") && !tasks) renderThread();
     dirty.clear();
     booted = true;
@@ -237,14 +373,16 @@ function flush() {
 // ------------------------------------------------------------------ top bar
 function renderKpis() {
   const k = S.kpis;
+  const running = k.running ?? 0;
+  const readyCount = S.agents.filter((a) => a.live && a.enabled && a.status !== "offline").length;
   $("#kpis").innerHTML = [
     ...(pendingApprovals().length
       ? [`<button class="kpi ask" data-go-approvals><b>${pendingApprovals().length}</b><span>need${pendingApprovals().length === 1 ? "s" : ""} your OK</span></button>`]
       : []),
-    `<div class="kpi live"><b>${k.running ?? 0}</b><span>working now</span></div>`,
+    `<div class="kpi live ${running > 0 ? "hot" : ""}"><i class="kpi-dot" aria-hidden="true"></i><b>${running > 0 ? running : readyCount}</b><span>${running > 0 ? "working now" : "ready"}</span></div>`,
     `<div class="kpi"><b>${k.tasksToday ?? 0}</b><span>asks today</span></div>`,
     `<div class="kpi"><b>${fmtK(k.tokensToday)}</b><span>tokens today</span></div>`,
-    `<div class="kpi"><b>${fmtUsd(k.costMonth)}</b><span>this month</span></div>`,
+    ...(k.costMonth > 0 ? [`<div class="kpi"><b>${fmtUsd(k.costMonth)}</b><span>this month</span></div>`] : []),
   ].join("");
 }
 
@@ -258,7 +396,7 @@ function renderChannels() {
 }
 
 // ------------------------------------------------------------------ crew map
-const MAP = { cx: 170, cy: 166, r: 104 };
+const MAP = { cx: 170, cy: 166, r: 102 };
 function renderMap() {
   const svg = $("#map");
   if (!$("#mapNodes", svg)) {
@@ -273,28 +411,69 @@ function renderMap() {
   let lines = `<circle class="ring-orbit" cx="${MAP.cx}" cy="${MAP.cy}" r="${MAP.r}"/>`;
   for (const a of S.agents) {
     const p = S.pos[a.id];
-    lines += `<line class="spoke" x1="${MAP.cx}" y1="${MAP.cy}" x2="${p.x}" y2="${p.y}"/>`;
+    const active = a.status === "working";
+    lines += `<line class="spoke ${active ? "active" : ""}" style="${active ? `stroke:${a.color}` : ""}" x1="${MAP.cx}" y1="${MAP.cy}" x2="${p.x}" y2="${p.y}"/>`;
   }
   $("#mapLines", svg).innerHTML = lines;
 
-  let nodes = `<circle class="you" cx="${MAP.cx}" cy="${MAP.cy}" r="21"/><text class="you-text" x="${MAP.cx}" y="${MAP.cy + 4}">YOU</text>`;
+  let nodes = `<g class="you-node" data-map-target="team" role="button" tabindex="0" aria-label="Message whole team">
+    <circle class="you" cx="${MAP.cx}" cy="${MAP.cy}" r="22"/>
+    <text class="you-text" x="${MAP.cx}" y="${MAP.cy + 4}">YOU</text>
+  </g>`;
+
   for (const a of S.agents) {
     const p = S.pos[a.id];
     const up = Math.sin(p.ang) < -0.3;
-    const ly = up ? -52 : 40;
-    nodes += `<g transform="translate(${p.x.toFixed(1)},${p.y.toFixed(1)})" opacity="${a.enabled ? 1 : 0.4}">
-      ${a.status === "working" ? `<circle class="pulse" r="25" fill="none" stroke="${a.color}" stroke-width="2"/>` : ""}
-      <circle r="25" fill="${a.color}" fill-opacity="0.14" stroke="${a.color}" stroke-width="1.6"/>
-      <text y="1" text-anchor="middle" dominant-baseline="central" style="font:800 19px var(--font-display)" fill="${a.color}">${esc(a.name[0])}</text>
+    const ly = up ? -50 : 41;
+    const active = activeTaskFor(a.id);
+    const isWorking = a.status === "working";
+    const isOnline = a.live && a.enabled && a.status === "idle";
+    const isSelected = S.target === a.id;
+    const modelShort = shortModel(a.model, a);
+    nodes += `<g class="map-node ${isSelected ? "selected" : ""}" data-map-target="${a.id}" role="button" tabindex="0" aria-label="Chat with ${esc(a.name)}" transform="translate(${p.x.toFixed(1)},${p.y.toFixed(1)})" opacity="${a.enabled ? 1 : 0.42}">
+      ${isWorking ? `<circle class="pulse" r="26" fill="none" stroke="${a.color}" stroke-width="2"/>
+        <circle class="orbit-spin" r="30" fill="none" stroke="${a.color}" stroke-width="1.6" stroke-dasharray="14 28" stroke-linecap="round"/>` : ""}
+      ${isOnline ? `<circle class="breathe" r="28" fill="none" stroke="${a.color}" stroke-width="1.1"/>` : ""}
+      <g class="node-core">
+        <circle class="node-ring" r="24" fill="${a.color}" fill-opacity="${isWorking ? 0.22 : 0.12}" stroke="${a.color}" stroke-width="${isSelected ? 2.4 : 1.6}"/>
+        ${mapEmblemPaths(a.id, a.color, a.name)}
+      </g>
+      <circle cx="17" cy="17" r="4.5" fill="${active?.awaitingApproval ? "var(--warn)" : isWorking ? a.color : isOnline ? "var(--ok)" : a.status === "offline" ? "var(--danger)" : "var(--faint)"}" stroke="var(--panel)" stroke-width="2"/>
       ${a.isLead ? `<text class="crown" y="${up ? 37 : -32}" fill="var(--accent-text)">LEAD</text>` : ""}
       <text class="node-label" y="${ly}">${esc(a.name)}</text>
-      <text class="node-sub" y="${ly + (up ? 14 : 13)}">${esc(a.model.length > 18 ? a.model.slice(0, 17) + "…" : a.model)}</text>
+      <text class="node-sub" y="${ly + (up ? 13 : 13)}">${esc(modelShort.length > 18 ? modelShort.slice(0, 17) + "…" : modelShort)}</text>
     </g>`;
   }
   $("#mapNodes", svg).innerHTML = nodes;
+
   const lead = agentById(S.lead);
   $("#leadLabel").textContent = lead ? `${lead.name} leads team goals` : "";
+
+  const busy = S.agents.filter((a) => a.status === "working");
+  const ready = S.agents.filter((a) => a.live && a.enabled && a.status !== "offline").length;
+  const cap = $("#mapCaption");
+  cap.classList.toggle("busy", busy.length > 0);
+  if (busy.length) {
+    const first = busy[0];
+    const t = activeTaskFor(first.id);
+    cap.innerHTML = `<i class="live-dot" aria-hidden="true"></i><span><b>${esc(first.name)}</b> ${t ? `is working on “${esc(t.title.slice(0, 34))}${t.title.length > 34 ? "…" : ""}”` : "is working…"}</span>`;
+  } else {
+    cap.innerHTML = `<i class="live-dot" aria-hidden="true"></i><span>${ready} of ${S.agents.length} assistants ready · click one to chat</span>`;
+  }
 }
+
+$("#map").addEventListener("click", (e) => {
+  const node = e.target.closest("[data-map-target]");
+  if (!node) return;
+  focusAgent(node.dataset.mapTarget, { switchTab: true });
+});
+$("#map").addEventListener("keydown", (e) => {
+  if (e.key !== "Enter" && e.key !== " ") return;
+  const node = e.target.closest("[data-map-target]");
+  if (!node) return;
+  e.preventDefault();
+  focusAgent(node.dataset.mapTarget, { switchTab: true });
+});
 
 function animateBaton(b) {
   const layer = $("#mapBatons");
@@ -302,7 +481,6 @@ function animateBaton(b) {
   const z = S.pos[b.to];
   if (!layer || !a || !z || matchMedia("(prefers-reduced-motion: reduce)").matches) return;
   const color = b.kind === "return" || b.kind === "handoff" ? colorOf(b.from) : b.kind === "reroute" ? "var(--warn)" : colorOf(b.to);
-  // Curve away from the center so passes between agents arc around it.
   const mx = (a.x + z.x) / 2, my = (a.y + z.y) / 2;
   const dx = mx - MAP.cx, dy = my - MAP.cy;
   const d = Math.hypot(dx, dy) || 1;
@@ -373,81 +551,167 @@ function renderHandoffs() {
           </li>`;
         })
         .join("")
-    : `<li class="empty" style="display:block">No handoffs yet. Send <b>@team</b> a goal and watch the baton move.</li>`;
+    : `<li class="empty" style="display:block">No handoffs yet. Send <b>@team</b> a goal and watch the crew pass the baton.</li>`;
 }
 
 // ------------------------------------------------------------------ crew cards
-function ring(r, share, cls) {
-  const c = 2 * Math.PI * r;
-  const off = c * (1 - Math.min(1, share ?? 0));
-  return `<circle class="g-track" r="${r}" cx="26" cy="26" fill="none" stroke-width="4"/>
-    <circle class="${cls}" r="${r}" cx="26" cy="26" fill="none" stroke-width="4" stroke-linecap="round"
-      stroke-dasharray="${c.toFixed(2)}" stroke-dashoffset="${off.toFixed(2)}" transform="rotate(-90 26 26)"/>`;
-}
-
-function meter(label, used, cap, fmt, share) {
-  const cls = cap ? (share >= 1 ? "full" : share >= 0.8 ? "warn" : "") : "off";
-  return `<div class="meter"><span class="k">${label}</span>
-    <div class="bar ${cls}"><span style="width:${cap ? Math.max(2, share * 100).toFixed(1) : 0}%"></span></div>
-    <span class="v"><b>${fmt(used)}</b> / ${cap ? fmt(cap) : "∞"}</span></div>`;
-}
-
-const STATUS_TEXT = { idle: "idle", working: "working", limited: "at limit", paused: "paused", offline: "offline" };
+const STATUS_TEXT = { idle: "Ready", working: "Working", limited: "At limit", paused: "Paused", offline: "Offline" };
 const BILL = { subscription: "Your plan", local: "Local", metered: "Pay-per-use" };
 const BILL_HELP = {
   subscription: "Runs on a subscription you already have. No extra charges from Relay.",
-  local: "Runs on your own machine with that agent's own setup.",
+  local: "Runs on your own machine with that assistant's own setup.",
   metered: "Billed per use by the provider.",
 };
-const modelName = (a) => (a.provider ? `${a.provider}/${a.model}` : a.model);
 function connText(a) {
   if (!a.live || a.online === undefined) return a.connectorLabel;
   return `${a.connectorLabel} · ${a.online ? "online" : a.healthDetail || "offline"}`;
 }
+
 function renderCrew() {
+  // Don't clobber an open select dropdown while the user is actively interacting with it.
+  const activeEl = document.activeElement;
+  if (activeEl && activeEl.matches("#crew select")) return;
+
   $("#crew").innerHTML = S.agents
     .map((a) => {
       const u = a.usage;
       const l = a.limit;
-      const working = a.status === "working" ? `${STATUS_TEXT.working}${a.running > 1 ? ` ×${a.running}` : ""}` : STATUS_TEXT[a.status];
-      const rate = a.rate && (a.rate.remainingRequests != null || a.rate.remainingTokens != null)
-        ? `<div class="meter"><span class="k">Provider</span><span class="v" style="grid-column:2/4">${a.rate.remainingRequests != null ? `<b>${fmtK(a.rate.remainingRequests)}</b> req` : ""} ${a.rate.remainingTokens != null ? `<b>${fmtK(a.rate.remainingTokens)}</b> tok` : ""} left · ${ago(Date.parse(a.rate.at))} ago</span></div>`
-        : "";
-      return `<article class="agent ${a.enabled ? "" : "paused"}" style="--c:${a.color}" data-edit="${a.id}">
+      const activeTask = activeTaskFor(a.id);
+      const lastTask = lastTaskFor(a.id);
+      const isAsk = Boolean(activeTask?.awaitingApproval);
+      const isWorking = a.status === "working" && !isAsk;
+      const avatarState = isAsk ? "ask" : isWorking ? "working" : a.status === "idle" && a.live ? "online" : a.status;
+      const statusCls = isAsk ? "ask" : a.status;
+      const statusLabel = isAsk
+        ? "Needs OK"
+        : isWorking
+          ? `<span class="eq" aria-hidden="true"><i></i><i></i><i></i></span>Working${a.running > 1 ? ` ×${a.running}` : ""}`
+          : STATUS_TEXT[a.status];
+
+      let activityHtml;
+      if (isAsk && activeTask) {
+        activityHtml = `<div class="agent-activity ask" data-go-approvals role="button" tabindex="0">
+          <span class="act-text">Needs your OK: ${esc(activeTask.title)}</span>
+          <span class="act-meta">Review →</span>
+        </div>`;
+      } else if (activeTask) {
+        const since = activeTask.startedAt ?? activeTask.createdAt;
+        activityHtml = `<div class="agent-activity live">
+          <span class="act-text" title="${esc(activeTask.title)}">${activeTask.status === "queued" ? "Queued: " : ""}${esc(activeTask.title)}</span>
+          <span class="act-meta"><span data-since="${since}">${fmtMs(Date.now() - Date.parse(since))}</span><button type="button" class="act-cancel" data-cancel="${activeTask.id}">Cancel</button></span>
+        </div>`;
+      } else if (lastTask) {
+        activityHtml = `<div class="agent-activity">
+          <span class="act-text" title="${esc(lastTask.title)}">Last: ${esc(lastTask.title)}</span>
+          <span class="act-meta"><span data-ago="${Date.parse(lastTask.finishedAt)}">${ago(Date.parse(lastTask.finishedAt))}</span></span>
+        </div>`;
+      } else {
+        const skills = (a.skills || []).slice(0, 3).join(", ");
+        activityHtml = `<div class="agent-activity">
+          <span class="act-text">${a.enabled && a.live ? `Standing by for ${esc(skills || "tasks")}` : esc(connText(a))}</span>
+        </div>`;
+      }
+
+      const opts = Array.from(new Set([a.model, ...(a.modelOptions ?? [])]));
+      const modelControl = opts.length > 1
+        ? `<select class="inline-select" data-model-for="${a.id}" aria-label="Model for ${esc(a.name)}" title="${esc(a.model)}">${modelOptionsMarkup(a)}</select>`
+        : `<div class="model-static" title="${esc(a.model)}">${esc(shortModel(a.model, a))}</div>`;
+
+      const reasoningControl = `<select class="inline-select reasoning" data-reasoning-for="${a.id}" aria-label="Reasoning level for ${esc(a.name)}">
+        ${LEVELS.map((lvl) => `<option value="${lvl}" ${a.reasoning === lvl ? "selected" : ""}>${lvl}</option>`).join("")}
+      </select>`;
+
+      const reqCap = a.limits.dailyRequests;
+      const reqShare = l.requests ?? 0;
+      const barCls = reqCap ? (reqShare >= 1 ? "full" : reqShare >= 0.8 ? "warn" : "") : "off";
+      const barScale = reqCap ? Math.min(1, Math.max(u.requestsToday > 0 ? 0.04 : 0, reqShare)).toFixed(3) : "1";
+      const showSpend = a.limits.monthlyBudgetUsd > 0 || u.costMonth > 0;
+
+      return `<article class="agent ${a.enabled ? "" : "paused"} ${isWorking ? "is-working" : ""} ${isAsk ? "is-ask" : ""} ${S.target === a.id ? "is-target" : ""}" style="--c:${a.color}" data-agent-card="${a.id}">
         <div class="agent-top">
-          <svg class="glyph" viewBox="0 0 52 52" aria-hidden="true">
-            ${ring(23, l.requests, "g-req")}${ring(16.5, l.tokens, "g-tok")}
-            <text x="26" y="27">${esc(a.name[0])}</text>
-          </svg>
-          <div class="agent-id" style="padding-right:76px">
-            <div class="agent-name">${esc(a.name)} ${a.isLead ? '<span class="badge lead">Lead</span>' : ""}${a.live ? (a.billing ? `<span class="badge bill ${a.billing}" title="${esc(BILL_HELP[a.billing])}">${BILL[a.billing]}</span>` : "") : `<span class="badge demo">${a.connectorLabel.startsWith("Off") ? "Off" : "Demo"}</span>`}</div>
+          <div class="avatar ${avatarState}">
+            <span class="aura" aria-hidden="true"></span>
+            ${avatarSvg(a.id, a.name)}
+            <i class="presence-dot" aria-hidden="true"></i>
+          </div>
+          <div class="agent-id">
+            <div class="agent-name-row">
+              <span class="agent-name">${esc(a.name)}</span>
+              ${a.isLead ? '<span class="badge lead">Lead</span>' : ""}
+              ${a.live ? (a.billing ? `<span class="badge bill ${a.billing}" title="${esc(BILL_HELP[a.billing])}">${BILL[a.billing]}</span>` : "") : `<span class="badge demo">${a.connectorLabel.startsWith("Off") ? "Off" : "Demo"}</span>`}
+            </div>
             <div class="agent-tag" title="${esc(a.tagline)}">${esc(a.tagline)}</div>
           </div>
-          <span class="status ${a.status}"><i></i>${working}</span>
+          <span class="status-pill ${statusCls}">${statusLabel}</span>
         </div>
-        <div class="labels">
-          <span class="chip" title="Model"><span class="k">model</span>${esc(modelName(a))}</span>
-          ${a.lastServed && a.lastServed !== modelName(a) ? `<span class="chip" title="Model that answered the last task"><span class="k">served</span>${esc(a.lastServed)}</span>` : ""}
-          <span class="chip" title="Reasoning effort"><span class="k">reasoning</span>${think(a.reasoning)}${esc(a.reasoning)}</span>
+
+        ${activityHtml}
+
+        <div class="agent-controls">
+          <div class="ctrl-box">
+            <span class="ctrl-lbl"><span>Model</span>${a.lastServed && a.lastServed !== a.model ? `<span class="mono" title="Last answered by ${esc(a.lastServed)}">→ ${esc(a.lastServed.split("/").pop())}</span>` : ""}</span>
+            ${modelControl}
+          </div>
+          <div class="ctrl-box">
+            <span class="ctrl-lbl"><span>Thinking</span>${think(a.reasoning)}</span>
+            ${reasoningControl}
+          </div>
         </div>
-        <div class="meters">
-          ${meter("Requests", u.requestsToday, a.limits.dailyRequests, (n) => fmtK(n), l.requests ?? 0)}
-          ${meter("Tokens", u.tokensToday, a.limits.dailyTokens, fmtK, l.tokens ?? 0)}
-          ${meter("Spend/mo", u.costMonth, a.limits.monthlyBudgetUsd, fmtUsd, l.budget ?? 0)}
-          ${rate}
+
+        <div class="usage-strip">
+          <div class="usage-row">
+            <span>Today: <b>${fmtK(u.requestsToday)}</b>${reqCap ? ` / ${fmtK(reqCap)} req` : " req"} · <b>${fmtK(u.tokensToday)}</b> tok</span>
+            ${showSpend ? `<span><b>${fmtUsd(u.costMonth)}</b>/mo</span>` : ""}
+          </div>
+          <div class="bar ${barCls}"><span style="transform:scaleX(${barScale})"></span></div>
         </div>
+
         <div class="agent-foot">
           <span class="conn ${a.live ? (a.online === false ? "down" : "live") : ""}" title="${esc(connText(a))}"><i></i>${esc(connText(a))}</span>
-          <button class="btn" data-edit="${a.id}" aria-label="Edit ${esc(a.name)}">Edit</button>
+          <div class="foot-actions">
+            <button type="button" class="btn ghost" data-edit="${a.id}" aria-label="Settings for ${esc(a.name)}">Settings</button>
+            <button type="button" class="btn agent-go" data-ask="${a.id}">Ask ${esc(a.name)}</button>
+          </div>
         </div>
       </article>`;
     })
     .join("");
 }
 
-$("#crew").addEventListener("click", (e) => {
-  const card = e.target.closest("[data-edit]");
-  if (card) openEditor(card.dataset.edit);
+$("#crew").addEventListener("change", (e) => {
+  const modelSel = e.target.closest("[data-model-for]");
+  if (modelSel) {
+    const id = modelSel.dataset.modelFor;
+    const a = agentById(id);
+    if (a) void quickUpdateAgent(id, modelPatchFor(a, modelSel.value), modelSel);
+    return;
+  }
+  const rSel = e.target.closest("[data-reasoning-for]");
+  if (rSel) {
+    void quickUpdateAgent(rSel.dataset.reasoningFor, { reasoning: rSel.value }, rSel);
+  }
+});
+
+$("#crew").addEventListener("click", async (e) => {
+  if (e.target.closest("select, option")) return;
+  const cancelBtn = e.target.closest("[data-cancel]");
+  if (cancelBtn) {
+    await api(`/api/tasks/${cancelBtn.dataset.cancel}/cancel`, { method: "POST" }).catch((err) => toast(err.message));
+    toast("Cancelling…");
+    return;
+  }
+  if (e.target.closest("[data-go-approvals]")) {
+    setTab("thread");
+    $("#approvals").scrollIntoView({ behavior: "smooth", block: "start" });
+    return;
+  }
+  const askBtn = e.target.closest("[data-ask]");
+  if (askBtn) {
+    focusAgent(askBtn.dataset.ask, { switchTab: true });
+    return;
+  }
+  const editBtn = e.target.closest("[data-edit]");
+  if (editBtn) openEditor(editBtn.dataset.edit);
 });
 
 // ------------------------------------------------------------------ board
@@ -470,14 +734,14 @@ function renderLanes() {
   const by = (st) => work.filter((t) => st.includes(t.status));
   const recent = (arr, n) => arr.sort((x, y) => Date.parse(y.finishedAt ?? y.createdAt) - Date.parse(x.finishedAt ?? x.createdAt)).slice(0, n);
   const lanes = [
-    ["Working", by(["running"])],
-    ["Queued", by(["queued"])],
-    ["Done", recent(by(["done"]), 15)],
-    ["Failed / blocked", recent(by(["failed", "blocked", "cancelled"]), 10)],
+    ["Working", by(["running"]), "Active asks show here"],
+    ["Queued", by(["queued"]), "Waiting tasks queue here"],
+    ["Done", recent(by(["done"]), 15), "Finished replies land here"],
+    ["Failed / blocked", recent(by(["failed", "blocked", "cancelled"]), 10), "Clean slate"],
   ];
   $("#lanes").innerHTML = lanes
-    .map(([name, items]) => `<div class="lane"><div class="lane-head">${name}<b>${items.length}</b></div>
-      <div class="lane-list">${items.length ? items.map(tcard).join("") : `<div class="empty">Nothing here</div>`}</div></div>`)
+    .map(([name, items, emptyText]) => `<div class="lane"><div class="lane-head">${name}<b>${items.length}</b></div>
+      <div class="lane-list">${items.length ? items.map(tcard).join("") : `<div class="empty">${emptyText}</div>`}</div></div>`)
     .join("");
   const done = work.filter((t) => t.status === "done").length;
   $("#boardCount").textContent = `${done} finished · ${work.length} total`;
@@ -488,7 +752,6 @@ function renderRanks() {
   const rows = S.lb[S.period] ?? [];
   const top = rows.slice(0, 3);
   const max = Math.max(1, ...top.map((r) => r.score));
-  // Podium order: 2nd, 1st, 3rd.
   const order = [top[1], top[0], top[2]];
   $("#podium").innerHTML = order
     .map((r, i) => {
@@ -502,12 +765,12 @@ function renderRanks() {
     })
     .join("");
   $("#rankTable").innerHTML =
-    `<div class="rrow head"><span>#</span><span>Agent</span><span class="num">Done</span><span class="num">Tokens</span><span class="num">Success</span><span class="num hide-sm">Avg time</span></div>` +
+    `<div class="rrow head"><span>#</span><span>Assistant</span><span class="num">Done</span><span class="num">Tokens</span><span class="num">Success</span><span class="num hide-sm">Avg time</span></div>` +
     rows
       .map((r, i) => {
         const a = agentById(r.agentId);
         return `<div class="rrow"><span class="n">${i + 1}</span>
-          <span class="a"><span class="dot" style="--c:${a?.color}"></span>${esc(a?.name ?? r.agentId)}<span class="chip" style="padding:1px 6px;font-size:10.5px">${esc(a?.model ?? "")}</span></span>
+          <span class="a"><span class="dot" style="--c:${a?.color}"></span>${esc(a?.name ?? r.agentId)}<span class="chip">${esc(shortModel(a?.model ?? "", a))}</span></span>
           <span class="num">${r.done}${r.failed ? `<span class="muted"> / ${r.failed}✕</span>` : ""}</span>
           <span class="num">${fmtK(r.tokens)}</span>
           <span class="num">${r.done + r.failed ? Math.round(r.successRate * 100) + "%" : "—"}</span>
@@ -522,6 +785,26 @@ $("#rankSeg").addEventListener("click", (e) => {
   S.period = b.dataset.p;
   $$("#rankSeg button").forEach((x) => x.classList.toggle("on", x === b));
   renderRanks();
+});
+
+// ------------------------------------------------------------------ thread header crew strip
+function renderCrewStrip() {
+  const el = $("#crewStrip");
+  if (!el) return;
+  el.innerHTML = S.agents
+    .map((a) => {
+      const cls = a.status === "working" ? "working" : a.status === "idle" && a.live ? "online" : a.status;
+      return `<button type="button" class="strip-pip ${cls} ${S.target === a.id ? "on" : ""}" style="--c:${a.color}" data-strip-target="${a.id}" title="${esc(a.name)} · ${STATUS_TEXT[a.status]} · ${esc(shortModel(a.model, a))}" aria-label="Chat with ${esc(a.name)} (${STATUS_TEXT[a.status]})">
+        ${avatarSvg(a.id, a.name)}
+        <i aria-hidden="true"></i>
+      </button>`;
+    })
+    .join("");
+}
+
+$("#crewStrip").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-strip-target]");
+  if (b) focusAgent(b.dataset.stripTarget);
 });
 
 // ------------------------------------------------------------------ thread
@@ -546,21 +829,24 @@ function footer(t) {
 function modelChip(t, a) {
   const asked = t.model ?? a?.model ?? "";
   const served = t.servedModel;
-  if (!served) return `<span class="chip" title="Model">${esc(asked)}</span>`;
-  // Same model, just provider-qualified: show it once.
+  if (!served) return `<span class="chip" title="${esc(asked)}">${esc(shortModel(asked, a))}</span>`;
   if (served === asked || served.endsWith(`/${asked}`)) return `<span class="chip" title="Model that answered">${esc(served)}</span>`;
-  return `<span class="chip" title="Requested → model that answered">${esc(asked)} → ${esc(served)}</span>`;
+  return `<span class="chip" title="Requested → model that answered">${esc(shortModel(asked, a))} → ${esc(served)}</span>`;
 }
 
 function agentBubble(t) {
   const a = agentById(t.agentId);
-  const head = `<div class="ahead"><span class="dot" style="--c:${a?.color}"></span><span class="nm">${esc(a?.name ?? t.agentId)}</span>
-    ${modelChip(t, a)}<span class="chip" style="--c:${a?.color}">${think(t.reasoning)}${esc(t.reasoning ?? "")}</span></div>`;
+  const head = `<div class="ahead">
+    <span class="mini-av" style="--c:${a?.color ?? "var(--accent)"}">${avatarSvg(t.agentId, a?.name ?? t.agentId)}</span>
+    <span class="nm">${esc(a?.name ?? t.agentId)}</span>
+    ${modelChip(t, a)}
+    <span class="chip" style="--c:${a?.color}">${think(t.reasoning)}${esc(t.reasoning ?? "")}</span>
+  </div>`;
   const reroute = t.reroutedFrom ? `<div class="reroute">↪ Rerouted from ${esc(nameOf(t.reroutedFrom))} (at limit or paused)</div>` : "";
   let body;
   if (t.status === "done") body = `<div class="body">${md(t.result)}</div>`;
-  else if (t.awaitingApproval) body = `<div class="needs-ok">🛡 Waiting for you (see the card at the top of the thread, or Telegram)</div>`;
-  else if (t.status === "running" || t.status === "queued") body = thinking(t, t.status === "queued" ? "waiting for a free slot" : "thinking");
+  else if (t.awaitingApproval) body = `<div class="needs-ok">Waiting for your OK (see the card above, or Telegram)</div>`;
+  else if (t.status === "running" || t.status === "queued") body = thinking(t, t.status === "queued" ? "waiting for a free slot" : `${esc(a?.name ?? "Assistant")} is thinking`);
   else body = `<div class="err-text">${esc(stateLabel(t))}: ${esc(t.error ?? "")}</div>`;
   return `<div class="msg bot"><div class="bubble" style="--c:${a?.color}">${head}${reroute}${body}${footer(t)}</div></div>`;
 }
@@ -594,10 +880,11 @@ function userBubble(text, meta, cls = "") {
 }
 
 const TRIES = [
-  ["@team", "plan a launch week for our new product: research, copy, and a task list"],
-  ["@grok", "what are people on X saying about AI agents this week?"],
-  ["@muse", "write 5 punchy hook lines for a short video"],
-  ["@hermes", "outline a script that backs up my projects folder nightly"],
+  ["@team", "research what people say about AI agent dashboards, write 3 taglines from it, then review them"],
+  ["@grok", "what's trending on X about AI agents?"],
+  ["@muse", "write one sharp tagline for Relay"],
+  ["@cline", "write a regex for a US ZIP code"],
+  ["@hermes", "reply with one word: ready"],
 ];
 
 function renderThread() {
@@ -611,7 +898,7 @@ function renderThread() {
   if (!items.length) {
     const ids = new Set(S.agents.map((a) => a.id));
     el.innerHTML = `<div class="welcome"><h3>One line to your <em>whole crew.</em></h3>
-      <p>Talk to one agent, or hand the team a goal and let the lead split it up. Same commands work from Telegram and iMessage.</p>
+      <p>Message one assistant, swap their model on the fly, or hand the team a goal and watch them work together.</p>
       <div class="tries">${TRIES.filter(([who]) => who === "@team" || ids.has(who.slice(1)))
         .map(([who, text]) => `<button class="try" data-try="${esc(`${who} ${text}`)}"><b>${who}</b> ${esc(text)}</button>`)
         .join("")}</div></div>`;
@@ -667,31 +954,75 @@ $("#threadFilter").addEventListener("click", (e) => {
   renderThread();
 });
 
-// ------------------------------------------------------------------ composer
+// ------------------------------------------------------------------ composer + active bar
 function renderTargets() {
   if (S.target !== "auto" && S.target !== "team" && !agentById(S.target)) S.target = "auto";
   const chips = [
     { id: "auto", name: "Auto", cls: "", color: "var(--muted)" },
     { id: "team", name: "Team", cls: "team", color: "var(--accent)" },
-    ...S.agents.map((a) => ({ id: a.id, name: a.name, cls: "", color: a.color, off: !a.enabled })),
+    ...S.agents.map((a) => ({ id: a.id, name: a.name, cls: a.status === "working" ? "busy" : "", color: a.color, off: !a.enabled })),
   ];
   $("#targets").innerHTML = chips
     .map((c) => `<button type="button" class="target ${c.cls} ${S.target === c.id ? "on" : ""}" data-target="${c.id}" style="--c:${c.color}${c.off ? ";opacity:.5" : ""}"><span class="dot"></span>${esc(c.name)}</button>`)
     .join("");
-  const ph = S.target === "auto" ? "Ask anyone. Relay picks the best agent…" : S.target === "team" ? "Give the crew a goal…" : `Message ${nameOf(S.target)}…`;
+  const ph = S.target === "auto" ? "Ask anyone. Relay picks the best assistant…" : S.target === "team" ? "Give the crew a goal…" : `Message ${nameOf(S.target)}…`;
   $("#input").placeholder = ph;
 }
+
+function renderActiveBar() {
+  const bar = $("#activeBar");
+  if (!bar) return;
+  const activeEl = document.activeElement;
+  if (activeEl && activeEl.matches("#activeBar select")) return;
+
+  if (S.target === "auto") {
+    const ready = S.agents.filter((a) => a.live && a.enabled && a.status !== "offline").length;
+    bar.innerHTML = `<div class="active-bar-who"><span class="dot" style="--c:var(--ok)"></span><b>Auto-route</b><span>Picks the best of ${ready} ready</span></div>
+      <span class="muted small">Select one to switch models</span>`;
+    return;
+  }
+  if (S.target === "team") {
+    const lead = agentById(S.lead);
+    bar.innerHTML = `<div class="active-bar-who"><span class="dot" style="--c:var(--accent)"></span><b>Team mode</b><span>${esc(lead?.name ?? "Lead")} splits &amp; wraps up the work</span></div>`;
+    return;
+  }
+  const a = agentById(S.target);
+  if (!a) return;
+  const opts = Array.from(new Set([a.model, ...(a.modelOptions ?? [])]));
+  const modelSel = opts.length > 1
+    ? `<select class="inline-select" data-model-for="${a.id}" style="--c:${a.color}" aria-label="Model for ${esc(a.name)}">${modelOptionsMarkup(a)}</select>`
+    : `<span class="chip">${esc(shortModel(a.model, a))}</span>`;
+  const rSel = `<select class="inline-select reasoning" data-reasoning-for="${a.id}" style="--c:${a.color}" aria-label="Reasoning for ${esc(a.name)}">${LEVELS.map((l) => `<option value="${l}" ${a.reasoning === l ? "selected" : ""}>${l}</option>`).join("")}</select>`;
+  bar.innerHTML = `<div class="active-bar-who">
+      <span class="dot" style="--c:${a.color}"></span>
+      <b>${esc(a.name)}</b>
+      <span>${STATUS_TEXT[a.status]}</span>
+    </div>
+    <div class="active-bar-controls">${modelSel}${rSel}</div>`;
+}
+
+$("#activeBar").addEventListener("change", (e) => {
+  const modelSel = e.target.closest("[data-model-for]");
+  if (modelSel) {
+    const id = modelSel.dataset.modelFor;
+    const a = agentById(id);
+    if (a) void quickUpdateAgent(id, modelPatchFor(a, modelSel.value), modelSel);
+    return;
+  }
+  const rSel = e.target.closest("[data-reasoning-for]");
+  if (rSel) {
+    void quickUpdateAgent(rSel.dataset.reasoningFor, { reasoning: rSel.value }, rSel);
+  }
+});
 
 $("#targets").addEventListener("click", (e) => {
   const b = e.target.closest("[data-target]");
   if (!b) return;
-  S.target = b.dataset.target;
-  store.set("relay-target", S.target);
-  renderTargets();
-  $("#input").focus();
+  focusAgent(b.dataset.target);
 });
 
 const COMMANDS = [
+  ["/doctor", "check every connection & safety lock"],
   ["/agents", "models, reasoning, usage"],
   ["/status", "what's running now"],
   ["/board", "who did the most work"],
@@ -778,29 +1109,34 @@ function openEditor(id) {
   S.editing = id;
   const d = $("#drawer");
   d.style.setProperty("--c", a.color);
+  const opts = Array.from(new Set([a.model, ...(a.modelOptions ?? [])]));
   d.innerHTML = `
     <div class="drawer-head">
-      <svg class="glyph" viewBox="0 0 52 52" style="--c:${a.color}" aria-hidden="true">${ring(23, a.limit.requests, "g-req")}${ring(16.5, a.limit.tokens, "g-tok")}<text x="26" y="27">${esc(a.name[0])}</text></svg>
+      <div class="avatar ${a.status === "working" ? "working" : a.live ? "online" : ""}" style="--c:${a.color}">
+        ${avatarSvg(a.id, a.name)}
+      </div>
       <div><h3>${esc(a.name)}</h3><div class="muted small">${esc(a.tagline)}</div></div>
       <button class="icon-btn x" data-close aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
     </div>
     <form class="drawer-body" id="editForm">
       <div class="conn-box">${a.live ? (a.online === false ? `<span class="err-text">●</span> <b>${esc(a.connectorLabel)}</b> is ${esc(a.healthDetail || "offline")}. Start it, and Relay picks it up within 30s.` : `● Connected via <b>${esc(a.connectorLabel)}</b>${a.lastServed ? ` · last answer from <b>${esc(a.lastServed)}</b>` : ""}${a.billing ? `<br><span class="small">${esc(BILL_HELP[a.billing])}</span>` : ""}`) : (a.connectorLabel.startsWith("Off") ? `◌ <b>Off.</b> ${esc(a.connectorLabel.replace(/^Off · /, ""))}. Relay won't use paid APIs unless you set <code>RELAY_ALLOW_METERED=true</code>.` : `◌ <b>Demo mode.</b> ${esc(a.connectorLabel.replace(/^Demo · /, "To go live: "))}, then restart the hub. Demo agents never join real team work.`)}</div>
       <div class="field">
-        <label for="fModel">Model</label>
+        <label for="fModelPick">Quick pick model</label>
+        <select class="inline-select" id="fModelPick">${modelOptionsMarkup(a)}</select>
+        <label for="fModel" style="margin-top:6px">Model ID</label>
         <input class="input mono" id="fModel" list="modelList" value="${esc(a.model)}" spellcheck="false" />
-        <datalist id="modelList">${a.modelOptions.map((m) => `<option value="${esc(m)}"></option>`).join("")}</datalist>
-        <span class="help">${a.supportsProvider ? "With a provider below, this is the model Hermes runs. Without one, Hermes uses its own default model." : "Pick a suggestion or type any model ID the provider accepts."}</span>
+        <datalist id="modelList">${opts.map((m) => `<option value="${esc(m)}"></option>`).join("")}</datalist>
+        <span class="help">${a.supportsProvider ? `With a provider below, this is the model ${esc(a.name)} runs. Without one, ${esc(a.name)} uses its own default model.` : "Pick from the dropdown above or enter any allowed model ID."}</span>
       </div>
       ${a.supportsProvider ? `<div class="field">
         <label for="fProv">Provider</label>
-        <input class="input mono" id="fProv" value="${esc(a.provider)}" placeholder="blank = Hermes default" spellcheck="false" />
-        <span class="help">Hermes provider slug, e.g. openrouter, anthropic, openai, nous. Must already be set up in Hermes.</span>
+        <input class="input mono" id="fProv" value="${esc(a.provider)}" placeholder="${esc(a.discoveredProvider ? `blank = default (${a.discoveredProvider})` : "blank = Hermes default")}" spellcheck="false" />
+        <span class="help">Provider slug configured inside Hermes (active: ${esc(a.discoveredProvider || "default")}).</span>
       </div>` : ""}
       <div class="field">
-        <span class="lbl">Reasoning</span>
+        <span class="lbl">Thinking / reasoning</span>
         <div class="levels" id="fLevels">${LEVELS.map((l) => `<button type="button" data-level="${l}" class="${a.reasoning === l ? "on" : ""}">${think(l)}${l}</button>`).join("")}</div>
-        <span class="help">${a.sendsReasoning ? "Sent with every request to this agent." : "Shown as a label. This connection doesn't send a reasoning setting to the model."}</span>
+        <span class="help">${a.sendsReasoning ? "Sent with every request to this assistant." : "Shown as a label. This connection doesn't send a reasoning parameter."}</span>
       </div>
       <div class="field">
         <span class="lbl">Usage limits <span class="help">(0 = no limit)</span></span>
@@ -809,7 +1145,7 @@ function openEditor(id) {
           <div class="field"><label for="fTok">Tokens/day</label><input class="input mono" id="fTok" type="number" min="0" step="1000" value="${a.limits.dailyTokens}"/></div>
           <div class="field"><label for="fBud">Budget $/mo</label><input class="input mono" id="fBud" type="number" min="0" step="1" value="${a.limits.monthlyBudgetUsd}"/></div>
         </div>
-        <span class="help">When an agent hits a limit, auto-routed and team work moves to a teammate. Direct asks stop and tell you.</span>
+        <span class="help">When an assistant hits a limit, auto-routed and team work moves to a teammate. Direct asks stop and tell you.</span>
       </div>
       <div class="field">
         <span class="lbl">Pricing per 1M tokens (for spend tracking)</span>
@@ -826,7 +1162,7 @@ function openEditor(id) {
         <div class="field"><label for="fPar">Parallel tasks</label><input class="input mono" id="fPar" type="number" min="1" max="8" value="${a.maxConcurrent}"/></div>
         <div class="field"><label for="fTag">Tagline</label><input class="input" id="fTag" value="${esc(a.tagline)}"/></div>
       </div>
-      <label class="switch"><span><b>Active</b><br><span class="muted small">Paused agents get no new work.</span></span><input type="checkbox" id="fOn" ${a.enabled ? "checked" : ""}/></label>
+      <label class="switch"><span><b>Active</b><br><span class="muted small">Paused assistants get no new work.</span></span><input type="checkbox" id="fOn" ${a.enabled ? "checked" : ""}/></label>
     </form>
     <div class="drawer-foot">
       <button class="btn ghost" id="makeLead" ${a.isLead ? "disabled" : ""}>${a.isLead ? "★ Team lead" : "Make team lead"}</button>
@@ -835,7 +1171,7 @@ function openEditor(id) {
   $("#scrim").hidden = false;
   d.setAttribute("aria-hidden", "false");
   requestAnimationFrame(() => d.classList.add("open"));
-  setTimeout(() => $("#fModel")?.focus(), 250);
+  setTimeout(() => $("#fModelPick")?.focus(), 220);
 }
 
 function closeEditor() {
@@ -849,6 +1185,17 @@ function closeEditor() {
 $("#scrim").addEventListener("click", closeEditor);
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && S.editing) closeEditor();
+});
+$("#drawer").addEventListener("change", (e) => {
+  const pick = e.target.closest("#fModelPick");
+  if (!pick) return;
+  const a = agentById(S.editing);
+  const fModel = $("#fModel");
+  if (fModel) fModel.value = pick.value;
+  const fProv = $("#fProv");
+  if (fProv && a?.discoveredProvider) {
+    fProv.value = pick.value === "hermes-agent" ? "" : a.discoveredProvider;
+  }
 });
 $("#drawer").addEventListener("click", async (e) => {
   if (e.target.closest("[data-close]")) return closeEditor();
@@ -880,7 +1227,7 @@ $("#drawer").addEventListener("click", async (e) => {
     };
     try {
       const a = await api(`/api/agents/${id}`, { method: "PATCH", body: JSON.stringify(patch) });
-      toast(`Saved. ${a.name} runs ${a.model} · ${a.reasoning}`);
+      toast(`Saved. ${a.name} runs ${shortModel(a.model, a)} · ${a.reasoning}`);
       closeEditor();
     } catch (err) {
       toast(err.message);
@@ -927,7 +1274,6 @@ function untilText(iso) {
 function renderApprovals() {
   const open = pendingApprovals();
   const el = $("#approvals");
-  // Keep anything already typed into a question box across re-renders.
   const drafts = Object.fromEntries($$("#approvals [data-answer-for]").map((i) => [i.dataset.answerFor, i.value]));
   el.innerHTML = open
     .map((a) => a.kind === "question" ? `<form class="ask-card" style="--c:${colorOf(a.agentId)}" data-question="${a.id}">
