@@ -1,7 +1,9 @@
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
 import { hostname } from "node:os";
 import { EventEmitter } from "node:events";
+import { join, resolve } from "node:path";
 import { isReasoning } from "./config.js";
 import { errorText, PublicError } from "./errors.js";
 import { checkHealth, coveredModel, fetchModelOptions, resolveConnector, runAgent, type DiscoveredModels, type Purpose } from "./connectors.js";
@@ -60,6 +62,8 @@ export interface AgentView extends AgentConfig {
   discoveredProvider?: string;
   discoveredProviderName?: string;
   discoveredDefaultModel?: string;
+  avatarIdle?: string;
+  avatarWorking?: string;
   lastServed?: string;
   status: "idle" | "working" | "limited" | "paused" | "offline";
   running: number;
@@ -77,6 +81,21 @@ const titleOf = (text: string) => {
   return line.length > 90 ? `${line.slice(0, 87)}…` : line;
 };
 const fmtK = (n: number) => (n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
+
+const AVATAR_EXTS = [".gif", ".webp", ".png", ".jpg", ".jpeg", ".svg"] as const;
+
+/** Locate optional custom static/animated profile images in web/avatars/<id>-{idle,working}.<ext>. */
+export function findAgentAvatars(agentId: string, webRoot = resolve(process.env.RELAY_WEB_ROOT?.trim() || "web")): { idle?: string; working?: string } {
+  const dir = join(webRoot, "avatars");
+  const pick = (state: "idle" | "working") => {
+    for (const ext of AVATAR_EXTS) {
+      const file = `${agentId}-${state}${ext}`;
+      if (existsSync(join(dir, file))) return `/avatars/${file}`;
+    }
+    return undefined;
+  };
+  return { idle: pick("idle"), working: pick("working") };
+}
 
 /** Chat apps show markdown markers literally; keep the text, drop the markers. */
 export function toPlainText(md: string): string {
@@ -410,6 +429,7 @@ export class Hub {
     const limit = limitState(usage, agent.limits);
     const health = this.health.get(agent.id);
     const discovered = this.discoveredModels.get(agent.id);
+    const avatars = findAgentAvatars(agent.id);
     const modelOptions = discovered
       ? Array.from(new Set([agent.model, ...agent.modelOptions, ...discovered.models]))
       : agent.modelOptions;
@@ -429,6 +449,8 @@ export class Hub {
       discoveredProvider: discovered?.provider,
       discoveredProviderName: discovered?.providerName,
       discoveredDefaultModel: discovered?.defaultModel,
+      avatarIdle: avatars.idle,
+      avatarWorking: avatars.working,
       lastServed,
       status: !agent.enabled || connector.blocked
         ? "paused"

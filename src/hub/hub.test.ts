@@ -1,9 +1,9 @@
-import { existsSync, mkdtempSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { normalizeAgent } from "./config.js";
-import { Hub } from "./hub.js";
+import { findAgentAvatars, Hub } from "./hub.js";
 import { Store } from "./store.js";
 import type { Task } from "./types.js";
 
@@ -71,5 +71,17 @@ describe("Hub task queue", () => {
     expect(second.taskId).toBeUndefined();
     expect(second.reply).toMatch(/daily request limit/);
     await settle([first.taskId!]);
+  });
+});
+
+describe("findAgentAvatars", () => {
+  it("finds optional idle and working avatar files preferring animated formats", () => {
+    const dir = mkdtempSync(join(tmpdir(), "relay-avatar-test-"));
+    mkdirSync(join(dir, "avatars"), { recursive: true });
+    writeFileSync(join(dir, "avatars", "grok-idle.png"), "x");
+    writeFileSync(join(dir, "avatars", "grok-working.gif"), "x");
+    writeFileSync(join(dir, "avatars", "grok-working.png"), "x");
+    expect(findAgentAvatars("grok", dir)).toEqual({ idle: "/avatars/grok-idle.png", working: "/avatars/grok-working.gif" });
+    expect(findAgentAvatars("missing", dir)).toEqual({ idle: undefined, working: undefined });
   });
 });

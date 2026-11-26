@@ -25,52 +25,196 @@ const S = {
   pos: {},
   token: store.get("relay-token") || "",
   editing: null,
+  previewWork: new Set(),
 };
 
-// ------------------------------------------------------------------ assistant emblems
-function avatarSvg(id, name = "?") {
+// ------------------------------------------------------------------ personalized animated portraits
+function characterPortraitSvg(id, working = false, name = "?", color = "var(--accent)") {
+  const cls = `portrait ${working ? "is-working" : "is-idle"}`;
   switch (id) {
-    case "hermes":
-      // Winged relay chevron
-      return `<svg class="emblem" viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M4 13.5 12 6l8 7.5M7 17.5 12 13l5 4.5" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"/>
-        <circle cx="12" cy="5.5" r="1.6" fill="currentColor"/>
-      </svg>`;
     case "grok":
-      // Live signal compass spark
-      return `<svg class="emblem" viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M12 3.5 14.3 9.7 20.5 12 14.3 14.3 12 20.5 9.7 14.3 3.5 12 9.7 9.7Z" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/>
-        <circle cx="12" cy="12" r="2" fill="currentColor"/>
+      return `<svg class="${cls}" viewBox="0 0 80 80" aria-hidden="true">
+        <rect width="80" height="80" fill="url(#avBgGrok)"/>
+        ${working ? `
+          <circle class="radar-ring" cx="40" cy="36" r="24" fill="none" stroke="#5ee0ff" stroke-width="1.3"/>
+          <circle class="radar-ring r2" cx="40" cy="36" r="24" fill="none" stroke="#5ee0ff" stroke-width="1"/>
+        ` : `<circle cx="40" cy="36" r="27" fill="none" stroke="#5ee0ff" stroke-opacity="0.14" stroke-width="1"/>
+          <circle cx="40" cy="36" r="19" fill="none" stroke="#5ee0ff" stroke-opacity="0.12" stroke-width="1"/>`}
+        <g class="char-body">
+          <!-- Tech collar & shoulders -->
+          <path d="M13 80 C15 62, 26 57, 40 57 C54 57, 65 62, 67 80 Z" fill="url(#avSuit)"/>
+          <path d="M27 57 L34 65 L40 62 L46 65 L53 57" fill="none" stroke="#5ee0ff" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" opacity="${working ? 1 : 0.65}"/>
+          <rect x="34" y="48" width="12" height="12" rx="5" fill="#c79578"/>
+          <!-- Head -->
+          <path d="M25 32 C25 20, 31 15, 40 15 C49 15, 55 20, 55 32 C55 45, 48 53, 40 53 C32 53, 25 45, 25 32 Z" fill="url(#avSkinCool)"/>
+          <!-- Swept dark hair -->
+          <path d="M23 32 C22 18, 30 11, 41 11 C52 11, 58 18, 57 32 C55 24, 50 20, 42 20 C35 20, 30 22, 25 27 Z" fill="#1e222d"/>
+          <path d="M31 14 C37 12, 46 13, 52 18" fill="none" stroke="#5ee0ff" stroke-opacity="${working ? 0.55 : 0.22}" stroke-width="1.4" stroke-linecap="round"/>
+          <!-- Brows -->
+          <path d="M29 30 Q33 ${working ? 28.5 : 29} 37 30" fill="none" stroke="#222531" stroke-width="1.8" stroke-linecap="round"/>
+          <path d="M43 30 Q47 ${working ? 28.5 : 29} 51 30" fill="none" stroke="#222531" stroke-width="1.8" stroke-linecap="round"/>
+          <!-- Eyes -->
+          <g class="${working ? "eyes-scan" : "eyes-idle"}">
+            <ellipse cx="33.5" cy="35" rx="2.3" ry="${working ? 2.1 : 2.5}" fill="#0f1822"/>
+            <ellipse cx="46.5" cy="35" rx="2.3" ry="${working ? 2.1 : 2.5}" fill="#0f1822"/>
+            <circle cx="34.2" cy="34.2" r="0.9" fill="#8cf0ff"/>
+            <circle cx="47.2" cy="34.2" r="0.9" fill="#8cf0ff"/>
+          </g>
+          <!-- Electric cyan AR visor -->
+          <path d="M24 32.5 C24 30.5, 26 29.5, 30 29.5 L50 29.5 C54 29.5, 56 30.5, 56 32.5 L54.5 38.5 C53.8 40.5, 51 41.2, 46.5 40.8 L42.5 39.2 C41 38.6, 39 38.6, 37.5 39.2 L33.5 40.8 C29 41.2, 26.2 40.5, 25.5 38.5 Z"
+            fill="url(#avVisorCyan)" fill-opacity="${working ? 0.72 : 0.44}" stroke="#5ee0ff" stroke-width="${working ? 1.7 : 1.2}"/>
+          ${working
+            ? `<rect class="visor-beam" x="37" y="30.5" width="6" height="9.2" rx="2" fill="#e6fcff" opacity="0.9"/>`
+            : `<path d="M28 32.2 L35 32.2" stroke="#e6fcff" stroke-opacity="0.55" stroke-width="1.3" stroke-linecap="round"/>`}
+          <!-- Mouth -->
+          <path d="${working ? "M35.5 45.8 Q40.5 48.2 45 45.2" : "M36 46 Q40 48 44 46"}" fill="none" stroke="#8b5a46" stroke-width="1.6" stroke-linecap="round"/>
+        </g>
       </svg>`;
+
     case "muse":
-      // Prism / creative quill diamond
-      return `<svg class="emblem" viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M12 3.5 19 10.5 12 20.5 5 10.5Z" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/>
-        <path d="M5 10.5h14M12 3.5v17" fill="none" stroke="currentColor" stroke-width="1.4" opacity="0.6"/>
+      return `<svg class="${cls}" viewBox="0 0 80 80" aria-hidden="true">
+        <rect width="80" height="80" fill="url(#avBgMuse)"/>
+        ${working ? `
+          <g fill="#ffb547">
+            <circle class="spark" cx="17" cy="48" r="2.2" fill="#ff6f61"/>
+            <circle class="spark s2" cx="63" cy="44" r="2.4" fill="#ffb547"/>
+            <path class="spark s3" d="M22 25 L23.5 21 L25 25 L29 26.5 L25 28 L23.5 32 L22 28 L18 26.5 Z" fill="#ff9b8a"/>
+            <path class="spark s4" d="M58 22 L59.3 18.5 L60.6 22 L64 23.3 L60.6 24.6 L59.3 28 L58 24.6 L54.6 23.3 Z" fill="#ffd166"/>
+          </g>
+        ` : `<circle cx="19" cy="46" r="1.4" fill="#ff9b8a" opacity="0.45"/>
+          <circle cx="61" cy="36" r="1.6" fill="#ffb547" opacity="0.4"/>
+          <circle cx="57" cy="52" r="1.1" fill="#ff6f61" opacity="0.4"/>`}
+        <g class="char-body">
+          <!-- Flowing hair back -->
+          <path d="M21 34 C20 18, 28 11, 40 11 C52 11, 60 18, 59 35 C60 44, 57 52, 53 56 L27 56 C23 52, 20 44, 21 34 Z" fill="#231c26"/>
+          <!-- Sculptural jacket -->
+          <path d="M13 80 C16 61, 27 56, 40 56 C53 56, 64 61, 67 80 Z" fill="url(#avSuit)"/>
+          <path d="M24 62 C30 58, 34 62, 40 68 C46 62, 50 58, 56 62" fill="none" stroke="#ff6f61" stroke-width="1.6" stroke-linecap="round" opacity="${working ? 1 : 0.7}"/>
+          <!-- Neck & glowing prism pendant -->
+          <rect x="34.5" y="48" width="11" height="12" rx="5" fill="#d79b79"/>
+          <polygon class="prism-glow" points="40,62 44.5,68.5 40,73 35.5,68.5" fill="url(#avCoral)" stroke="#ffe0d6" stroke-width="0.9"/>
+          <!-- Face -->
+          <path d="M26 32 C26 21, 32 16, 40 16 C48 16, 54 21, 54 32 C54 44, 47.5 52, 40 52 C32.5 52, 26 44, 26 32 Z" fill="url(#avSkinWarm)"/>
+          <!-- Swept fringe -->
+          <path d="M24 31 C25 18, 34 12, 45 14 C52 15, 56 21, 56 29 C51 22, 45 20, 38 22 C33 23, 28 26, 24 31 Z" fill="#2a202e"/>
+          <path d="M30 16 C37 13, 47 14, 52 20" fill="none" stroke="#ff9b8a" stroke-opacity="${working ? 0.65 : 0.28}" stroke-width="1.3" stroke-linecap="round"/>
+          <!-- Brows & expressive eyes -->
+          <path d="M30 30 Q33.5 ${working ? 27.8 : 29} 37 30" fill="none" stroke="#2c202c" stroke-width="1.5" stroke-linecap="round"/>
+          <path d="M43 30 Q46.5 ${working ? 27.8 : 29} 50 30" fill="none" stroke="#2c202c" stroke-width="1.5" stroke-linecap="round"/>
+          <g class="eyes-idle">
+            <ellipse cx="33.5" cy="35" rx="${working ? 2.8 : 2.5}" ry="${working ? 3 : 2.6}" fill="#221822"/>
+            <ellipse cx="46.5" cy="35" rx="${working ? 2.8 : 2.5}" ry="${working ? 3 : 2.6}" fill="#221822"/>
+            <circle cx="34.5" cy="34" r="1.1" fill="${working ? "#ffd166" : "#fff2ed"}"/>
+            <circle cx="47.5" cy="34" r="1.1" fill="${working ? "#ffd166" : "#fff2ed"}"/>
+          </g>
+          <!-- Warm cheeks & smile -->
+          <ellipse cx="29.5" cy="39.5" rx="2.6" ry="1.3" fill="#ff6f61" opacity="${working ? 0.38 : 0.22}"/>
+          <ellipse cx="50.5" cy="39.5" rx="2.6" ry="1.3" fill="#ff6f61" opacity="${working ? 0.38 : 0.22}"/>
+          <path d="${working ? "M34.5 44.5 Q40 49.5 45.5 44.5" : "M35.5 45 Q40 48.2 44.5 45"}" fill="none" stroke="#9e5348" stroke-width="1.7" stroke-linecap="round"/>
+        </g>
       </svg>`;
+
+    case "hermes":
+      return `<svg class="${cls}" viewBox="0 0 80 80" aria-hidden="true">
+        <rect width="80" height="80" fill="url(#avBgHermes)"/>
+        <circle cx="40" cy="37" r="28" fill="none" stroke="#f6c445" stroke-opacity="${working ? 0.35 : 0.14}" stroke-width="1.1" stroke-dasharray="${working ? "6 6" : "2 5"}"/>
+        <g class="char-body">
+          <!-- Golden winged helm crests -->
+          <g class="${working ? "wing" : ""}">
+            <path d="M23 32 L12 22 L17 29 L11 28 L19 35 L14 36 L23 38 Z" fill="url(#avGold)" opacity="${working ? 1 : 0.82}"/>
+            <path d="M57 32 L68 22 L63 29 L69 28 L61 35 L66 36 L57 38 Z" fill="url(#avGold)" opacity="${working ? 1 : 0.82}"/>
+          </g>
+          <!-- Operator jacket -->
+          <path d="M13 80 C16 61, 27 56, 40 56 C53 56, 64 61, 67 80 Z" fill="url(#avSuit)"/>
+          <path d="M29 58 L40 67 L51 58" fill="none" stroke="#f6c445" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M35 68 L40 72 L45 68" fill="none" stroke="#f6c445" stroke-width="1.4" stroke-linecap="round" opacity="0.7"/>
+          <rect x="34" y="48" width="12" height="12" rx="5" fill="#c7956d"/>
+          <!-- Head -->
+          <path d="M25 32 C25 20, 31 15, 40 15 C49 15, 55 20, 55 32 C55 44.5, 48 52.5, 40 52.5 C32 52.5, 25 44.5, 25 32 Z" fill="url(#avSkinOlive)"/>
+          <!-- Clean styled hair -->
+          <path d="M23.5 31 C23 18, 30 11, 40 11 C50 11, 57 18, 56.5 31 C53 23, 47 19.5, 40 19.5 C33 19.5, 27 23, 23.5 31 Z" fill="#231e19"/>
+          <!-- Brows & eyes -->
+          <path d="M29.5 30 Q33.5 ${working ? 29.2 : 29} 37 30.2" fill="none" stroke="#261e16" stroke-width="1.7" stroke-linecap="round"/>
+          <path d="M43 30.2 Q46.5 ${working ? 29.2 : 29} 50.5 30" fill="none" stroke="#261e16" stroke-width="1.7" stroke-linecap="round"/>
+          <g class="${working ? "eyes-scan" : "eyes-idle"}">
+            <ellipse cx="33.5" cy="35" rx="2.4" ry="2.4" fill="#1e1812"/>
+            <ellipse cx="46.5" cy="35" rx="2.4" ry="2.4" fill="#1e1812"/>
+            <circle cx="34.3" cy="34.2" r="0.9" fill="#ffe28a"/>
+            <circle cx="47.3" cy="34.2" r="0.9" fill="#ffe28a"/>
+          </g>
+          ${working ? `
+            <!-- Active golden HUD band -->
+            <rect x="23.5" y="30.5" width="33" height="9" rx="4.5" fill="url(#avVisorGold)" fill-opacity="0.48" stroke="#f6c445" stroke-width="1.3"/>
+            <line class="hud-tick" x1="27" y1="35" x2="53" y2="35" stroke="#fff4cc" stroke-width="1.2" stroke-dasharray="4 4"/>
+          ` : ""}
+          <!-- Mouth -->
+          <path d="${working ? "M35.5 45.8 Q40 47.4 44.5 45.4" : "M35.5 45.5 Q40 48 44.5 45.5"}" fill="none" stroke="#8a5a3a" stroke-width="1.6" stroke-linecap="round"/>
+        </g>
+      </svg>`;
+
     case "cline":
-      // Precision code chevrons
-      return `<svg class="emblem" viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M8.5 7.5 4 12l4.5 4.5M15.5 7.5 20 12l-4.5 4.5M13.5 6l-3 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      return `<svg class="${cls}" viewBox="0 0 80 80" aria-hidden="true">
+        <rect width="80" height="80" fill="url(#avBgCline)"/>
+        <g class="char-body">
+          <!-- Tech hoodie shoulders -->
+          <path d="M12 80 C14 60, 25 54, 40 54 C55 54, 66 60, 68 80 Z" fill="url(#avSuit)"/>
+          <path d="M25 56 C27 65, 32 70, 40 70 C48 70, 53 65, 55 56" fill="none" stroke="#7ee0a8" stroke-width="1.6" opacity="${working ? 1 : 0.65}"/>
+          <!-- Outer cyber-hoodie & sleek bot shell -->
+          <path d="M19 42 C19 20, 27 12, 40 12 C53 12, 61 20, 61 42 C61 52, 54 58, 40 58 C26 58, 19 52, 19 42 Z" fill="url(#avBotShell)" stroke="#7ee0a8" stroke-opacity="${working ? 0.72 : 0.3}" stroke-width="1.4"/>
+          <!-- Dark glossy visor screen -->
+          <rect x="24" y="23" width="32" height="26" rx="10" fill="#0d1413" stroke="#7ee0a8" stroke-opacity="${working ? 0.85 : 0.35}" stroke-width="1.2"/>
+          ${working ? `
+            <!-- Scrolling code lines inside visor -->
+            <g stroke="#7ee0a8" stroke-opacity="0.55" stroke-width="1.4" stroke-linecap="round">
+              <line class="code-line" x1="28" y1="28" x2="35" y2="28"/>
+              <line class="code-line c2" x1="45" y1="28" x2="52" y2="28"/>
+              <line class="code-line c3" x1="29" y1="44" x2="51" y2="44"/>
+            </g>
+            <!-- Intense angled focused mint eyes -->
+            <path d="M29 33 L36 35.5 L29 38" fill="none" stroke="#7ee0a8" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M51 33 L44 35.5 L51 38" fill="none" stroke="#7ee0a8" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
+            <circle cx="40" cy="41.5" r="1.4" fill="#c8ffdf"/>
+          ` : `
+            <!-- Friendly blinking glowing mint eyes -->
+            <g class="eyes-glance">
+              <rect x="30.5" y="31.5" width="5.2" height="7.5" rx="2.6" fill="#7ee0a8"/>
+              <rect x="44.3" y="31.5" width="5.2" height="7.5" rx="2.6" fill="#7ee0a8"/>
+              <circle cx="32.2" cy="33.5" r="1.1" fill="#eafff3"/>
+              <circle cx="46" cy="33.5" r="1.1" fill="#eafff3"/>
+            </g>
+            <path d="M36.5 42.5 Q40 44.8 43.5 42.5" fill="none" stroke="#7ee0a8" stroke-width="1.6" stroke-linecap="round" opacity="0.85"/>
+          `}
+          <!-- Ear nodes -->
+          <rect x="16" y="31" width="3.5" height="11" rx="1.8" fill="#7ee0a8" opacity="${working ? 0.95 : 0.55}"/>
+          <rect x="60.5" y="31" width="3.5" height="11" rx="1.8" fill="#7ee0a8" opacity="${working ? 0.95 : 0.55}"/>
+        </g>
       </svg>`;
+
     default:
-      return `<svg class="emblem" viewBox="0 0 24 24" aria-hidden="true"><text x="12" y="13" text-anchor="middle" dominant-baseline="central" fill="currentColor" style="font:800 15px var(--font-display)">${esc(name[0] || "?")}</text></svg>`;
+      return `<svg class="${cls}" viewBox="0 0 80 80" aria-hidden="true">
+        <rect width="80" height="80" fill="#181820"/>
+        <circle cx="40" cy="40" r="24" fill="${color}" fill-opacity="0.16" stroke="${color}" stroke-width="1.8"/>
+        <text x="40" y="42" text-anchor="middle" dominant-baseline="central" fill="${color}" style="font:800 28px var(--font-display)">${esc(name[0] || "?")}</text>
+      </svg>`;
   }
 }
 
-function mapEmblemPaths(id, color, name) {
-  switch (id) {
-    case "hermes":
-      return `<path d="M-8 2 0-6 8 2M-5 6 0 1 5 6" fill="none" stroke="${color}" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"/><circle cy="-7" r="1.7" fill="${color}"/>`;
-    case "grok":
-      return `<path d="M0-9 2.3-2.3 9 0 2.3 2.3 0 9-2.3 2.3-9 0-2.3-2.3Z" fill="none" stroke="${color}" stroke-width="1.8" stroke-linejoin="round"/><circle r="2" fill="${color}"/>`;
-    case "muse":
-      return `<path d="M0-9 7-1 0 9-7-1Z" fill="none" stroke="${color}" stroke-width="1.8" stroke-linejoin="round"/><path d="M-7-1h14" stroke="${color}" stroke-width="1.3" opacity="0.65"/>`;
-    case "cline":
-      return `<path d="M-3.5-5-8.5 0-3.5 5M3.5-5 8.5 0 3.5 5M1.5-6-1.5 6" fill="none" stroke="${color}" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>`;
-    default:
-      return `<text y="1" text-anchor="middle" dominant-baseline="central" style="font:800 18px var(--font-display)" fill="${color}">${esc(name[0] || "?")}</text>`;
+function renderPortraitContent(agent, working = false) {
+  const idleUrl = agent?.avatarIdle;
+  const workUrl = agent?.avatarWorking || idleUrl;
+  if (idleUrl) {
+    return `<img class="portrait-img portrait-idle" src="${esc(idleUrl)}" alt="" loading="lazy"/>
+      <img class="portrait-img portrait-work" src="${esc(workUrl)}" alt="" loading="lazy"/>`;
   }
+  return characterPortraitSvg(agent?.id, working, agent?.name, agent?.color);
+}
+
+function mapPortraitMarkup(a, working) {
+  const url = working ? (a.avatarWorking || a.avatarIdle) : a.avatarIdle;
+  if (url) {
+    return `<image href="${esc(url)}" x="-24" y="-24" width="48" height="48" preserveAspectRatio="xMidYMid slice" clip-path="url(#mapAvatarClip)"/>`;
+  }
+  return `<g clip-path="url(#mapAvatarClip)"><svg x="-24" y="-24" width="48" height="48" viewBox="0 0 80 80">${characterPortraitSvg(a.id, working, a.name, a.color).replace(/^<svg[^>]*>|<\/svg>$/g, "")}</svg></g>`;
 }
 
 // ------------------------------------------------------------------ helpers
@@ -426,8 +570,8 @@ function renderMap() {
     const up = Math.sin(p.ang) < -0.3;
     const ly = up ? -50 : 41;
     const active = activeTaskFor(a.id);
-    const isWorking = a.status === "working";
-    const isOnline = a.live && a.enabled && a.status === "idle";
+    const isWorking = a.status === "working" || S.previewWork.has(a.id);
+    const isOnline = a.live && a.enabled && a.status === "idle" && !isWorking;
     const isSelected = S.target === a.id;
     const modelShort = shortModel(a.model, a);
     nodes += `<g class="map-node ${isSelected ? "selected" : ""}" data-map-target="${a.id}" role="button" tabindex="0" aria-label="Chat with ${esc(a.name)}" transform="translate(${p.x.toFixed(1)},${p.y.toFixed(1)})" opacity="${a.enabled ? 1 : 0.42}">
@@ -435,13 +579,13 @@ function renderMap() {
         <circle class="orbit-spin" r="30" fill="none" stroke="${a.color}" stroke-width="1.6" stroke-dasharray="14 28" stroke-linecap="round"/>` : ""}
       ${isOnline ? `<circle class="breathe" r="28" fill="none" stroke="${a.color}" stroke-width="1.1"/>` : ""}
       <g class="node-core">
-        <circle class="node-ring" r="24" fill="${a.color}" fill-opacity="${isWorking ? 0.22 : 0.12}" stroke="${a.color}" stroke-width="${isSelected ? 2.4 : 1.6}"/>
-        ${mapEmblemPaths(a.id, a.color, a.name)}
+        ${mapPortraitMarkup(a, isWorking)}
+        <circle class="node-ring" r="24" fill="none" stroke="${a.color}" stroke-width="${isSelected || isWorking ? 2.4 : 1.7}"/>
       </g>
-      <circle cx="17" cy="17" r="4.5" fill="${active?.awaitingApproval ? "var(--warn)" : isWorking ? a.color : isOnline ? "var(--ok)" : a.status === "offline" ? "var(--danger)" : "var(--faint)"}" stroke="var(--panel)" stroke-width="2"/>
+      <circle cx="17" cy="17" r="4.8" fill="${active?.awaitingApproval ? "var(--warn)" : isWorking ? a.color : isOnline ? "var(--ok)" : a.status === "offline" ? "var(--danger)" : "var(--faint)"}" stroke="var(--panel)" stroke-width="2"/>
       ${a.isLead ? `<text class="crown" y="${up ? 37 : -32}" fill="var(--accent-text)">LEAD</text>` : ""}
       <text class="node-label" y="${ly}">${esc(a.name)}</text>
-      <text class="node-sub" y="${ly + (up ? 13 : 13)}">${esc(modelShort.length > 18 ? modelShort.slice(0, 17) + "…" : modelShort)}</text>
+      <text class="node-sub" y="${ly + 13}">${esc(modelShort.length > 18 ? modelShort.slice(0, 17) + "…" : modelShort)}</text>
     </g>`;
   }
   $("#mapNodes", svg).innerHTML = nodes;
@@ -579,13 +723,14 @@ function renderCrew() {
       const activeTask = activeTaskFor(a.id);
       const lastTask = lastTaskFor(a.id);
       const isAsk = Boolean(activeTask?.awaitingApproval);
-      const isWorking = a.status === "working" && !isAsk;
+      const isPreview = S.previewWork.has(a.id);
+      const isWorking = (a.status === "working" && !isAsk) || isPreview;
       const avatarState = isAsk ? "ask" : isWorking ? "working" : a.status === "idle" && a.live ? "online" : a.status;
-      const statusCls = isAsk ? "ask" : a.status;
+      const statusCls = isAsk ? "ask" : isWorking ? "working" : a.status;
       const statusLabel = isAsk
         ? "Needs OK"
         : isWorking
-          ? `<span class="eq" aria-hidden="true"><i></i><i></i><i></i></span>Working${a.running > 1 ? ` ×${a.running}` : ""}`
+          ? `<span class="eq" aria-hidden="true"><i></i><i></i><i></i></span>${isPreview && a.status !== "working" ? "Preview" : `Working${a.running > 1 ? ` ×${a.running}` : ""}`}`
           : STATUS_TEXT[a.status];
 
       let activityHtml;
@@ -629,11 +774,11 @@ function renderCrew() {
 
       return `<article class="agent ${a.enabled ? "" : "paused"} ${isWorking ? "is-working" : ""} ${isAsk ? "is-ask" : ""} ${S.target === a.id ? "is-target" : ""}" style="--c:${a.color}" data-agent-card="${a.id}">
         <div class="agent-top">
-          <div class="avatar ${avatarState}">
+          <button type="button" class="avatar ${avatarState}" data-preview-avatar="${a.id}" title="Click to preview ${esc(a.name)}'s working animation" aria-label="Preview ${esc(a.name)}'s working animation">
             <span class="aura" aria-hidden="true"></span>
-            ${avatarSvg(a.id, a.name)}
+            <span class="avatar-stage">${renderPortraitContent(a, isWorking)}</span>
             <i class="presence-dot" aria-hidden="true"></i>
-          </div>
+          </button>
           <div class="agent-id">
             <div class="agent-name-row">
               <span class="agent-name">${esc(a.name)}</span>
@@ -694,6 +839,26 @@ $("#crew").addEventListener("change", (e) => {
 
 $("#crew").addEventListener("click", async (e) => {
   if (e.target.closest("select, option")) return;
+  const previewBtn = e.target.closest("[data-preview-avatar]");
+  if (previewBtn) {
+    const id = previewBtn.dataset.previewAvatar;
+    if (S.previewWork.has(id)) S.previewWork.delete(id);
+    else {
+      S.previewWork.add(id);
+      clearTimeout(S.previewTimers?.[id]);
+      S.previewTimers ??= {};
+      S.previewTimers[id] = setTimeout(() => {
+        S.previewWork.delete(id);
+        renderCrew();
+        renderMap();
+        renderCrewStrip();
+      }, 4500);
+    }
+    renderCrew();
+    renderMap();
+    renderCrewStrip();
+    return;
+  }
   const cancelBtn = e.target.closest("[data-cancel]");
   if (cancelBtn) {
     await api(`/api/tasks/${cancelBtn.dataset.cancel}/cancel`, { method: "POST" }).catch((err) => toast(err.message));
@@ -793,9 +958,10 @@ function renderCrewStrip() {
   if (!el) return;
   el.innerHTML = S.agents
     .map((a) => {
-      const cls = a.status === "working" ? "working" : a.status === "idle" && a.live ? "online" : a.status;
+      const working = a.status === "working" || S.previewWork.has(a.id);
+      const cls = working ? "working" : a.status === "idle" && a.live ? "online" : a.status;
       return `<button type="button" class="strip-pip ${cls} ${S.target === a.id ? "on" : ""}" style="--c:${a.color}" data-strip-target="${a.id}" title="${esc(a.name)} · ${STATUS_TEXT[a.status]} · ${esc(shortModel(a.model, a))}" aria-label="Chat with ${esc(a.name)} (${STATUS_TEXT[a.status]})">
-        ${avatarSvg(a.id, a.name)}
+        <span class="pip-stage">${renderPortraitContent(a, working)}</span>
         <i aria-hidden="true"></i>
       </button>`;
     })
@@ -836,8 +1002,9 @@ function modelChip(t, a) {
 
 function agentBubble(t) {
   const a = agentById(t.agentId);
+  const working = t.status === "running" || t.status === "queued";
   const head = `<div class="ahead">
-    <span class="mini-av" style="--c:${a?.color ?? "var(--accent)"}">${avatarSvg(t.agentId, a?.name ?? t.agentId)}</span>
+    <span class="mini-av" style="--c:${a?.color ?? "var(--accent)"}">${renderPortraitContent(a ?? { id: t.agentId, name: t.agentId }, working)}</span>
     <span class="nm">${esc(a?.name ?? t.agentId)}</span>
     ${modelChip(t, a)}
     <span class="chip" style="--c:${a?.color}">${think(t.reasoning)}${esc(t.reasoning ?? "")}</span>
@@ -1112,10 +1279,20 @@ function openEditor(id) {
   const opts = Array.from(new Set([a.model, ...(a.modelOptions ?? [])]));
   d.innerHTML = `
     <div class="drawer-head">
-      <div class="avatar ${a.status === "working" ? "working" : a.live ? "online" : ""}" style="--c:${a.color}">
-        ${avatarSvg(a.id, a.name)}
+      <div class="avatar lg ${a.status === "working" ? "working" : a.live ? "online" : ""}" id="drawerAvatar" style="--c:${a.color}">
+        <span class="aura" aria-hidden="true"></span>
+        <span class="avatar-stage">${renderPortraitContent(a, a.status === "working")}</span>
       </div>
-      <div><h3>${esc(a.name)}</h3><div class="muted small">${esc(a.tagline)}</div></div>
+      <div>
+        <h3>${esc(a.name)}</h3>
+        <div class="muted small">${esc(a.tagline)}</div>
+        <div class="preview-row">
+          <div class="preview-toggle" id="avatarPreviewToggle" role="group" aria-label="Preview avatar state">
+            <button type="button" data-av-mode="idle" class="${a.status === "working" ? "" : "on"}">Ready</button>
+            <button type="button" data-av-mode="working" class="${a.status === "working" ? "on" : ""}">Working</button>
+          </div>
+        </div>
+      </div>
       <button class="icon-btn x" data-close aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
     </div>
     <form class="drawer-body" id="editForm">
@@ -1199,6 +1376,21 @@ $("#drawer").addEventListener("change", (e) => {
 });
 $("#drawer").addEventListener("click", async (e) => {
   if (e.target.closest("[data-close]")) return closeEditor();
+  const avMode = e.target.closest("[data-av-mode]");
+  if (avMode) {
+    const a = agentById(S.editing);
+    if (!a) return;
+    const working = avMode.dataset.avMode === "working";
+    $$("#avatarPreviewToggle button").forEach((b) => b.classList.toggle("on", b === avMode));
+    const av = $("#drawerAvatar");
+    if (av) {
+      av.classList.toggle("working", working);
+      av.classList.toggle("online", !working && a.live);
+      const stage = av.querySelector(".avatar-stage");
+      if (stage) stage.innerHTML = renderPortraitContent(a, working);
+    }
+    return;
+  }
   const lvl = e.target.closest("[data-level]");
   if (lvl) {
     $$("#fLevels button").forEach((b) => b.classList.toggle("on", b === lvl));
