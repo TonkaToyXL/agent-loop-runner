@@ -28,6 +28,8 @@ export interface ConnectorConfig {
   reasoningArg?: string;
   /** Env vars that must be non-empty for this connector to be used. */
   requiresEnv?: string[];
+  /** cli: environment variables removed before starting the command (e.g. pay-per-use API keys a subscription CLI would otherwise bill). */
+  dropEnv?: string[];
   /** openai: base URL such as https://api.x.ai/v1. */
   baseUrl?: string;
   /** openai: env var that overrides baseUrl. */

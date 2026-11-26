@@ -520,6 +520,14 @@ async function runOpenAI(req: RunRequest, config: ConnectorConfig): Promise<RunR
 // ---------------------------------------------------------------- cli (local, signed-in tools)
 const MAX_STDOUT = 4 * 1024 * 1024;
 
+/** The environment a CLI runs with: Relay's own, minus any variables the connector drops. Exported for tests. */
+export function cliEnv(config: ConnectorConfig, base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  if (!config.dropEnv?.length) return base;
+  const env = { ...base };
+  for (const name of config.dropEnv) delete env[name];
+  return env;
+}
+
 /** Parse a CLI's stdout into a result. Exported for tests. */
 export function parseCliOutput(stdout: string, format: ConnectorConfig["outputFormat"], label: string): Omit<RunResult, "rate"> & { usage?: TokenUsage } {
   if (format === "codex-jsonl") {
@@ -595,7 +603,7 @@ async function runCli(req: RunRequest, config: ConnectorConfig): Promise<RunResu
   const cwd = join(tmpdir(), "relay-cli", req.agent.id);
   mkdirSync(cwd, { recursive: true });
   if (req.signal.aborted) throw new Error("Cancelled");
-  const child = spawn(config.command!, args, { cwd, env: process.env, stdio: ["pipe", "pipe", "pipe"] });
+  const child = spawn(config.command!, args, { cwd, env: cliEnv(config), stdio: ["pipe", "pipe", "pipe"] });
   let stdout = "";
   let stderr = "";
   child.stdout.on("data", (d: Buffer) => {

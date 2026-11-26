@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { normalizeAgent } from "./config.js";
-import { buildChatBody, coveredModel, networkReason, parseChatResponse, parseCliOutput, parseModelOptions, pickModelForTask, pickReasoningForTask, resolveConnector } from "./connectors.js";
+import { buildChatBody, cliEnv, coveredModel, networkReason, parseChatResponse, parseCliOutput, parseModelOptions, pickModelForTask, pickReasoningForTask, resolveConnector } from "./connectors.js";
 import type { ConnectorConfig } from "./types.js";
 
 const hermesConn: ConnectorConfig = { kind: "openai", label: "Hermes", reasoningIn: "model_options", supportsProvider: true };
@@ -334,5 +334,22 @@ describe("pickModelForTask (auto model mode)", () => {
       model: "gpt-6.1-terra",
       reasoning: "max",
     });
+  });
+});
+
+describe("cliEnv", () => {
+  it("keeps pay-per-use API keys away from a subscription CLI", () => {
+    const base = { PATH: "/bin", OPENAI_API_KEY: "sk-paid", CODEX_API_KEY: "sk-paid2", HOME: "/h" };
+    const conn: ConnectorConfig = { kind: "cli", label: "Codex", command: "codex", dropEnv: ["CODEX_API_KEY", "OPENAI_API_KEY"] };
+    expect(cliEnv(conn, base)).toEqual({ PATH: "/bin", HOME: "/h" });
+    expect(base.OPENAI_API_KEY).toBe("sk-paid");
+    expect(cliEnv({ kind: "cli", label: "x", command: "x" }, base)).toBe(base);
+  });
+
+  it("is configured on the ChatGPT connector", async () => {
+    const { readFileSync } = await import("node:fs");
+    const cfg = JSON.parse(readFileSync(new URL("../../relay.config.json", import.meta.url), "utf8"));
+    const codex = cfg.agents.find((a: { id: string }) => a.id === "chatgpt").connectors[0];
+    expect(codex.dropEnv).toEqual(expect.arrayContaining(["CODEX_API_KEY", "OPENAI_API_KEY"]));
   });
 });
