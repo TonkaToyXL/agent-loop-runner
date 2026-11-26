@@ -19,6 +19,12 @@ const MAX_STEPS = 6;
 /** How much of an earlier step's answer to pass forward. */
 const MAX_HANDOFF_CHARS = 6000;
 
+/** Trim a teammate's reply and stop it from closing or opening a teammate_output fence itself. */
+function fenced(text: string): string {
+  const cut = text.length > MAX_HANDOFF_CHARS ? `${text.slice(0, MAX_HANDOFF_CHARS)}\n[…cut for length]` : text;
+  return cut.replace(/<(\/?)(teammate_output)/gi, "‹$1$2");
+}
+
 export function planPrompt(goal: string, agents: PlannerAgent[]): string {
   const roster = agents
     .filter((a) => a.enabled)
@@ -155,7 +161,7 @@ export function stepPrompt(task: string, inputs: StepResult[]): string {
   if (!inputs.length) return task;
   const body = inputs
     .map((r) => {
-      const text = r.text.length > MAX_HANDOFF_CHARS ? `${r.text.slice(0, MAX_HANDOFF_CHARS)}\n[…cut for length]` : r.text;
+      const text = fenced(r.text);
       return `### Step ${r.step} · ${r.agentName}${r.ok ? "" : " (failed)"}\n<teammate_output step="${r.step}" agent="${r.agentName}">\n${text}\n</teammate_output>`;
     })
     .join("\n\n");
@@ -170,7 +176,7 @@ export function readySteps(steps: PlanStep[], finished: Set<number>, started: Se
 export function synthesisPrompt(goal: string, parts: { agentName: string; ok: boolean; text: string }[]): string {
   const body = parts
     .map((p, i) => {
-      const text = p.text.length > MAX_HANDOFF_CHARS ? `${p.text.slice(0, MAX_HANDOFF_CHARS)}\n[…cut for length]` : p.text;
+      const text = fenced(p.text);
       return `### Step ${i + 1} · ${p.agentName}${p.ok ? "" : " (failed)"}\n<teammate_output step="${i + 1}" agent="${p.agentName}">\n${text}\n</teammate_output>`;
     })
     .join("\n\n");
