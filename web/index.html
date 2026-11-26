@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="app.css?v=5" />
+  <link rel="stylesheet" href="app.css?v=6" />
 </head>
 <body>
   <div class="app" id="app">
@@ -27,10 +27,21 @@
       <div class="kpis" id="kpis"></div>
       <div class="top-right">
         <div class="channels" id="channels"></div>
+        <button class="cmd-btn" id="cmdBtn" title="Command palette (⌘K)" aria-label="Open command palette">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M16 16l4 4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+          <kbd>⌘K</kbd>
+        </button>
+        <button class="icon-btn" id="focusBtn" title="Toggle focus mode (hide Board & Ranks)" aria-label="Toggle focus mode" aria-pressed="false">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V5h4M20 9V5h-4M4 15v4h4M20 15v4h-4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <button class="icon-btn" id="soundBtn" title="Toggle subtle sound effects" aria-label="Toggle sound effects" aria-pressed="false">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5L6 9H3v6h3l5 4V5Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path class="snd-waves" d="M15.5 8.8a4.5 4.5 0 0 1 0 6.4M18.3 6a8.5 8.5 0 0 1 0 12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path class="snd-mute" d="M15.5 9.5l5 5M20.5 9.5l-5 5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+        </button>
         <button class="icon-btn" id="themeBtn" title="Toggle theme" aria-label="Toggle theme">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9 7 7 0 0 1-9-9Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
         </button>
       </div>
+      <div class="top-pulse" id="topPulse" aria-hidden="true"></div>
     </header>
 
     <main class="main" id="main">
@@ -40,10 +51,17 @@
           <div class="map-caption" id="mapCaption"></div>
         </div>
         <div class="mission-feed">
-          <div class="section-head">
-            <h2>Live activity</h2>
-            <span class="muted small" id="leadLabel"></span>
+          <div class="section-head mission-head">
+            <h2>Live mission</h2>
+            <div class="mission-meta">
+              <span class="muted small" id="leadLabel"></span>
+              <button type="button" class="replay-btn" id="replayBtn" hidden title="Replay the last team relay on the map">
+                <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 3.5L12.5 8l-8 4.5V3.5Z" fill="currentColor"/></svg>
+                Replay
+              </button>
+            </div>
           </div>
+          <div class="pipeline" id="missionPipeline" hidden></div>
           <ol class="handoffs" id="handoffs"></ol>
         </div>
       </section>
@@ -118,6 +136,22 @@
   <div class="scrim" id="scrim" hidden></div>
   <aside class="drawer" id="drawer" aria-hidden="true" aria-label="Assistant settings"></aside>
 
+  <div class="cmdk-wrap" id="cmdkWrap" hidden>
+    <div class="cmdk" role="dialog" aria-modal="true" aria-label="Command palette">
+      <div class="cmdk-head">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M16 16l4 4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+        <input id="cmdkInput" type="text" placeholder="Jump to an assistant, switch models, run a command…" autocomplete="off" spellcheck="false" />
+        <kbd>ESC</kbd>
+      </div>
+      <div class="cmdk-list" id="cmdkList" role="listbox"></div>
+      <div class="cmdk-foot">
+        <span><kbd>↑↓</kbd> move</span>
+        <span><kbd>↵</kbd> run</span>
+        <span><kbd>⌘K</kbd> toggle</span>
+      </div>
+    </div>
+  </div>
+
   <div class="lock" id="lock" hidden>
     <form class="lock-card" id="lockForm">
       <svg class="brand-mark big" viewBox="0 0 32 32" aria-hidden="true">
@@ -139,6 +173,6 @@
       </clipPath>
     </defs>
   </svg>
-  <script src="app.js?v=4" type="module"></script>
+  <script src="app.js?v=6" type="module"></script>
 </body>
 </html>
