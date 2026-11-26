@@ -68,6 +68,27 @@ export function parseApprovalButton(data: string | undefined): { id: string; app
   return m ? { id: m[1], approve: m[2] === "y" } : null;
 }
 
+/** Build Telegram's / command menu, including every active assistant. */
+export function buildBotCommands(agents: { id: string; name: string; tagline?: string }[]): { command: string; description: string }[] {
+  const agentCmds = agents
+    .filter((a) => /^[a-z0-9_]{1,32}$/.test(a.id))
+    .map((a) => ({
+      command: a.id,
+      description: (`Ask ${a.name}${a.tagline ? ` — ${a.tagline}` : ""}`).slice(0, 120),
+    }));
+  return [
+    { command: "team", description: "Give the crew a goal" },
+    ...agentCmds,
+    { command: "agents", description: "Models, reasoning, usage" },
+    { command: "status", description: "What's running now" },
+    { command: "approvals", description: "What's waiting for your OK" },
+    { command: "doctor", description: "Check that everything is connected" },
+    { command: "board", description: "Who did the most work" },
+    { command: "inbox", description: "Recent email (read-only)" },
+    { command: "help", description: "How to talk to the crew" },
+  ];
+}
+
 /** Telegram bot via long polling: no public URL or webhook needed. */
 export class TelegramChannel implements ChannelAdapter {
   readonly name = "telegram" as const;
@@ -75,6 +96,7 @@ export class TelegramChannel implements ChannelAdapter {
   private running = false;
   private connected = false;
   private detail = "";
+  private botUsername = "";
   private abort = new AbortController();
   /** Approval id -> the messages that show it, so they can be updated after a decision. */
   private readonly approvalMessages = new Map<string, { chatId: string; messageId: number }[]>();
@@ -166,18 +188,10 @@ export class TelegramChannel implements ChannelAdapter {
   private async loop(): Promise<void> {
     try {
       const me = await this.call<{ username: string }>("getMe", {});
+      this.botUsername = me.username;
       this.setState(true, `@${me.username}`);
       await this.call("setMyCommands", {
-        commands: [
-          { command: "team", description: "Give the crew a goal" },
-          { command: "inbox", description: "Recent email (read-only)" },
-          { command: "approvals", description: "What's waiting for your OK" },
-          { command: "status", description: "What's running now" },
-          { command: "agents", description: "Models, reasoning, usage" },
-          { command: "doctor", description: "Check that everything is connected" },
-          { command: "board", description: "Who did the most work" },
-          { command: "help", description: "How to talk to the crew" },
-        ],
+        commands: buildBotCommands(this.hub.agents()),
       }).catch(() => {});
     } catch (err) {
       this.setState(false, err instanceof Error ? err.message : "getMe failed");
@@ -192,7 +206,7 @@ export class TelegramChannel implements ChannelAdapter {
           AbortSignal.any([this.abort.signal, AbortSignal.timeout(65_000)]),
         );
         backoff = 1000;
-        if (!this.connected) this.setState(true, this.detail || "polling");
+        if (!this.connected) this.setState(true, this.botUsername ? `@${this.botUsername}` : "polling");
         for (const update of updates) {
           this.offset = update.update_id + 1;
           void this.onMessage(update);

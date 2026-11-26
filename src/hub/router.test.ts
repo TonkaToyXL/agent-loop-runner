@@ -32,8 +32,18 @@ describe("parseCommand", () => {
     expect(parseCommand("/model nobody x", agents).type).toBe("error");
   });
 
-  it("strips Telegram bot suffixes from commands", () => {
-    expect(parseCommand("/status@RelayCrewBot", agents)).toEqual({ type: "status" });
+  it("strips Telegram bot suffixes from commands and guides bare agent mentions", () => {
+    const fullCrew = [...agents, { id: "cline", name: "Cline" }, { id: "zen", name: "Zen" }, { id: "chatgpt", name: "ChatGPT" }];
+    expect(parseCommand("/status@RelayCrewBot", fullCrew)).toEqual({ type: "status" });
+    expect(parseCommand("/chatgpt@Relay_xl_bot summarize this", fullCrew)).toEqual({
+      type: "ask",
+      agentId: "chatgpt",
+      text: "summarize this",
+    });
+    expect(parseCommand("@gpt quick check", fullCrew)).toEqual({ type: "ask", agentId: "chatgpt", text: "quick check" });
+    expect(parseCommand("/codex quick check", fullCrew)).toEqual({ type: "ask", agentId: "chatgpt", text: "quick check" });
+    expect(parseCommand("/chatgpt", fullCrew)).toEqual({ type: "error", message: "Usage: /chatgpt <your ask> (or @chatgpt <your ask>)" });
+    expect(parseCommand("@zen", fullCrew)).toEqual({ type: "error", message: "Usage: @zen <your ask>" });
   });
 
   it("reports unknown agents and commands", () => {

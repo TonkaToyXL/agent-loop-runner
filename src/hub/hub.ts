@@ -589,8 +589,10 @@ export class Hub {
     const agents = this.agents();
     const cmd = parseCommand(text, agents);
     switch (cmd.type) {
-      case "help":
-        return { reply: HELP_TEXT };
+      case "help": {
+        const crew = agents.map((a) => `/${a.id}`).join(" · ");
+        return { reply: crew ? `${HELP_TEXT}\n\nCrew: ${crew}` : HELP_TEXT };
+      }
       case "agents":
         return { reply: this.agentsText() };
       case "status":

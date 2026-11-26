@@ -26,10 +26,18 @@ export interface AgentRef {
 
 const TEAM_WORDS = new Set(["team", "all", "everyone", "crew"]);
 
+const AGENT_ALIASES: Record<string, string> = {
+  gpt: "chatgpt",
+  codex: "chatgpt",
+  opencode: "zen",
+};
+
 export function resolveAgent(token: string, agents: AgentRef[]): string | null {
   const t = token.toLowerCase().replace(/^@/, "");
   const hit = agents.find((a) => a.id === t || a.name.toLowerCase() === t);
-  return hit ? hit.id : null;
+  if (hit) return hit.id;
+  const alias = AGENT_ALIASES[t];
+  return alias && agents.some((a) => a.id === alias) ? alias : null;
 }
 
 /**
@@ -110,11 +118,25 @@ export function parseCommand(input: string, agents: AgentRef[]): Command {
         // Allow "/grok do this" as a shortcut for "@grok do this".
         const agentId = resolveAgent(cmd, agents);
         const body = text.slice(rawCmd.length + 1).trim();
-        if (agentId && body) return { type: "ask", agentId, text: body };
-        if (TEAM_WORDS.has(cmd) && body) return { type: "team", text: body };
+        if (agentId) {
+          return body ? { type: "ask", agentId, text: body } : { type: "error", message: `Usage: /${agentId} <your ask> (or @${agentId} <your ask>)` };
+        }
+        if (TEAM_WORDS.has(cmd)) {
+          return body ? { type: "team", text: body } : { type: "error", message: `Usage: /${cmd} <goal>` };
+        }
         return { type: "error", message: `Unknown command /${cmd}. Try /help.` };
       }
     }
+  }
+
+  const bareMention = /^@([\w-]+)$/.exec(text);
+  if (bareMention) {
+    const who = bareMention[1];
+    if (TEAM_WORDS.has(who.toLowerCase())) return { type: "error", message: `Usage: @${who} <goal>` };
+    const agentId = resolveAgent(who, agents);
+    return agentId
+      ? { type: "error", message: `Usage: @${agentId} <your ask>` }
+      : { type: "error", message: `No agent called @${who}. Try /agents.` };
   }
 
   const mention = /^@([\w-]+)[\s,:]+([\s\S]+)$/.exec(text);

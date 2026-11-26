@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { toPlainText } from "../hub.js";
 import { normalizeHandle } from "./imessage.js";
-import { chunk } from "./telegram.js";
+import { buildBotCommands, chunk } from "./telegram.js";
 
 describe("normalizeHandle", () => {
   it("normalizes US numbers in any format", () => {
@@ -26,6 +26,25 @@ describe("chunk", () => {
     const parts = chunk(text, 200);
     expect(parts.every((p) => p.length <= 200)).toBe(true);
     expect(parts.join("\n")).toBe(text);
+  });
+});
+
+describe("buildBotCommands", () => {
+  it("includes every active assistant in Telegram's slash command menu", () => {
+    const cmds = buildBotCommands([
+      { id: "grok", name: "Grok", tagline: "Live scout" },
+      { id: "muse", name: "Muse", tagline: "Creative lead" },
+      { id: "hermes", name: "Hermes", tagline: "Operator" },
+      { id: "cline", name: "Cline", tagline: "Open-model coder" },
+      { id: "zen", name: "Zen", tagline: "Analyst" },
+      { id: "chatgpt", name: "ChatGPT", tagline: "Generalist" },
+    ]);
+    const names = cmds.map((c) => c.command);
+    expect(names).toContain("team");
+    for (const id of ["grok", "muse", "hermes", "cline", "zen", "chatgpt"]) {
+      expect(names).toContain(id);
+    }
+    expect(names).toContain("doctor");
   });
 });
 
