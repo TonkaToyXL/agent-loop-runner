@@ -319,23 +319,23 @@ export function pickModelForTask(
   const kind = classifyTask(prompt);
   switch (kind) {
     case "creative":
-      return { model: prefer("muse-spark", "kimi-k3.1-pro", "glm-5.3"), reasoning, reason: "creative" };
+      return { model: prefer("muse-spark", "gpt-6.1-sol", "kimi-k3.1-pro", "glm-5.3", "gpt-6-sol"), reasoning, reason: "creative" };
     case "hard":
-      return { model: prefer("deepseek-v4-pro", "kimi-k3.1-pro", "qwen3.8-max", "mistral-large-4"), reasoning, reason: "deep analysis" };
+      return { model: prefer("gpt-6.1-terra", "deepseek-v4-pro", "kimi-k3.1-pro", "gpt-6.1-sol", "qwen3.8-max", "mistral-large-4"), reasoning, reason: "deep analysis" };
     case "review":
-      return { model: prefer("deepseek-v4-pro", "qwen3.8-max", "kimi-k3.1-pro", "mistral-large-4"), reasoning, reason: "review & analysis" };
+      return { model: prefer("gpt-6.1-terra", "deepseek-v4-pro", "qwen3.8-max", "kimi-k3.1-pro", "gpt-6.1-sol", "mistral-large-4"), reasoning, reason: "review & analysis" };
     case "ui":
-      return { model: prefer("glm-5.3", "kimi-k3.1-pro", "qwen3.8-max"), reasoning, reason: "UI & frontend" };
+      return { model: prefer("gpt-6.1-sol", "glm-5.3", "kimi-k3.1-pro", "gpt-6-astra", "qwen3.8-max"), reasoning, reason: "UI & frontend" };
     case "deep":
-      return { model: prefer("kimi-k3.1-pro", "qwen3.8-max", "deepseek-v4-pro", "mistral-large-4"), reasoning, reason: "deep coding" };
+      return { model: prefer("gpt-6.1-terra", "kimi-k3.1-pro", "gpt-6.1-sol", "qwen3.8-max", "deepseek-v4-pro", "mistral-large-4"), reasoning, reason: "deep coding" };
     case "quick":
       return {
-        model: prefer("deepseek-v4.1-flash", "glm-5.3-flash", "mimo-v2.6-flash", "minimax-m3.1-flash"),
+        model: prefer("gpt-6-astra", "deepseek-v4.1-flash", "glm-5.3-flash", "gpt-6-luna", "mimo-v2.6-flash", "minimax-m3.1-flash"),
         reasoning,
         reason: "fast value task",
       };
     default:
-      return { model: prefer("kimi-k3.1-pro", "glm-5.3", "deepseek-v4-pro", "mistral-large-4"), reasoning, reason: "general" };
+      return { model: prefer("gpt-6-astra", "kimi-k3.1-pro", "gpt-6.1-sol", "glm-5.3", "deepseek-v4-pro", "mistral-large-4"), reasoning, reason: "general" };
   }
 }
 
@@ -522,18 +522,75 @@ const MAX_STDOUT = 4 * 1024 * 1024;
 
 /** Parse a CLI's stdout into a result. Exported for tests. */
 export function parseCliOutput(stdout: string, format: ConnectorConfig["outputFormat"], label: string): Omit<RunResult, "rate"> & { usage?: TokenUsage } {
+  if (format === "codex-jsonl") {
+    const messages: string[] = [];
+    let usage: TokenUsage | undefined;
+    let errMsg = "";
+    for (const rawLine of stdout.split("\n")) {
+      const line = rawLine.trim();
+      if (!line.startsWith("{")) continue;
+      let ev: Record<string, unknown>;
+      try {
+        ev = JSON.parse(line) as Record<string, unknown>;
+      } catch {
+        continue;
+      }
+      if (ev.type === "item.completed" && ev.item && typeof ev.item === "object") {
+        const item = ev.item as Record<string, unknown>;
+        if (item.type === "agent_message" && typeof item.text === "string" && item.text.trim()) {
+          messages.push(item.text.trim());
+        }
+      } else if (ev.type === "turn.completed" && ev.usage && typeof ev.usage === "object") {
+        const u = ev.usage as Record<string, unknown>;
+        const input = Number(u.input_tokens ?? 0);
+        const output = Number(u.output_tokens ?? 0);
+        if (Number.isFinite(input) && Number.isFinite(output)) usage = { input, output };
+      } else if (ev.type === "turn.failed" && ev.error && typeof ev.error === "object") {
+        const m = (ev.error as { message?: unknown }).message;
+        if (typeof m === "string" && m.trim()) errMsg = m.trim();
+      } else if (ev.type === "error" && typeof ev.message === "string" && ev.message.trim()) {
+        errMsg = ev.message.trim();
+      }
+    }
+    if (messages.length) {
+      const text = messages.join("\n\n").trim();
+      return { text, usage: usage ?? { input: 0, output: estimateTokens(text) } };
+    }
+    if (errMsg) {
+      // Unwrap nested JSON error payloads if Codex printed an API error string.
+      try {
+        const nested = JSON.parse(errMsg) as { error?: { message?: string } };
+        if (nested.error?.message) errMsg = nested.error.message;
+      } catch {}
+      throw new Error(errMsg.slice(0, 300));
+    }
+    throw new Error(`${label} returned an empty reply`);
+  }
   const text = stdout.trim();
   if (!text) throw new Error(`${label} returned an empty reply`);
   return { text, usage: { input: 0, output: estimateTokens(text) } };
 }
 
 async function runCli(req: RunRequest, config: ConnectorConfig): Promise<RunResult> {
+  const chosen = pickModelForTask(req.agent, config, req.prompt);
+  const effectiveModel = chosen.model;
+  const effectiveReasoning = chosen.reasoning;
   const template = config.args ?? [];
   const promptInArgs = template.some((a) => a.includes("{prompt}"));
   const args = template.map((a) =>
-    a.replaceAll("{model}", req.agent.model).replaceAll("{system}", req.agent.system).replaceAll("{prompt}", req.prompt),
+    a
+      .replaceAll("{model}", effectiveModel)
+      .replaceAll("{reasoning}", effectiveReasoning)
+      .replaceAll("{system}", req.agent.system)
+      .replaceAll("{prompt}", req.prompt),
   );
-  if (config.modelArg && req.agent.model && req.agent.model !== "default") args.push(config.modelArg, req.agent.model);
+  if (config.modelArg && effectiveModel && effectiveModel !== "default" && effectiveModel !== "auto") {
+    args.push(config.modelArg, effectiveModel);
+  }
+  if (config.reasoningArg) {
+    const effort = effectiveReasoning === "off" ? "low" : effectiveReasoning;
+    args.push("-c", `${config.reasoningArg}="${effort}"`);
+  }
   // An empty working folder, so the tool doesn't pick up whatever project Relay runs from.
   const cwd = join(tmpdir(), "relay-cli", req.agent.id);
   mkdirSync(cwd, { recursive: true });
@@ -548,7 +605,12 @@ async function runCli(req: RunRequest, config: ConnectorConfig): Promise<RunResu
     stderr = (stderr + d.toString("utf8")).slice(-4000);
   });
   child.stdin.on("error", () => {});
-  child.stdin.end(promptInArgs ? "" : req.prompt);
+  const stdinText = promptInArgs
+    ? ""
+    : config.outputFormat === "codex-jsonl" && req.agent.system
+      ? `System instructions:\n${req.agent.system}\n\nUser request:\n${req.prompt}`
+      : req.prompt;
+  child.stdin.end(stdinText);
 
   const timeoutMs = config.timeoutMs ?? 600_000;
   const code = await new Promise<number | null>((resolve, reject) => {
@@ -575,12 +637,17 @@ async function runCli(req: RunRequest, config: ConnectorConfig): Promise<RunResu
     try {
       return parseCliOutput(stdout, config.outputFormat, config.label) as RunResult;
     } catch (err) {
+      const parsedErr = err instanceof Error && !err.message.endsWith("returned an empty reply") ? err.message : "";
       const tail = stderr.trim().split("\n").slice(-3).join(" ").slice(0, 300);
-      throw new Error(`${config.label} exited with code ${code}${tail ? `: ${tail}` : err instanceof Error ? `: ${err.message}` : ""}`);
+      throw new Error(`${config.label} exited with code ${code}${parsedErr ? `: ${parsedErr}` : tail ? `: ${tail}` : ""}`);
     }
   }
   const parsed = parseCliOutput(stdout, config.outputFormat, config.label);
-  return { ...parsed, usage: parsed.usage ?? { input: estimateTokens(req.prompt), output: estimateTokens(parsed.text) } };
+  return {
+    ...parsed,
+    served: req.agent.model === "auto" ? effectiveModel : parsed.served,
+    usage: parsed.usage ?? { input: estimateTokens(req.prompt), output: estimateTokens(parsed.text) },
+  };
 }
 
 // ---------------------------------------------------------------- Hermes Runs API (approvals)

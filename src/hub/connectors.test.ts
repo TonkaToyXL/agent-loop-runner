@@ -306,4 +306,33 @@ describe("pickModelForTask (auto model mode)", () => {
     expect(pickReasoningForTask("low", "deep dive security audit")).toBe("low");
     expect(buildChatBody(zen, zenConn, "write a regex")).toMatchObject({ reasoning_effort: "low" });
   });
+
+  it("parses codex-jsonl stdout with token usage and unwraps API errors", () => {
+    const okOut = [
+      JSON.stringify({ type: "thread.started", thread_id: "t1" }),
+      JSON.stringify({ type: "item.completed", item: { id: "i0", type: "agent_message", text: "CODEX_OK" } }),
+      JSON.stringify({ type: "turn.completed", usage: { input_tokens: 120, output_tokens: 8 } }),
+    ].join("\n");
+    expect(parseCliOutput(okOut, "codex-jsonl", "Codex CLI")).toEqual({
+      text: "CODEX_OK",
+      usage: { input: 120, output: 8 },
+    });
+
+    const errOut = JSON.stringify({
+      type: "turn.failed",
+      error: { message: JSON.stringify({ error: { message: "Model not supported" } }) },
+    });
+    expect(() => parseCliOutput(errOut, "codex-jsonl", "Codex CLI")).toThrow("Model not supported");
+
+    const codexConn: ConnectorConfig = { kind: "cli", label: "Codex CLI", billing: "subscription", command: "codex" };
+    const chatgpt = normalizeAgent(
+      { id: "chatgpt", model: "auto", reasoning: "auto", modelOptions: ["auto", "gpt-6-astra", "gpt-6.1-sol", "gpt-6.1-terra"] },
+      0,
+    );
+    expect(pickModelForTask(chatgpt, codexConn, "write a quick regex")).toMatchObject({ model: "gpt-6-astra", reasoning: "low" });
+    expect(pickModelForTask(chatgpt, codexConn, "do a thorough security audit and architecture review")).toMatchObject({
+      model: "gpt-6.1-terra",
+      reasoning: "max",
+    });
+  });
 });

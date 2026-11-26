@@ -5,8 +5,10 @@ import { describe, expect, it } from "vitest";
 import {
   formatProviderQuotaSummary,
   parseClinePassQuota,
+  parseCodexQuota,
   parseNousPortalQuota,
   providerQuotaKey,
+  readCodexAuth,
   readHermesNousAuth,
 } from "./quota.js";
 
@@ -99,7 +101,38 @@ describe("providerQuotaKey & readHermesNousAuth", () => {
     expect(providerQuotaKey({ kind: "openai", label: "ClinePass", apiKeyEnv: "CLINEPASS_API_KEY" })).toBe("clinepass");
     expect(providerQuotaKey({ kind: "openai", label: "OpenCode Zen", apiKeyEnv: "OPENCODE_ZEN_API_KEY" })).toBe("opencode-zen");
     expect(providerQuotaKey({ kind: "openai", label: "Hermes", supportsProvider: true, healthPath: "/health" })).toBe("hermes-nous");
+    expect(providerQuotaKey({ kind: "cli", label: "Codex CLI", command: "codex" })).toBe("codex");
     expect(providerQuotaKey({ kind: "webhook", label: "Grok Bot webhook", webhookUrlEnv: "GROK_WEBHOOK_URL" })).toBe("webhook:GROK_WEBHOOK_URL");
+  });
+
+  it("parses ChatGPT / Codex wham usage windows", () => {
+    const q = parseCodexQuota(
+      {
+        plan_type: "plus",
+        rate_limit: {
+          primary_window: { used_percent: 6, limit_window_seconds: 18000, reset_at: 1795676057 },
+          secondary_window: { used_percent: 4, limit_window_seconds: 604800, reset_at: 1796067219 },
+        },
+      },
+      new Date("2026-11-26T06:00:00Z"),
+    );
+    expect(q).toEqual({
+      provider: "ChatGPT",
+      plan: "ChatGPT Plus",
+      live: true,
+      windows: [
+        { label: "5h", usedPercent: 6, resetsAt: new Date(1795676057 * 1000).toISOString() },
+        { label: "Week", usedPercent: 4, resetsAt: new Date(1796067219 * 1000).toISOString() },
+      ],
+      updatedAt: "2026-11-26T06:00:00.000Z",
+    });
+    expect(formatProviderQuotaSummary(q)).toBe("5h 6% · Week 4%");
+  });
+
+  it("reads Codex CLI auth.json read-only", () => {
+    const dir = mkdtempSync(join(tmpdir(), "relay-codex-auth-"));
+    writeFileSync(join(dir, "auth.json"), JSON.stringify({ tokens: { access_token: "tok-c", account_id: "acct-1" } }));
+    expect(readCodexAuth(dir)).toEqual({ accessToken: "tok-c", accountId: "acct-1" });
   });
 
   it("reads Nous Portal OAuth token from Hermes auth.json read-only", () => {

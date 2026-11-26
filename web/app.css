@@ -420,7 +420,7 @@ kbd { font: 11px var(--font-mono); padding: 1px 5px; border: 1px solid var(--lin
 .usage-row b { color: var(--text); font: 500 11.5px var(--font-mono); }
 .quota-src { display: inline-flex; align-items: center; gap: 5px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .quota-src.live i { width: 6px; height: 6px; border-radius: 50%; background: var(--ok); flex: none; }
-.quota-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.quota-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(0, 1fr)); gap: 8px; }
 .qwin { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .qwin-top { display: flex; align-items: baseline; justify-content: space-between; gap: 4px; font-size: 10.5px; color: var(--muted); }
 .qwin-top em { font-style: normal; color: var(--faint); font: 10px var(--font-mono); }

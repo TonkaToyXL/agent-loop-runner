@@ -504,7 +504,7 @@ export class Hub {
       live: connector.live,
       connectorLabel: connector.label,
       supportsProvider: Boolean(connector.config.supportsProvider),
-      sendsReasoning: Boolean(connector.config.reasoningParam || connector.config.reasoningIn),
+      sendsReasoning: Boolean(connector.config.reasoningParam || connector.config.reasoningIn || connector.config.reasoningArg),
       billing: connector.billing,
       blocked: Boolean(connector.blocked),
       online: health?.ok,

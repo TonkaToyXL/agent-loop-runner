@@ -21,9 +21,11 @@ export interface ConnectorConfig {
   /** cli: arguments. {model}, {system} and {prompt} are filled in; without {prompt} the prompt goes to stdin. */
   args?: string[];
   /** cli: how to read stdout. */
-  outputFormat?: "text";
-  /** cli: flag that selects the model (e.g. --model). Skipped when the agent's model is "default". */
+  outputFormat?: "text" | "codex-jsonl";
+  /** cli: flag that selects the model (e.g. --model or -m). Skipped when the agent's model is "default". */
   modelArg?: string;
+  /** cli: Codex-style -c <key>="<effort>" config key for reasoning effort. */
+  reasoningArg?: string;
   /** Env vars that must be non-empty for this connector to be used. */
   requiresEnv?: string[];
   /** openai: base URL such as https://api.x.ai/v1. */

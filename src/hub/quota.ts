@@ -144,14 +144,76 @@ export function parseNousPortalQuota(payload: unknown, now = new Date()): Provid
   };
 }
 
+/** Parse ChatGPT / Codex CLI /backend-api/wham/usage payload into live 5h & Weekly quota windows. */
+export function parseCodexQuota(payload: unknown, now = new Date()): ProviderQuota | undefined {
+  if (!payload || typeof payload !== "object") return undefined;
+  const rec = payload as Record<string, unknown>;
+  const rl = (rec.rate_limit && typeof rec.rate_limit === "object" ? rec.rate_limit : {}) as Record<string, unknown>;
+  const windows: ProviderQuotaWindow[] = [];
+  const labelFor = (seconds: number | undefined, fallback: string) =>
+    seconds === 18_000 ? "5h" : seconds === 604_800 ? "Week" : seconds === 86_400 ? "Day" : fallback;
+
+  for (const [key, fallback] of [
+    ["primary_window", "5h"],
+    ["secondary_window", "Week"],
+  ] as const) {
+    const win = rl[key];
+    if (!win || typeof win !== "object") continue;
+    const w = win as Record<string, unknown>;
+    const used = toFiniteNumber(w.used_percent ?? w.usedPercent);
+    if (used === undefined) continue;
+    const secs = toFiniteNumber(w.limit_window_seconds);
+    windows.push({
+      label: labelFor(secs, fallback),
+      usedPercent: clampPct(used),
+      resetsAt: normalizeIso(w.reset_at ?? w.resets_at),
+    });
+  }
+  if (!windows.length) return undefined;
+
+  const rawPlan = typeof rec.plan_type === "string" ? rec.plan_type.trim() : "";
+  const plan = rawPlan ? `ChatGPT ${rawPlan[0].toUpperCase()}${rawPlan.slice(1)}` : "ChatGPT";
+
+  return {
+    provider: "ChatGPT",
+    plan,
+    live: true,
+    windows,
+    updatedAt: now.toISOString(),
+  };
+}
+
 /** Shared cache key so agents on the same provider account (e.g. Cline + Muse on ClinePass) share one fetch. */
 export function providerQuotaKey(config: ConnectorConfig): string | undefined {
   const baseUrl = (env(config.baseUrlEnv) || config.baseUrl || "").toLowerCase();
   if (config.apiKeyEnv === "CLINEPASS_API_KEY" || baseUrl.includes("api.cline.bot")) return "clinepass";
   if (config.apiKeyEnv === "OPENCODE_ZEN_API_KEY" || baseUrl.includes("opencode.ai/zen")) return "opencode-zen";
   if (config.kind === "openai" && config.supportsProvider && config.healthPath) return "hermes-nous";
+  if (config.kind === "cli" && config.command === "codex") return "codex";
   if (config.kind === "webhook") return `webhook:${config.webhookUrlEnv ?? config.label}`;
   return undefined;
+}
+
+interface CodexAuthToken {
+  accessToken: string;
+  accountId?: string;
+}
+
+/** Read Codex CLI's existing ChatGPT OAuth token strictly read-only (never mutates auth.json). */
+export function readCodexAuth(codexHome = process.env.CODEX_HOME?.trim() || join(homedir(), ".codex")): CodexAuthToken | undefined {
+  try {
+    const path = join(codexHome, "auth.json");
+    if (!existsSync(path)) return undefined;
+    const raw = JSON.parse(readFileSync(path, "utf8")) as {
+      tokens?: { access_token?: string; account_id?: string };
+    };
+    const accessToken = typeof raw.tokens?.access_token === "string" ? raw.tokens.access_token.trim() : "";
+    if (!accessToken) return undefined;
+    const accountId = typeof raw.tokens?.account_id === "string" ? raw.tokens.account_id.trim() || undefined : undefined;
+    return { accessToken, accountId };
+  } catch {
+    return undefined;
+  }
 }
 
 interface NousAuthToken {
@@ -230,6 +292,27 @@ export async function fetchProviderQuota(
       return parseNousPortalQuota(payload);
     } catch {
       return undefined;
+    }
+  }
+
+  if (key === "codex") {
+    const auth = readCodexAuth();
+    if (!auth) return { provider: "ChatGPT", live: false, note: "Sign in via Codex CLI", updatedAt: new Date().toISOString() };
+    try {
+      const headers: Record<string, string> = {
+        authorization: `Bearer ${auth.accessToken}`,
+        "user-agent": "codex-cli",
+        ...(auth.accountId ? { "chatgpt-account-id": auth.accountId } : {}),
+      };
+      const payload = await fetchJson("https://chatgpt.com/backend-api/wham/usage", headers);
+      return parseCodexQuota(payload) ?? {
+        provider: "ChatGPT",
+        live: false,
+        note: "Shared with your Codex CLI quota",
+        updatedAt: new Date().toISOString(),
+      };
+    } catch {
+      return { provider: "ChatGPT", live: false, note: "Shared with your Codex CLI quota", updatedAt: new Date().toISOString() };
     }
   }
 
