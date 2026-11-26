@@ -328,7 +328,7 @@ export function pickModelForTask(
       return { model: prefer("kimi-k3.1-pro", "qwen3.8-max", "deepseek-v4-pro"), reasoning, reason: "deep coding" };
     case "quick":
       return {
-        model: prefer("deepseek-v4.1-flash-free", "mimo-v2.6-flash-free", "deepseek-v4.1-flash", "glm-5.3-flash", "mimo-v2.6-flash", "minimax-m3.1-flash"),
+        model: prefer("deepseek-v4.1-flash", "glm-5.3-flash", "mimo-v2.6-flash", "minimax-m3.1-flash"),
         reasoning,
         reason: "fast value task",
       };

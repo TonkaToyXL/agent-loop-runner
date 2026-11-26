@@ -14,7 +14,7 @@ ensure_relay_env
 API="$(get_kv "$RELAY_ENV" OPENCODE_ZEN_BASE_URL)"; API="${OPENCODE_ZEN_BASE_URL:-${API:-https://opencode.ai/zen/v1}}"
 
 say "Zen runs on your prepaid OpenCode credit with Auto model + Auto thinking"
-say "(free models for quick asks, heavier models only for harder work, capped at \$30/mo)."
+say "(fast flash models for quick asks, heavier models for harder work, capped at \$30/mo)."
 say "Tip: make sure auto-reload is OFF in your OpenCode billing settings so it stops at your credit."
 echo
 
@@ -30,8 +30,8 @@ else
   [ -n "$KEY" ] || die "No key entered."
 fi
 
-if ask "Send one tiny test message on deepseek-v4.1-flash-free (\$0 cost)?" y; then
-  BODY='{"model":"deepseek-v4.1-flash-free","messages":[{"role":"user","content":"Reply with the single word: ok"}]}'
+if ask "Send one tiny test message on deepseek-v4.1-flash?" y; then
+  BODY='{"model":"deepseek-v4.1-flash","messages":[{"role":"user","content":"Reply with the single word: ok"}]}'
   RESP="$(curl -s --max-time 60 -w '\n%{http_code}' -X POST "$API/chat/completions" \
     -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' --data "$BODY" || true)"
   CODE="$(printf '%s' "$RESP" | tail -n 1)"

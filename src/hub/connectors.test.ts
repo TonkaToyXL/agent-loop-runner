@@ -272,19 +272,19 @@ describe("pickModelForTask (auto model mode)", () => {
     }
   });
 
-  it("scales auto reasoning effort and prefers free models on OpenCode Zen for quick tasks", () => {
+  it("scales auto reasoning effort and picks fast flash models on OpenCode Zen for quick tasks", () => {
     const zenConn: ConnectorConfig = { kind: "openai", label: "OpenCode Zen", billing: "subscription", reasoningParam: "reasoning_effort" };
     const zen = normalizeAgent(
       {
         id: "zen",
         model: "auto",
         reasoning: "auto",
-        modelOptions: ["auto", "deepseek-v4.1-flash-free", "kimi-k3.1-pro", "deepseek-v4-pro", "glm-5.3"],
+        modelOptions: ["auto", "deepseek-v4.1-flash", "kimi-k3.1-pro", "deepseek-v4-pro", "glm-5.3"],
       },
       0,
     );
     expect(pickModelForTask(zen, zenConn, "write a regex for a ZIP code")).toMatchObject({
-      model: "deepseek-v4.1-flash-free",
+      model: "deepseek-v4.1-flash",
       reasoning: "low",
     });
     expect(pickModelForTask(zen, zenConn, "fix the responsive CSS grid layout")).toMatchObject({
