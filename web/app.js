@@ -3,7 +3,7 @@ const $ = (sel, el = document) => el.querySelector(sel);
 const $$ = (sel, el = document) => [...el.querySelectorAll(sel)];
 const ESC = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ESC[c]);
-const LEVELS = ["off", "low", "medium", "high", "max"];
+const LEVELS = ["auto", "off", "low", "medium", "high", "max"];
 const store = {
   get: (k) => { try { return localStorage.getItem(k); } catch { return null; } },
   set: (k, v) => { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch {} },
@@ -190,6 +190,45 @@ function characterPortraitSvg(id, working = false, name = "?", color = "var(--ac
         </g>
       </svg>`;
 
+    case "zen":
+      return `<svg class="${cls}" viewBox="0 0 80 80" aria-hidden="true">
+        <rect width="80" height="80" fill="url(#avBgZen)"/>
+        <circle cx="40" cy="36" r="27" fill="none" stroke="#b78bff" stroke-opacity="${working ? 0.45 : 0.16}" stroke-width="1.2" stroke-dasharray="${working ? "8 5" : "2 6"}"/>
+        ${working ? `
+          <circle class="spark" cx="16" cy="40" r="2.2" fill="#d8b8ff"/>
+          <circle class="spark s2" cx="64" cy="36" r="2.3" fill="#b78bff"/>
+          <circle class="spark s3" cx="22" cy="20" r="1.8" fill="#e9d5ff"/>
+          <circle class="spark s4" cx="59" cy="22" r="1.8" fill="#c084fc"/>
+        ` : `<circle cx="18" cy="34" r="1.5" fill="#d8b8ff" opacity="0.45"/>
+          <circle cx="62" cy="34" r="1.5" fill="#b78bff" opacity="0.45"/>`}
+        <g class="char-body">
+          <!-- High minimalist strategist collar -->
+          <path d="M13 80 C16 60, 27 55, 40 55 C53 55, 64 60, 67 80 Z" fill="url(#avSuit)"/>
+          <path d="M27 56 L40 69 L53 56" fill="none" stroke="url(#avViolet)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+          <circle class="prism-glow" cx="40" cy="69" r="2.4" fill="#d8b8ff"/>
+          <rect x="34.5" y="48" width="11" height="11" rx="5" fill="#cfa487"/>
+          <!-- Head -->
+          <path d="M25.5 32 C25.5 20, 31.5 15, 40 15 C48.5 15, 54.5 20, 54.5 32 C54.5 44, 48 52, 40 52 C32 52, 25.5 44, 25.5 32 Z" fill="url(#avSkinCool)"/>
+          <!-- Clean futuristic hair + forehead focus gem -->
+          <path d="M24 31 C24 18, 31 11, 40 11 C49 11, 56 18, 56 31 C52 22, 46 19, 40 19 C34 19, 28 22, 24 31 Z" fill="#1c1829"/>
+          <polygon points="40,21.5 42.2,24.5 40,27.5 37.8,24.5" fill="url(#avViolet)" opacity="${working ? 1 : 0.78}"/>
+          <!-- Brows & eyes -->
+          <path d="M30 30.5 Q33.5 ${working ? 29 : 29.8} 37 30.5" fill="none" stroke="#241c33" stroke-width="1.5" stroke-linecap="round"/>
+          <path d="M43 30.5 Q46.5 ${working ? 29 : 29.8} 50 30.5" fill="none" stroke="#241c33" stroke-width="1.5" stroke-linecap="round"/>
+          <g class="${working ? "eyes-scan" : "eyes-idle"}">
+            <ellipse cx="33.5" cy="35" rx="2.4" ry="2.4" fill="#181226"/>
+            <ellipse cx="46.5" cy="35" rx="2.4" ry="2.4" fill="#181226"/>
+            <circle cx="34.3" cy="34.2" r="1" fill="${working ? "#e9d5ff" : "#d8b8ff"}"/>
+            <circle cx="47.3" cy="34.2" r="1" fill="${working ? "#e9d5ff" : "#d8b8ff"}"/>
+          </g>
+          ${working ? `
+            <path class="hud-tick" d="M24 35 Q40 31 56 35" fill="none" stroke="#d8b8ff" stroke-width="1.3" stroke-dasharray="4 4"/>
+          ` : ""}
+          <!-- Calm focused expression -->
+          <path d="${working ? "M36 45.6 Q40 47.4 44 45.6" : "M36 45.5 Q40 47.8 44 45.5"}" fill="none" stroke="#8b6254" stroke-width="1.5" stroke-linecap="round"/>
+        </g>
+      </svg>`;
+
     default:
       return `<svg class="${cls}" viewBox="0 0 80 80" aria-hidden="true">
         <rect width="80" height="80" fill="#181820"/>
@@ -230,7 +269,10 @@ const ago = (t) => {
 };
 const clock = (iso) => new Date(iso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 const think = (level) => {
-  const n = Math.max(0, LEVELS.indexOf(level));
+  if (level === "auto") {
+    return `<span class="think" aria-hidden="true"><s class="on"></s><s class="on"></s><s></s><s class="on"></s></span>`;
+  }
+  const n = Math.max(0, ["off", "low", "medium", "high", "max"].indexOf(level));
   return `<span class="think" aria-hidden="true">${[1, 2, 3, 4].map((i) => `<s class="${i <= n ? "on" : ""}"></s>`).join("")}</span>`;
 };
 const CHANNEL_LABEL = { web: "web", telegram: "telegram", imessage: "imessage", system: "hub" };
@@ -1196,7 +1238,7 @@ const COMMANDS = [
   ["/board", "who did the most work"],
   ["/team ", "give the crew a goal"],
   ["/model ", "<agent> <model-id>"],
-  ["/reasoning ", "<agent> off|low|medium|high|max"],
+  ["/reasoning ", "<agent> auto|off|low|medium|high|max"],
   ["/lead ", "<agent> plans team goals"],
   ["/inbox", "recent email (read-only)"],
   ["/inbox summary", "what needs your attention"],

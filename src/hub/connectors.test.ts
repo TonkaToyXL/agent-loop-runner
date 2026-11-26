@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { normalizeAgent } from "./config.js";
-import { buildChatBody, coveredModel, networkReason, parseChatResponse, parseCliOutput, parseModelOptions, pickModelForTask, resolveConnector } from "./connectors.js";
+import { buildChatBody, coveredModel, networkReason, parseChatResponse, parseCliOutput, parseModelOptions, pickModelForTask, pickReasoningForTask, resolveConnector } from "./connectors.js";
 import type { ConnectorConfig } from "./types.js";
 
 const hermesConn: ConnectorConfig = { kind: "openai", label: "Hermes", reasoningIn: "model_options", supportsProvider: true };
@@ -270,5 +270,36 @@ describe("pickModelForTask (auto model mode)", () => {
     } finally {
       if (saved !== undefined) process.env.RELAY_ALLOW_METERED = saved;
     }
+  });
+
+  it("scales auto reasoning effort and prefers free models on OpenCode Zen for quick tasks", () => {
+    const zenConn: ConnectorConfig = { kind: "openai", label: "OpenCode Zen", billing: "subscription", reasoningParam: "reasoning_effort" };
+    const zen = normalizeAgent(
+      {
+        id: "zen",
+        model: "auto",
+        reasoning: "auto",
+        modelOptions: ["auto", "deepseek-v4.1-flash-free", "kimi-k3.1-pro", "deepseek-v4-pro", "glm-5.3"],
+      },
+      0,
+    );
+    expect(pickModelForTask(zen, zenConn, "write a regex for a ZIP code")).toMatchObject({
+      model: "deepseek-v4.1-flash-free",
+      reasoning: "low",
+    });
+    expect(pickModelForTask(zen, zenConn, "fix the responsive CSS grid layout")).toMatchObject({
+      model: "glm-5.3",
+      reasoning: "medium",
+    });
+    expect(pickModelForTask(zen, zenConn, "review this SQL schema for index issues")).toMatchObject({
+      model: "deepseek-v4-pro",
+      reasoning: "high",
+    });
+    expect(pickModelForTask(zen, zenConn, "do a thorough security audit and system architecture deep dive")).toMatchObject({
+      model: "deepseek-v4-pro",
+      reasoning: "max",
+    });
+    expect(pickReasoningForTask("low", "deep dive security audit")).toBe("low");
+    expect(buildChatBody(zen, zenConn, "write a regex")).toMatchObject({ reasoning_effort: "low" });
   });
 });

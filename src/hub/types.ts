@@ -1,4 +1,4 @@
-export const REASONING_LEVELS = ["off", "low", "medium", "high", "max"] as const;
+export const REASONING_LEVELS = ["auto", "off", "low", "medium", "high", "max"] as const;
 export type Reasoning = (typeof REASONING_LEVELS)[number];
 
 export type ConnectorKind = "openai" | "webhook" | "cli" | "demo";

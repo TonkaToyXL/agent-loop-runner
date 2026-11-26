@@ -12,6 +12,7 @@
     "setup:imessage": "bash scripts/setup-imessage.sh",
     "setup:grok": "bash scripts/setup-grok.sh",
     "setup:clinepass": "bash scripts/setup-clinepass.sh",
+    "setup:opencode": "bash scripts/setup-opencode.sh",
     "setup:email": "bash scripts/setup-email.sh",
     "babysit-pr": "tsx src/babysit-pr.ts",
     "build": "tsc",

@@ -587,10 +587,11 @@ export class Hub {
         if (!limit.ok) return { reply: `${target.name} hit its ${limit.reason}. Raise the limit or ask someone else.` };
         const task = this.submitDirect(cmd.agentId, cmd.text, origin, "explicit");
         const a = this.agent(task.agentId)!;
-        const picked = a.model === "auto" ? pickModelForTask(a, resolveConnector(a).config, cmd.text) : null;
-        const modelLabel = picked ? `auto → ${picked.model}` : a.model;
+        const picked = a.model === "auto" || a.reasoning === "auto" ? pickModelForTask(a, resolveConnector(a).config, cmd.text) : null;
+        const modelLabel = a.model === "auto" && picked ? `auto → ${picked.model}` : a.model;
+        const reasonLabel = a.reasoning === "auto" && picked ? `auto → ${picked.reasoning}` : a.reasoning;
         if (a.actsInWorld && riskyAction(cmd.text)) return { reply: `🛡 ${a.name} needs your OK before starting this. Check for the Approve button.`, taskId: task.id };
-        return { reply: `→ ${a.name} is on it (${modelLabel} · ${a.reasoning}).`, taskId: task.id };
+        return { reply: `→ ${a.name} is on it (${modelLabel} · ${reasonLabel}).`, taskId: task.id };
       }
       case "auto": {
         const pool = this.routable();
@@ -598,10 +599,11 @@ export class Hub {
         const id = pickAgent(cmd.text, pool, fallback);
         const task = this.submitDirect(id, cmd.text, origin, "auto");
         const a = this.agent(task.agentId)!;
-        const picked = a.model === "auto" ? pickModelForTask(a, resolveConnector(a).config, cmd.text) : null;
-        const modelLabel = picked ? `auto → ${picked.model}` : a.model;
+        const picked = a.model === "auto" || a.reasoning === "auto" ? pickModelForTask(a, resolveConnector(a).config, cmd.text) : null;
+        const modelLabel = a.model === "auto" && picked ? `auto → ${picked.model}` : a.model;
+        const reasonLabel = a.reasoning === "auto" && picked ? `auto → ${picked.reasoning}` : a.reasoning;
         if (a.actsInWorld && riskyAction(cmd.text)) return { reply: `🛡 Routed to ${a.name}, which needs your OK before starting. Check for the Approve button.`, taskId: task.id };
-        return { reply: `→ Routed to ${a.name} (${modelLabel} · ${a.reasoning}).`, taskId: task.id };
+        return { reply: `→ Routed to ${a.name} (${modelLabel} · ${reasonLabel}).`, taskId: task.id };
       }
       case "team": {
         const task = this.submitGoal(cmd.text, origin);
@@ -957,8 +959,11 @@ export class Hub {
       this.controllers.delete(task.id);
       throw this.fail(task, "blocked", `${agent.name}: ${latest.reason} while this was waiting.`);
     }
-    const autoPicked = agent.model === "auto" ? pickModelForTask(agent, resolveConnector(agent).config, prompt) : null;
-    const effectiveAgent = autoPicked && autoPicked.model !== agent.model ? { ...agent, model: autoPicked.model } : agent;
+    const autoPicked = agent.model === "auto" || agent.reasoning === "auto" ? pickModelForTask(agent, resolveConnector(agent).config, prompt) : null;
+    const effectiveAgent =
+      autoPicked && (autoPicked.model !== agent.model || autoPicked.reasoning !== agent.reasoning)
+        ? { ...agent, model: autoPicked.model, reasoning: autoPicked.reasoning }
+        : agent;
     this.inFlight.set(agent.id, (this.inFlight.get(agent.id) ?? 0) + 1);
     task.status = "running";
     task.startedAt = new Date().toISOString();
@@ -982,8 +987,9 @@ export class Hub {
         ask: (q) => this.askOwner({ taskId: task.id, agentId: runner.id, agentName: runner.name, source: "agent", ...q }, task),
       });
       task.usage = result.usage;
-      task.servedModel = result.served ?? (autoPicked ? effectiveAgent.model : undefined);
-      task.costUsd = costOf(result.usage, effectiveAgent.pricing);
+      task.servedModel = result.served ?? (agent.model === "auto" ? effectiveAgent.model : undefined);
+      const isFreeModel = /-free$/i.test(effectiveAgent.model);
+      task.costUsd = isFreeModel ? 0 : costOf(result.usage, effectiveAgent.pricing);
       task.result = result.text;
       task.status = "done";
       this.record(task, effectiveAgent, true, Date.now() - started);

@@ -98,7 +98,7 @@ export function parseCommand(input: string, agents: AgentRef[]): Command {
         const agentId = args[0] ? resolveAgent(args[0], agents) : null;
         const level = args[1]?.toLowerCase();
         if (!agentId || !isReasoning(level)) {
-          return { type: "error", message: "Usage: /reasoning <agent> off|low|medium|high|max" };
+          return { type: "error", message: "Usage: /reasoning <agent> auto|off|low|medium|high|max" };
         }
         return { type: "reasoning", agentId, reasoning: level };
       }
@@ -198,7 +198,7 @@ export const HELP_TEXT = [
   "/status           what's running now",
   "/board            who did the most work",
   "/model <agent> <model-id>",
-  "/reasoning <agent> off|low|medium|high|max",
+  "/reasoning <agent> auto|off|low|medium|high|max",
   "/lead <agent>     choose who plans team goals",
   "/inbox            recent email (read-only)",
   "/inbox summary    what needs your attention",

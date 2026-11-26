@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { fallbackPlan, type PlannerAgent } from "./planner.js";
 import { estimateTokens } from "./usage.js";
-import type { AgentConfig, Billing, ConnectorConfig, RateInfo, TokenUsage } from "./types.js";
+import type { AgentConfig, Billing, ConnectorConfig, RateInfo, Reasoning, TokenUsage } from "./types.js";
 
 export type Purpose = "plan" | "work" | "synthesis";
 
@@ -220,31 +220,20 @@ function safeAutoCandidates(agent: AgentConfig, config: ConnectorConfig): string
   );
 }
 
-/**
- * When an agent's model is set to "auto", pick the best covered model from its modelOptions
- * based on the task's shape (fast/simple, UI/frontend, analysis/review, deep coding, creative).
- * Pure, zero-cost, and strictly limited to billing-covered options. Exported for tests.
- */
-export function pickModelForTask(
-  agent: AgentConfig,
-  config: ConnectorConfig,
-  prompt: string,
-): { model: string; reason?: string } {
-  const fixed = config.model || agent.model;
-  if (fixed !== "auto") return { model: fixed };
-  const candidates = safeAutoCandidates(agent, config);
-  if (!candidates.length) return { model: fixed };
+export interface TaskRoutingChoice {
+  model: string;
+  reasoning: Exclude<Reasoning, "auto">;
+  reason?: string;
+}
 
-  const prefer = (...needles: string[]) => {
-    for (const needle of needles) {
-      const hit = candidates.find((c) => c.toLowerCase().includes(needle));
-      if (hit) return hit;
-    }
-    return candidates[0];
-  };
-
+function classifyTask(prompt: string): "quick" | "creative" | "ui" | "review" | "deep" | "hard" | "general" {
   const text = prompt.trim();
-  const hasCodeFence = text.includes("```");
+  const fenceCount = (text.match(/```/g) ?? []).length;
+  const hasCodeFence = fenceCount >= 2 || text.includes("```");
+  const isHard =
+    text.length >= 650 ||
+    fenceCount >= 4 ||
+    /\b(deep dive|thorough|security audit|formal proof|system architecture|distributed|end-to-end design|multi-step|step by step)\b/i.test(text);
   const isReviewOrMath =
     /\b(review|critique|audit|security|vulnerabilit(?:y|ies)|sql|query|database|schema|algorithm|complexity|big-?o|math|proof|calculate|compare|evaluate|benchmark|trade-?offs?)\b/i.test(
       text,
@@ -269,22 +258,83 @@ export function pickModelForTask(
     (/\b(regex|regexp|one-?liner|one word|quick|brief|short|tldr|tl;dr|syntax|convert|format|cron|what is|what's|explain simply)\b/i.test(text) ||
       text.length <= 120);
 
-  if (isCreative && !isReviewOrMath) {
-    return { model: prefer("muse-spark", "kimi-k3.1-pro", "glm-5.3"), reason: "creative" };
+  if (isHard) return "hard";
+  if (isCreative && !isReviewOrMath) return "creative";
+  if (isReviewOrMath) return "review";
+  if (isUi) return "ui";
+  if (isDeepCode) return "deep";
+  if (isQuick) return "quick";
+  return "general";
+}
+
+/**
+ * Pick the best reasoning effort for a task when an agent's reasoning is set to "auto".
+ * Balances speed/cost on simple asks with deeper thinking on coding, reviews, and hard problems.
+ */
+export function pickReasoningForTask(reasoning: Reasoning, prompt: string): Exclude<Reasoning, "auto"> {
+  if (reasoning !== "auto") return reasoning;
+  const kind = classifyTask(prompt);
+  switch (kind) {
+    case "quick":
+      return "low";
+    case "creative":
+    case "ui":
+    case "general":
+      return "medium";
+    case "review":
+    case "deep":
+      return "high";
+    case "hard":
+      return "max";
   }
-  if (isReviewOrMath) {
-    return { model: prefer("deepseek-v4-pro", "qwen3.8-max", "kimi-k3.1-pro"), reason: "review & analysis" };
+}
+
+/**
+ * When an agent's model is set to "auto", pick the best covered model from its modelOptions
+ * based on value + intelligence for the task (preferring free/flash models for simple asks,
+ * and flagship models for deep coding, reviews, and hard problems). Pure, zero-cost, and
+ * strictly limited to billing-covered options. Exported for tests.
+ */
+export function pickModelForTask(
+  agent: AgentConfig,
+  config: ConnectorConfig,
+  prompt: string,
+): TaskRoutingChoice {
+  const reasoning = pickReasoningForTask(agent.reasoning, prompt);
+  const fixed = config.model || agent.model;
+  if (fixed !== "auto") return { model: fixed, reasoning };
+  const candidates = safeAutoCandidates(agent, config);
+  if (!candidates.length) return { model: fixed, reasoning };
+
+  const prefer = (...needles: string[]) => {
+    for (const needle of needles) {
+      const hit = candidates.find((c) => c.toLowerCase().includes(needle));
+      if (hit) return hit;
+    }
+    return candidates[0];
+  };
+
+  const kind = classifyTask(prompt);
+  switch (kind) {
+    case "creative":
+      return { model: prefer("muse-spark", "kimi-k3.1-pro", "glm-5.3"), reasoning, reason: "creative" };
+    case "hard":
+      return { model: prefer("deepseek-v4-pro", "kimi-k3.1-pro", "qwen3.8-max"), reasoning, reason: "deep analysis" };
+    case "review":
+      return { model: prefer("deepseek-v4-pro", "qwen3.8-max", "kimi-k3.1-pro"), reasoning, reason: "review & analysis" };
+    case "ui":
+      return { model: prefer("glm-5.3", "kimi-k3.1-pro", "qwen3.8-max"), reasoning, reason: "UI & frontend" };
+    case "deep":
+      return { model: prefer("kimi-k3.1-pro", "qwen3.8-max", "deepseek-v4-pro"), reasoning, reason: "deep coding" };
+    case "quick":
+      return {
+        model: prefer("deepseek-v4.1-flash-free", "mimo-v2.6-flash-free", "deepseek-v4.1-flash", "glm-5.3-flash", "mimo-v2.6-flash", "minimax-m3.1-flash"),
+        reasoning,
+        reason: "fast value task",
+      };
+    default:
+      return { model: prefer("kimi-k3.1-pro", "glm-5.3", "deepseek-v4-pro"), reasoning, reason: "general" };
   }
-  if (isUi) {
-    return { model: prefer("glm-5.3", "kimi-k3.1-pro", "qwen3.8-max"), reason: "UI & frontend" };
-  }
-  if (isDeepCode) {
-    return { model: prefer("kimi-k3.1-pro", "qwen3.8-max", "deepseek-v4-pro"), reason: "deep coding" };
-  }
-  if (isQuick) {
-    return { model: prefer("deepseek-v4.1-flash", "glm-5.3-flash", "mimo-v2.6-flash", "minimax-m3.1-flash"), reason: "fast task" };
-  }
-  return { model: prefer("kimi-k3.1-pro", "glm-5.3", "deepseek-v4-pro"), reason: "general" };
 }
 
 export function buildChatBody(agent: AgentConfig, config: ConnectorConfig, prompt: string): Record<string, unknown> {
@@ -296,8 +346,9 @@ export function buildChatBody(agent: AgentConfig, config: ConnectorConfig, promp
       { role: "user", content: prompt },
     ],
   };
-  const effort = agent.reasoning === "max" ? "high" : agent.reasoning;
-  if (agent.reasoning !== "off") {
+  const resolvedReasoning = pickReasoningForTask(agent.reasoning, prompt);
+  const effort = resolvedReasoning === "max" ? "high" : resolvedReasoning;
+  if (resolvedReasoning !== "off") {
     if (config.reasoningIn === "model_options") body.model_options = { reasoning_effort: effort };
     else if (config.reasoningParam) body[config.reasoningParam] = effort;
   }
@@ -422,7 +473,10 @@ async function runOpenAI(req: RunRequest, config: ConnectorConfig): Promise<RunR
   const covered = coveredModel(req.agent, config);
   if (covered.error) throw new Error(covered.error);
   const chosen = pickModelForTask(req.agent, config, req.prompt);
-  const effectiveAgent = chosen.model !== req.agent.model ? { ...req.agent, model: chosen.model } : req.agent;
+  const effectiveAgent =
+    chosen.model !== req.agent.model || chosen.reasoning !== req.agent.reasoning
+      ? { ...req.agent, model: chosen.model, reasoning: chosen.reasoning }
+      : req.agent;
   if (config.runsApi) {
     const headers = { ...config.headers, "content-type": "application/json", ...(key ? { authorization: `Bearer ${key}` } : {}) };
     if (await hermesSupportsRuns(base, headers, req.signal)) return runHermesRun({ ...req, agent: effectiveAgent }, config, base, headers);

@@ -229,7 +229,7 @@
         "cline-pass/mimo-v2.6-flash",
         "cline-pass/muse-spark-1.3-contributor"
       ],
-      "reasoning": "medium",
+      "reasoning": "auto",
       "skills": [
         "code",
         "coding",
@@ -277,6 +277,71 @@
       "pricing": {
         "inputPerMTok": 0,
         "outputPerMTok": 0
+      },
+      "enabled": true,
+      "maxConcurrent": 2,
+      "optional": true
+    },
+    {
+      "id": "zen",
+      "name": "Zen",
+      "color": "#b78bff",
+      "tagline": "Value-smart analyst & coder on OpenCode Zen",
+      "model": "auto",
+      "modelOptions": [
+        "auto",
+        "deepseek-v4.1-flash-free",
+        "mimo-v2.6-flash-free",
+        "kimi-k3.1-pro",
+        "kimi-k3",
+        "deepseek-v4-pro",
+        "deepseek-v4.1-flash",
+        "glm-5.3",
+        "glm-5.3-flash",
+        "minimax-m3",
+        "mistral-large-4"
+      ],
+      "reasoning": "auto",
+      "skills": [
+        "analyze",
+        "analysis",
+        "review",
+        "critique",
+        "audit",
+        "architecture",
+        "sql",
+        "math",
+        "compare",
+        "code",
+        "debug",
+        "refactor",
+        "security",
+        "design"
+      ],
+      "system": "You are Zen, the team's value-smart analyst and engineer. Give crisp, high-signal analysis, reviews, architecture, and clean code.",
+      "connectors": [
+        {
+          "kind": "openai",
+          "label": "OpenCode Zen",
+          "billing": "subscription",
+          "requiresEnv": [
+            "OPENCODE_ZEN_API_KEY"
+          ],
+          "baseUrl": "https://opencode.ai/zen/v1",
+          "baseUrlEnv": "OPENCODE_ZEN_BASE_URL",
+          "apiKeyEnv": "OPENCODE_ZEN_API_KEY",
+          "reasoningParam": "reasoning_effort",
+          "timeoutMs": 300000
+        }
+      ],
+      "limits": {
+        "dailyRequests": 200,
+        "dailyTokens": 1500000,
+        "monthlyBudgetUsd": 30
+      },
+      "pricing": {
+        "inputPerMTok": 0.6,
+        "outputPerMTok": 2.0
       },
       "enabled": true,
       "maxConcurrent": 2,
