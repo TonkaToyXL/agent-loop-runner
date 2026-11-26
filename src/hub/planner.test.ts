@@ -70,6 +70,15 @@ describe("parsePlan", () => {
     expect(parsePlan("I think Grok should do it.", ids)).toBeNull();
     expect(parsePlan("[not json]", ids)).toBeNull();
   });
+
+  it("extracts JSON arrays even when surrounding prose contains square brackets", () => {
+    const reply =
+      'Plan [2 steps]:\n```json\n[{"step":1,"agent":"grok","task":"scan X [today]"},{"step":2,"agent":"muse","task":"write copy","after":[1]}]\n```\n[ready]';
+    expect(parsePlan(reply, ids)).toEqual([
+      { agentId: "grok", task: "scan X [today]", after: [] },
+      { agentId: "muse", task: "write copy", after: [0] },
+    ]);
+  });
 });
 
 describe("readySteps", () => {
@@ -88,10 +97,12 @@ describe("readySteps", () => {
 });
 
 describe("stepPrompt", () => {
-  it("passes earlier results forward, marked by step and agent", () => {
+  it("passes earlier results forward fenced as untrusted data, marked by step and agent", () => {
     const p = stepPrompt("Write the post", [{ step: 1, agentName: "Grok", ok: true, text: "people love it" }]);
     expect(p).toContain("Write the post");
-    expect(p).toContain("### Step 1 · Grok\npeople love it");
+    expect(p).toContain("### Step 1 · Grok");
+    expect(p).toContain('<teammate_output step="1" agent="Grok">\npeople love it\n</teammate_output>');
+    expect(p).toMatch(/untrusted data/i);
   });
 
   it("leaves independent steps untouched and trims very long inputs", () => {
@@ -130,7 +141,9 @@ describe("prompts", () => {
       { agentName: "Grok", ok: true, text: "done" },
       { agentName: "Muse", ok: false, text: "timeout" },
     ]);
-    expect(prompt).toContain("### Step 1 · Grok\ndone");
-    expect(prompt).toContain("### Step 2 · Muse (failed)\ntimeout");
+    expect(prompt).toContain("### Step 1 · Grok");
+    expect(prompt).toContain('<teammate_output step="1" agent="Grok">\ndone\n</teammate_output>');
+    expect(prompt).toContain("### Step 2 · Muse (failed)");
+    expect(prompt).toContain("do not run tools");
   });
 });

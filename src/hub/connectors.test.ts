@@ -295,6 +295,10 @@ describe("pickModelForTask (auto model mode)", () => {
       model: "deepseek-v4-pro",
       reasoning: "high",
     });
+    expect(pickModelForTask(zen, zenConn, "review this SQL schema for index issues", ["deepseek-v4-pro"])).toMatchObject({
+      model: "kimi-k3.1-pro",
+      reasoning: "high",
+    });
     expect(pickModelForTask(zen, zenConn, "do a thorough security audit and system architecture deep dive")).toMatchObject({
       model: "deepseek-v4-pro",
       reasoning: "max",

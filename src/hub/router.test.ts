@@ -66,4 +66,20 @@ describe("pickAgent", () => {
     expect(pickAgent("hello there", crew, "hermes")).toBe("hermes");
     expect(pickAgent("write a caption", [{ ...crew[1], enabled: false }, crew[2]], "hermes")).toBe("hermes");
   });
+
+  it("matches word stems like debugging/writing/trending and prefers idle teammates on ties", () => {
+    expect(pickAgent("help me debugging this script", crew, "muse")).toBe("hermes");
+    expect(pickAgent("I am writing a tagline", crew, "hermes")).toBe("muse");
+    expect(pickAgent("what is trending today", [{ id: "grok", skills: ["trend"], enabled: true }, crew[2]], "hermes")).toBe("grok");
+    expect(
+      pickAgent(
+        "review this code",
+        [
+          { id: "cline", skills: ["code", "review"], enabled: true, busy: 2 },
+          { id: "zen", skills: ["code", "review"], enabled: true, busy: 0 },
+        ],
+        "cline",
+      ),
+    ).toBe("zen");
+  });
 });

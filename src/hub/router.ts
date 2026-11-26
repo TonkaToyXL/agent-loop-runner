@@ -167,21 +167,33 @@ export function parseInbox(args: string[]): Command {
   return { type: "inbox", mode, hours, unreadOnly, question };
 }
 
-/** Pick the agent whose skills best match the text. Ties go to the fallback (lead). */
+function matchesSkill(words: string[], skill: string): boolean {
+  const s = skill.toLowerCase();
+  if (words.includes(s)) return true;
+  if (s.length < 4) return false;
+  // Simple morphological stem match: "debug" -> "debugging", "write" -> "writing", "analyze" -> "analyzing".
+  const stem = s.endsWith("e") && s.length >= 5 ? s.slice(0, -1) : s;
+  return words.some((w) => w.startsWith(stem) && w.length <= stem.length + 5);
+}
+
+/** Pick the agent whose skills best match the text. Ties prefer idle agents, then fallback (lead). */
 export function pickAgent(
   text: string,
-  agents: { id: string; skills: string[]; enabled: boolean }[],
+  agents: { id: string; skills: string[]; enabled: boolean; busy?: number }[],
   fallback: string,
 ): string {
-  const words = new Set(text.toLowerCase().match(/[a-z0-9]+/g) ?? []);
+  const words = text.toLowerCase().match(/[a-z0-9]+/g) ?? [];
   let best = fallback;
   let bestScore = 0;
+  let bestBusy = Number.POSITIVE_INFINITY;
   for (const agent of agents) {
     if (!agent.enabled) continue;
-    const score = agent.skills.reduce((n, skill) => n + (words.has(skill) ? 1 : 0), 0);
-    if (score > bestScore) {
+    const score = agent.skills.reduce((n, skill) => n + (matchesSkill(words, skill) ? 1 : 0), 0);
+    const busy = agent.busy ?? 0;
+    if (score > bestScore || (score > 0 && score === bestScore && busy < bestBusy)) {
       best = agent.id;
       bestScore = score;
+      bestBusy = busy;
     }
   }
   return best;

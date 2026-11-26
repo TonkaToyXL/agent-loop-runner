@@ -74,6 +74,134 @@ describe("Hub task queue", () => {
   });
 });
 
+describe("Hub team delegation", () => {
+  it("fails over a broken text-only subtask to a healthy teammate and skips synthesis for a single-step goal", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "relay-team-test-"));
+    const lead = normalizeAgent(
+      {
+        id: "lead",
+        name: "Lead",
+        model: "m",
+        actsInWorld: true,
+        skills: ["plan"],
+        connectors: [
+          {
+            kind: "cli",
+            label: "sh",
+            billing: "local",
+            command: "sh",
+            args: ["-c", `cat >/dev/null; printf '[{"step":1,"agent":"flaky","task":"review the copy"}]'`],
+          },
+        ],
+      },
+      0,
+    );
+    const flaky = normalizeAgent(
+      {
+        id: "flaky",
+        name: "Flaky",
+        model: "m",
+        skills: ["review"],
+        connectors: [{ kind: "cli", label: "sh", billing: "local", command: "sh", args: ["-c", "echo rate-limited >&2; exit 1"] }],
+      },
+      1,
+    );
+    const backup = normalizeAgent(
+      {
+        id: "backup",
+        name: "Backup",
+        model: "m",
+        skills: ["review"],
+        connectors: [{ kind: "cli", label: "sh", billing: "local", command: "sh", args: ["-c", "cat >/dev/null; echo rescued-by-backup"] }],
+      },
+      2,
+    );
+    const hub = new Hub({ lead: "lead", agents: [lead, flaky, backup] }, new Store(join(dir, "state.json")));
+    const batons: { from: string; to: string; kind: string }[] = [];
+    hub.bus.on("event", (e: { type: string; data: { from: string; to: string; kind: string } }) => {
+      if (e.type === "baton") batons.push(e.data);
+    });
+    const res = await hub.handleText("@team review the copy", web);
+    for (let i = 0; i < 100; i++) {
+      const g = hub.store.state.tasks.find((t) => t.id === res.taskId);
+      if (g && !["queued", "running"].includes(g.status)) break;
+      await new Promise((r) => setTimeout(r, 30));
+    }
+    const goal = hub.store.state.tasks.find((t) => t.id === res.taskId)!;
+    const kids = hub.store.state.tasks.filter((t) => t.parentId === goal.id);
+    expect(goal.status).toBe("done");
+    expect(goal.result).toBe("rescued-by-backup");
+    expect(kids.find((k) => k.kind === "subtask")).toMatchObject({ agentId: "backup", reroutedFrom: "flaky", status: "done" });
+    expect(kids.some((k) => k.kind === "synthesis")).toBe(false);
+    expect(batons.some((b) => b.from === "flaky" && b.to === "backup" && b.kind === "reroute")).toBe(true);
+  });
+
+  it("prefers an independent reviewer over the upstream draft author when a review step fails over", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "relay-indep-test-"));
+    const lead = normalizeAgent(
+      {
+        id: "lead",
+        name: "Lead",
+        model: "m",
+        actsInWorld: true,
+        skills: ["plan"],
+        connectors: [
+          {
+            kind: "cli",
+            label: "sh",
+            billing: "local",
+            command: "sh",
+            args: [
+              "-c",
+              `cat >/dev/null; printf '[{"step":1,"agent":"writer","task":"write taglines"},{"step":2,"agent":"flaky","task":"review the taglines","after":[1]}]'`,
+            ],
+          },
+        ],
+      },
+      0,
+    );
+    const writer = normalizeAgent(
+      {
+        id: "writer",
+        name: "Writer",
+        model: "m",
+        skills: ["tagline", "taglines", "write"],
+        connectors: [{ kind: "cli", label: "sh", billing: "local", command: "sh", args: ["-c", "cat >/dev/null; echo draft-taglines"] }],
+      },
+      1,
+    );
+    const flaky = normalizeAgent(
+      {
+        id: "flaky",
+        name: "Flaky",
+        model: "m",
+        skills: ["review"],
+        connectors: [{ kind: "cli", label: "sh", billing: "local", command: "sh", args: ["-c", "echo disabled >&2; exit 1"] }],
+      },
+      2,
+    );
+    const reviewer = normalizeAgent(
+      {
+        id: "reviewer",
+        name: "Reviewer",
+        model: "m",
+        skills: ["code"],
+        connectors: [{ kind: "cli", label: "sh", billing: "local", command: "sh", args: ["-c", "cat >/dev/null; echo independent-review"] }],
+      },
+      3,
+    );
+    const hub = new Hub({ lead: "lead", agents: [lead, writer, flaky, reviewer] }, new Store(join(dir, "state.json")));
+    const res = await hub.handleText("@team write and review taglines", web);
+    for (let i = 0; i < 100; i++) {
+      const g = hub.store.state.tasks.find((t) => t.id === res.taskId);
+      if (g && !["queued", "running"].includes(g.status)) break;
+      await new Promise((r) => setTimeout(r, 30));
+    }
+    const kids = hub.store.state.tasks.filter((t) => t.parentId === res.taskId);
+    expect(kids.find((k) => k.step === 2)).toMatchObject({ agentId: "reviewer", reroutedFrom: "flaky", status: "done" });
+  });
+});
+
 describe("findAgentAvatars", () => {
   it("finds optional idle and working avatar files preferring animated formats", () => {
     const dir = mkdtempSync(join(tmpdir(), "relay-avatar-test-"));

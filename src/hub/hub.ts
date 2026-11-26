@@ -309,7 +309,18 @@ export class Hub {
 
   private team(): PlannerAgent[] {
     const ok = new Set(this.routable().map((a) => a.id));
-    return this.agents().map(({ id, name, skills, tagline }) => ({ id, name, skills, tagline, enabled: ok.has(id) }));
+    return this.agents().map(({ id, name, skills, tagline, actsInWorld }) => ({
+      id,
+      name,
+      skills,
+      tagline,
+      enabled: ok.has(id),
+      actsInWorld,
+    }));
+  }
+
+  private routableWithLoad() {
+    return this.routable().map((a) => ({ ...a, busy: this.inFlight.get(a.id) ?? 0 }));
   }
 
   /** Limit status, counting requests already running for this agent (they aren't in usage yet). */
@@ -594,7 +605,7 @@ export class Hub {
         return { reply: `→ ${a.name} is on it (${modelLabel} · ${reasonLabel}).`, taskId: task.id };
       }
       case "auto": {
-        const pool = this.routable();
+        const pool = this.routableWithLoad();
         const fallback = pool.some((a) => a.id === this.leadId) ? this.leadId : pool[0]?.id ?? this.leadId;
         const id = pickAgent(cmd.text, pool, fallback);
         const task = this.submitDirect(id, cmd.text, origin, "auto");
@@ -800,18 +811,54 @@ export class Hub {
         }
         if (inputs.length) for (const d of steps[i].after) this.baton({ from: subtasks[d].agentId, to: sub.agentId, taskId: sub.id, kind: "handoff" });
         else this.baton({ from: lead.id, to: sub.agentId, taskId: sub.id, kind: "delegate" });
-        const job = this.execute(sub, "work", stepPrompt(steps[i].task, inputs))
-          .then((text) => {
+        const runPrompt = stepPrompt(steps[i].task, inputs);
+        const runStep = async (): Promise<void> => {
+          try {
+            const text = await this.execute(sub, "work", runPrompt);
             results[i] = { step: i + 1, agentName: nameOf(i), ok: true, text };
             if (!usedLater.has(i)) this.baton({ from: sub.agentId, to: lead.id, taskId: sub.id, kind: "return" });
-          })
-          .catch(() => {
+          } catch {
+            // Runtime failover: if a text-only or non-cancelled step fails (e.g. 429 rate limit or timeout),
+            // retry once on the best idle teammate rather than stalling downstream steps.
+            const failedAgent = this.agent(sub.agentId);
+            const failReason = String(sub.error ?? "failed");
+            const canFailover =
+              !controller.signal.aborted &&
+              sub.status === "failed" &&
+              !sub.reroutedFrom &&
+              !failedAgent?.actsInWorld;
+            const upstreamAuthors = steps[i].after.map((d) => subtasks[d].agentId);
+            const alt = canFailover
+              ? this.alternateFor(sub, sub.agentId, { preferTextOnly: true, avoidIds: upstreamAuthors })
+              : undefined;
+            if (alt) {
+              const prevId = sub.agentId;
+              console.warn(`[team] step ${i + 1} rerouted ${prevId} -> ${alt.id} (${failReason.slice(0, 140)})`);
+              sub.reroutedFrom = prevId;
+              sub.agentId = alt.id;
+              sub.status = "queued";
+              sub.error = undefined;
+              sub.finishedAt = undefined;
+              this.touch(sub);
+              this.baton({ from: prevId, to: alt.id, taskId: sub.id, kind: "reroute" });
+              try {
+                const text = await this.execute(sub, "work", runPrompt);
+                results[i] = { step: i + 1, agentName: nameOf(i), ok: true, text };
+                if (!usedLater.has(i)) this.baton({ from: sub.agentId, to: lead.id, taskId: sub.id, kind: "return" });
+                return;
+              } catch {
+                // fall through to record failure
+              }
+            } else {
+              console.warn(`[team] step ${i + 1} (${sub.agentId}) failed: ${failReason.slice(0, 140)}`);
+            }
             results[i] = { step: i + 1, agentName: nameOf(i), ok: false, text: String(sub.error ?? "failed") };
-          })
-          .finally(() => {
-            finished.add(i);
-            running.delete(i);
-          });
+          }
+        };
+        const job = runStep().finally(() => {
+          finished.add(i);
+          running.delete(i);
+        });
         running.set(i, job);
       };
 
@@ -826,18 +873,23 @@ export class Hub {
       const parts = steps.map((_, i) => results[i] ?? { step: i + 1, agentName: nameOf(i), ok: false, text: "not run" });
       if (!parts.some((p) => p.ok)) throw new Error("Every step failed: " + parts.map((p) => `${p.agentName}: ${p.text}`).join("; "));
 
-      // 3. Synthesize
-      const synth = this.createTask({
-        kind: "synthesis",
-        agentId: lead.id,
-        parentId: goal.id,
-        prompt: synthesisPrompt(goal.prompt, parts),
-        title: `Wrap-up: ${titleOf(goal.prompt)}`,
-        channel: "system",
-        routing: "auto",
-      });
-      goal.result = await this.execute(synth, "synthesis", synth.prompt);
-      goal.status = "done";
+      // 3. Synthesize (skip redundant wrap-up LLM call when a single step already produced the complete answer)
+      if (parts.length === 1 && parts[0].ok) {
+        goal.result = parts[0].text;
+        goal.status = "done";
+      } else {
+        const synth = this.createTask({
+          kind: "synthesis",
+          agentId: lead.id,
+          parentId: goal.id,
+          prompt: synthesisPrompt(goal.prompt, parts),
+          title: `Wrap-up: ${titleOf(goal.prompt)}`,
+          channel: "system",
+          routing: "auto",
+        });
+        goal.result = await this.execute(synth, "synthesis", synth.prompt);
+        goal.status = "done";
+      }
     } catch (err) {
       goal.status = controller.signal.aborted ? "cancelled" : "failed";
       goal.error = errorText(err);
@@ -863,9 +915,18 @@ export class Hub {
     }
   }
 
-  /** Find someone else with capacity, best skill match first. */
-  private alternateFor(task: Task, exclude: string): AgentConfig | undefined {
-    const open = this.routable().filter((a) => a.id !== exclude && this.limitFor(a).ok);
+  /** Find someone else with capacity, best skill match first (preferring idle, independent teammates). */
+  private alternateFor(
+    task: Task,
+    exclude: string,
+    opts: { preferTextOnly?: boolean; avoidIds?: string[] } = {},
+  ): AgentConfig | undefined {
+    const allOpen = this.routableWithLoad().filter((a) => a.id !== exclude && this.limitFor(a).ok);
+    const textOpen = opts.preferTextOnly ? allOpen.filter((a) => !a.actsInWorld) : [];
+    const basePool = textOpen.length ? textOpen : allOpen;
+    const avoid = new Set(opts.avoidIds ?? []);
+    const independent = avoid.size ? basePool.filter((a) => !avoid.has(a.id)) : [];
+    const open = independent.length ? independent : basePool;
     if (!open.length) return undefined;
     const id = pickAgent(task.prompt, open, open[0].id);
     return open.find((a) => a.id === id);
@@ -959,8 +1020,10 @@ export class Hub {
       this.controllers.delete(task.id);
       throw this.fail(task, "blocked", `${agent.name}: ${latest.reason} while this was waiting.`);
     }
-    const autoPicked = agent.model === "auto" || agent.reasoning === "auto" ? pickModelForTask(agent, resolveConnector(agent).config, prompt) : null;
-    const effectiveAgent =
+    const conn = resolveConnector(agent);
+    const triedModels: string[] = [];
+    const autoPicked = agent.model === "auto" || agent.reasoning === "auto" ? pickModelForTask(agent, conn.config, prompt) : null;
+    let effectiveAgent =
       autoPicked && (autoPicked.model !== agent.model || autoPicked.reasoning !== agent.reasoning)
         ? { ...agent, model: autoPicked.model, reasoning: autoPicked.reasoning }
         : agent;
@@ -974,18 +1037,39 @@ export class Hub {
 
     const started = Date.now();
     try {
-      const runner = effectiveAgent;
-      const result = await runAgent({
-        agent: effectiveAgent,
-        prompt,
-        purpose,
-        taskId: task.id,
-        signal: controller.signal,
-        team: this.team(),
-        approve: (ask) =>
-          this.requestApproval({ taskId: task.id, agentId: runner.id, agentName: runner.name, source: "agent", ...ask }, task),
-        ask: (q) => this.askOwner({ taskId: task.id, agentId: runner.id, agentName: runner.name, source: "agent", ...q }, task),
-      });
+      let result;
+      for (;;) {
+        try {
+          const runner = effectiveAgent;
+          result = await runAgent({
+            agent: effectiveAgent,
+            prompt,
+            purpose,
+            taskId: task.id,
+            signal: controller.signal,
+            team: this.team(),
+            approve: (ask) =>
+              this.requestApproval({ taskId: task.id, agentId: runner.id, agentName: runner.name, source: "agent", ...ask }, task),
+            ask: (q) => this.askOwner({ taskId: task.id, agentId: runner.id, agentName: runner.name, source: "agent", ...q }, task),
+          });
+          break;
+        } catch (err) {
+          const msg = errorText(err);
+          // When model is "auto" and the chosen model is disabled/unavailable (HTTP 403/404), try the next safe option once.
+          if (agent.model === "auto" && triedModels.length < 2 && /HTTP (403|404)\b/.test(msg) && !controller.signal.aborted) {
+            triedModels.push(effectiveAgent.model);
+            const next = pickModelForTask(agent, conn.config, prompt, triedModels);
+            if (next.model !== "auto" && !triedModels.includes(next.model)) {
+              console.warn(`[auto-model] ${agent.name}: ${effectiveAgent.model} unavailable (${msg.slice(0, 100)}), trying ${next.model}`);
+              effectiveAgent = { ...effectiveAgent, model: next.model };
+              task.model = effectiveAgent.model;
+              this.touch(task);
+              continue;
+            }
+          }
+          throw err;
+        }
+      }
       task.usage = result.usage;
       task.servedModel = result.served ?? (agent.model === "auto" ? effectiveAgent.model : undefined);
       const isFreeModel = /-free$/i.test(effectiveAgent.model);

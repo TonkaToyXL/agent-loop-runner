@@ -299,11 +299,13 @@ export function pickModelForTask(
   agent: AgentConfig,
   config: ConnectorConfig,
   prompt: string,
+  exclude: Iterable<string> = [],
 ): TaskRoutingChoice {
   const reasoning = pickReasoningForTask(agent.reasoning, prompt);
   const fixed = config.model || agent.model;
   if (fixed !== "auto") return { model: fixed, reasoning };
-  const candidates = safeAutoCandidates(agent, config);
+  const skip = new Set(exclude);
+  const candidates = safeAutoCandidates(agent, config).filter((c) => !skip.has(c));
   if (!candidates.length) return { model: fixed, reasoning };
 
   const prefer = (...needles: string[]) => {
@@ -319,13 +321,13 @@ export function pickModelForTask(
     case "creative":
       return { model: prefer("muse-spark", "kimi-k3.1-pro", "glm-5.3"), reasoning, reason: "creative" };
     case "hard":
-      return { model: prefer("deepseek-v4-pro", "kimi-k3.1-pro", "qwen3.8-max"), reasoning, reason: "deep analysis" };
+      return { model: prefer("deepseek-v4-pro", "kimi-k3.1-pro", "qwen3.8-max", "mistral-large-4"), reasoning, reason: "deep analysis" };
     case "review":
-      return { model: prefer("deepseek-v4-pro", "qwen3.8-max", "kimi-k3.1-pro"), reasoning, reason: "review & analysis" };
+      return { model: prefer("deepseek-v4-pro", "qwen3.8-max", "kimi-k3.1-pro", "mistral-large-4"), reasoning, reason: "review & analysis" };
     case "ui":
       return { model: prefer("glm-5.3", "kimi-k3.1-pro", "qwen3.8-max"), reasoning, reason: "UI & frontend" };
     case "deep":
-      return { model: prefer("kimi-k3.1-pro", "qwen3.8-max", "deepseek-v4-pro"), reasoning, reason: "deep coding" };
+      return { model: prefer("kimi-k3.1-pro", "qwen3.8-max", "deepseek-v4-pro", "mistral-large-4"), reasoning, reason: "deep coding" };
     case "quick":
       return {
         model: prefer("deepseek-v4.1-flash", "glm-5.3-flash", "mimo-v2.6-flash", "minimax-m3.1-flash"),
@@ -333,7 +335,7 @@ export function pickModelForTask(
         reason: "fast value task",
       };
     default:
-      return { model: prefer("kimi-k3.1-pro", "glm-5.3", "deepseek-v4-pro"), reasoning, reason: "general" };
+      return { model: prefer("kimi-k3.1-pro", "glm-5.3", "deepseek-v4-pro", "mistral-large-4"), reasoning, reason: "general" };
   }
 }
 

@@ -1050,20 +1050,37 @@ function agentBubble(t) {
 function goalBubble(t) {
   const lead = agentById(t.agentId);
   const kids = [...S.tasks.values()].filter((c) => c.parentId === t.id).sort((x, y) => Date.parse(x.createdAt) - Date.parse(y.createdAt));
+  const subtasks = kids.filter((c) => c.kind === "subtask");
+  const doneSteps = subtasks.filter((c) => c.status === "done").length;
   const label = (c) => (c.kind === "plan" ? "Plan" : c.kind === "synthesis" ? "Wrap-up" : `${c.step ? `${c.step} · ` : ""}${nameOf(c.agentId)}`);
   const stepState = (c) =>
     c.awaitingApproval ? "needs your OK" : c.status === "queued" && c.after?.length ? `waits for ${c.after.join(", ")}` : stateLabel(c);
+  const progressLine = subtasks.length
+    ? `<div class="team-progress"><span class="muted small">${doneSteps}/${subtasks.length} steps done</span>${subtasks.some((c) => c.reroutedFrom) ? '<span class="reroute" style="margin:0">↪ auto-failover active</span>' : ""}</div>`
+    : "";
   const steps = kids.length
-    ? `<div class="steps">${kids
-        .map((c) => `<details><summary><span class="dot" style="--c:${colorOf(c.agentId)}"></span><span class="sname">${esc(label(c))}</span>
+    ? `<div class="steps">${progressLine}${kids
+        .map((c) => {
+          const ca = agentById(c.agentId);
+          const cWorking = c.status === "running";
+          const openAttr = c.status === "failed" || c.status === "blocked" ? " open" : "";
+          const stepModel = c.model ? `<span class="chip" style="padding:1px 5px;font-size:10px">${esc(shortModel(c.model, ca))}</span>` : "";
+          const rerouteTag = c.reroutedFrom ? `<span class="reroute" style="margin:0;font-size:10.5px">↪ from ${esc(nameOf(c.reroutedFrom))}</span>` : "";
+          return `<details${openAttr}><summary><span class="mini-av step-av" style="--c:${colorOf(c.agentId)}">${renderPortraitContent(ca ?? { id: c.agentId, name: c.agentId }, cWorking)}</span><span class="sname">${esc(label(c))}</span>
             <span class="stitle">${esc(c.kind === "subtask" ? c.title : nameOf(c.agentId))}</span><span class="sstate ${c.awaitingApproval ? "ask" : c.status}">${esc(stepState(c))}</span></summary>
-            <div class="sbody body">${c.status === "done" ? (c.kind === "plan" ? `<pre><code>${esc(c.result)}</code></pre>` : md(c.result)) : c.error ? `<span class="err-text">${esc(c.error)}</span>` : "…"}</div></details>`)
+            <div class="sbody body">${stepModel || rerouteTag ? `<div style="display:flex;gap:6px;align-items:center;margin-bottom:6px;flex-wrap:wrap">${stepModel}${rerouteTag}</div>` : ""}${c.status === "done" ? (c.kind === "plan" ? `<pre><code>${esc(c.result)}</code></pre>` : md(c.result)) : c.error ? `<span class="err-text">${esc(c.error)}</span>` : "…"}</div></details>`;
+        })
         .join("")}</div>`
     : "";
   let body;
   if (t.status === "done") body = `<div class="body">${md(t.result)}</div>`;
   else if (t.status === "running" || t.status === "queued") {
-    const stage = kids.some((c) => c.kind === "synthesis") ? "wrapping up" : kids.some((c) => c.kind === "subtask") ? "crew working" : "planning";
+    const activeSub = subtasks.find((c) => c.status === "running");
+    const stage = kids.some((c) => c.kind === "synthesis")
+      ? `${lead?.name ?? "Lead"} wrapping up`
+      : activeSub
+        ? `${nameOf(activeSub.agentId)} working (step ${activeSub.step ?? ""})`
+        : `${lead?.name ?? "Lead"} planning`;
     body = thinking(t, stage);
   } else body = `<div class="err-text">${esc(stateLabel(t))}: ${esc(t.error ?? "")}</div>`;
   return `<div class="msg bot"><div class="bubble" style="--c:var(--accent)">
