@@ -256,8 +256,7 @@ body.focus-mode .main > [data-tab="ranks"] { display: none !important; }
 .pipe-stat { font: 500 11px var(--font-mono); color: var(--muted); white-space: nowrap; flex: none; }
 .pipe-stat.live { color: var(--accent-text); }
 .pipe-track {
-  display: flex; align-items: center; gap: 6px;
-  overflow-x: auto; padding-bottom: 2px; scrollbar-width: thin;
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
 }
 .pipe-col { display: flex; flex-direction: column; gap: 5px; flex: none; }
 .pipe-arrow { width: 14px; height: 14px; color: var(--faint); flex: none; }
