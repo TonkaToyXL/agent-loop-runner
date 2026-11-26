@@ -257,6 +257,8 @@ kbd { font: 11px var(--font-mono); padding: 1px 5px; border: 1px solid var(--lin
 .avatar-stage svg.portrait, .avatar-stage img.portrait-img {
   width: 100%; height: 100%; display: block; object-fit: cover;
 }
+/* Transparent logos (e.g. Hermes' white line art) need a dark backing to show on the light theme. */
+img.portrait-img { background: #0b0d12; }
 .avatar-stage img.portrait-img {
   position: absolute; inset: 0;
   transition: opacity 0.35s ease, transform 0.35s cubic-bezier(0.16, 1, 0.3, 1);
