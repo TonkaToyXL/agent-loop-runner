@@ -171,6 +171,36 @@ export interface RateInfo {
   at: string;
 }
 
+export interface ProviderQuotaWindow {
+  /** Short window label, e.g. "5h", "Week", "Month", "Subscription". */
+  label: string;
+  /** Percentage of this window used (0..100). */
+  usedPercent: number;
+  /** ISO timestamp when the window resets, if reported by the provider. */
+  resetsAt?: string;
+}
+
+export interface ProviderQuota {
+  /** Provider display name, e.g. "ClinePass", "Nous Portal", "OpenCode Zen". */
+  provider: string;
+  /** Active plan label when reported by the provider. */
+  plan?: string;
+  /** True when numbers were fetched live from the provider's API. */
+  live: boolean;
+  /** Rolling usage windows when reported (e.g. ClinePass 5h / Week / Month). */
+  windows?: ProviderQuotaWindow[];
+  /** Remaining account credits in USD when reported (e.g. Nous Portal). */
+  creditsRemainingUsd?: number;
+  /** Current period spend in USD when reported. */
+  periodSpendUsd?: number;
+  /** Monthly subscription credit allowance in USD when reported. */
+  monthlyCreditsUsd?: number;
+  /** Honest note when a provider does not expose a live quota/balance API. */
+  note?: string;
+  /** ISO timestamp of when this quota snapshot was fetched. */
+  updatedAt: string;
+}
+
 export interface ChannelStatus {
   name: Channel;
   enabled: boolean;

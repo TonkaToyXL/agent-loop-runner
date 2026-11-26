@@ -21,6 +21,7 @@ import {
   type StepResult,
 } from "./planner.js";
 import { HELP_TEXT, parseCommand, pickAgent } from "./router.js";
+import { fetchProviderQuota, formatProviderQuotaSummary, providerQuotaKey } from "./quota.js";
 import type { Store } from "./store.js";
 import type {
   AgentConfig,
@@ -28,6 +29,7 @@ import type {
   ChannelStatus,
   EditableAgentFields,
   HubConfig,
+  ProviderQuota,
   ReplyTarget,
   Task,
   TaskKind,
@@ -71,6 +73,7 @@ export interface AgentView extends AgentConfig {
   usage: AgentUsage;
   limit: LimitState;
   rate?: { remainingRequests?: number; remainingTokens?: number; at: string };
+  providerQuota?: ProviderQuota;
 }
 
 export type Baton = { from: string; to: string; taskId: string; kind: "delegate" | "return" | "reroute" | "handoff" };
@@ -116,7 +119,10 @@ export class Hub {
   private readonly inFlight = new Map<string, number>();
   private readonly health = new Map<string, { ok: boolean; detail: string }>();
   private readonly discoveredModels = new Map<string, DiscoveredModels>();
+  private readonly providerQuotas = new Map<string, ProviderQuota>();
+  private readonly quotaFetchedAt = new Map<string, number>();
   private healthTimer: NodeJS.Timeout | null = null;
+  private quotaTimer: NodeJS.Timeout | null = null;
   private readonly healthFails = new Map<string, number>();
   private readonly healthAlerted = new Map<string, "down" | "up">();
   readonly approvals: ApprovalDesk;
@@ -418,10 +424,56 @@ export class Hub {
     void run();
     this.healthTimer = setInterval(run, intervalMs);
     this.healthTimer.unref();
+    void this.refreshQuotas();
+    this.quotaTimer = setInterval(() => void this.refreshQuotas(), 180_000);
+    this.quotaTimer.unref();
   }
 
   stopHealthChecks(): void {
     if (this.healthTimer) clearInterval(this.healthTimer);
+    if (this.quotaTimer) clearInterval(this.quotaTimer);
+  }
+
+  /** Fetch live provider usage limits / credits for live agents, deduplicated per provider account. */
+  async refreshQuotas(onlyKey?: string): Promise<void> {
+    const now = Date.now();
+    const seen = new Map<string, Promise<ProviderQuota | undefined>>();
+    let changed = false;
+
+    for (const agent of this.agents()) {
+      const connector = resolveConnector(agent);
+      if (!connector.live) {
+        changed = this.providerQuotas.delete(agent.id) || changed;
+        continue;
+      }
+      const key = providerQuotaKey(connector.config);
+      if (!key) continue;
+      if (onlyKey && key !== onlyKey) continue;
+      // Avoid hammering provider APIs on rapid back-to-back tasks.
+      if (onlyKey && now - (this.quotaFetchedAt.get(key) ?? 0) < 15_000) continue;
+
+      let pending = seen.get(key);
+      if (!pending) {
+        this.quotaFetchedAt.set(key, now);
+        pending = fetchProviderQuota(connector.config).catch(() => undefined);
+        seen.set(key, pending);
+      }
+      const next = await pending;
+      if (!next) continue;
+      const prev = this.providerQuotas.get(agent.id);
+      const same =
+        prev &&
+        prev.live === next.live &&
+        prev.plan === next.plan &&
+        prev.creditsRemainingUsd === next.creditsRemainingUsd &&
+        prev.periodSpendUsd === next.periodSpendUsd &&
+        prev.note === next.note &&
+        JSON.stringify(prev.windows ?? []) === JSON.stringify(next.windows ?? []);
+      this.providerQuotas.set(agent.id, next);
+      if (!same) changed = true;
+    }
+
+    if (changed) this.emitAgents();
   }
 
   setLead(id: string): void {
@@ -477,6 +529,7 @@ export class Hub {
       usage,
       limit,
       rate: this.store.state.rates[agent.id],
+      providerQuota: this.providerQuotas.get(agent.id),
     };
   }
 
@@ -667,7 +720,7 @@ export class Hub {
         return [
           `${v.status === "working" ? "◉" : v.status === "idle" ? "●" : "○"} ${a.name}${lead} · ${v.status}`,
           `  ${a.provider ? `${a.provider}/` : ""}${a.model}${served} · reasoning ${a.reasoning} · ${v.connectorLabel}`,
-          `  today ${v.usage.requestsToday}${lim.dailyRequests ? `/${lim.dailyRequests}` : ""} req · ${fmtK(v.usage.tokensToday)}${lim.dailyTokens ? `/${fmtK(lim.dailyTokens)}` : ""} tok`,
+          `  today ${v.usage.requestsToday}${lim.dailyRequests ? `/${lim.dailyRequests}` : ""} req · ${fmtK(v.usage.tokensToday)}${lim.dailyTokens ? `/${fmtK(lim.dailyTokens)}` : ""} tok${formatProviderQuotaSummary(v.providerQuota) ? ` · ${formatProviderQuotaSummary(v.providerQuota)}` : ""}`,
         ].join("\n");
       })
       .join("\n\n");
@@ -1078,6 +1131,8 @@ export class Hub {
       task.status = "done";
       this.record(task, effectiveAgent, true, Date.now() - started);
       if (result.rate) this.store.state.rates[agent.id] = result.rate;
+      const quotaKey = providerQuotaKey(conn.config);
+      if (conn.live && quotaKey) void this.refreshQuotas(quotaKey);
       return result.text;
     } catch (err) {
       const message = errorText(err);
