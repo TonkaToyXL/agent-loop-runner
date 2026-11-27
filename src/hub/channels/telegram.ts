@@ -11,7 +11,13 @@ export function chunk(text: string, size = MAX_LEN): string[] {
   let rest = text;
   while (rest.length > size) {
     const cut = rest.lastIndexOf("\n", size);
-    const at = cut > size / 2 ? cut : size;
+    let at = cut > size / 2 ? cut : size;
+    // Never split between a UTF-16 high surrogate and low surrogate (e.g. emoji).
+    if (at > 0 && at < rest.length) {
+      const code = rest.charCodeAt(at - 1);
+      if (code >= 0xd800 && code <= 0xdbff) at--;
+    }
+    if (at <= 0) at = size;
     parts.push(rest.slice(0, at));
     rest = rest.slice(at).replace(/^\n/, "");
   }
@@ -118,9 +124,15 @@ export class TelegramChannel implements ChannelAdapter {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
-      signal,
+      signal: signal ?? AbortSignal.timeout(15_000),
     });
-    const data = (await res.json()) as { ok: boolean; result: T; description?: string };
+    const raw = await res.text();
+    let data: { ok: boolean; result: T; description?: string };
+    try {
+      data = JSON.parse(raw) as { ok: boolean; result: T; description?: string };
+    } catch {
+      throw new Error(`Telegram ${method} HTTP ${res.status}: non-JSON reply`);
+    }
     if (!data.ok) throw new Error(`Telegram ${method}: ${data.description ?? res.status}`);
     return data.result;
   }
@@ -151,6 +163,11 @@ export class TelegramChannel implements ChannelAdapter {
       disable_web_page_preview: true,
       reply_markup: { inline_keyboard: buttons },
     });
+    // If the approval settled on another channel while sendMessage was in flight, update it right away.
+    if (approval.status !== "pending") {
+      await this.call("editMessageText", { chat_id: chatId, message_id: msg.message_id, text: approvalText(approval) }).catch(() => {});
+      return;
+    }
     if (approval.kind === "question") this.questionMessages.set(`${chatId}:${msg.message_id}`, approval.id);
     const list = this.approvalMessages.get(approval.id) ?? [];
     list.push({ chatId, messageId: msg.message_id });
@@ -161,6 +178,9 @@ export class TelegramChannel implements ChannelAdapter {
     if (approval.status === "pending") return;
     const list = this.approvalMessages.get(approval.id) ?? [];
     this.approvalMessages.delete(approval.id);
+    for (const [key, qId] of this.questionMessages.entries()) {
+      if (qId === approval.id) this.questionMessages.delete(key);
+    }
     for (const { chatId, messageId } of list) {
       // Replacing the text without reply_markup also removes the buttons.
       await this.call("editMessageText", { chat_id: chatId, message_id: messageId, text: approvalText(approval) }).catch(() => {});
@@ -185,14 +205,18 @@ export class TelegramChannel implements ChannelAdapter {
     this.hub.emitChannels();
   }
 
+  private async initBot(): Promise<void> {
+    const me = await this.call<{ username: string }>("getMe", {});
+    this.botUsername = me.username;
+    this.setState(true, `@${me.username}`);
+    await this.call("setMyCommands", {
+      commands: buildBotCommands(this.hub.agents()),
+    }).catch(() => {});
+  }
+
   private async loop(): Promise<void> {
     try {
-      const me = await this.call<{ username: string }>("getMe", {});
-      this.botUsername = me.username;
-      this.setState(true, `@${me.username}`);
-      await this.call("setMyCommands", {
-        commands: buildBotCommands(this.hub.agents()),
-      }).catch(() => {});
+      await this.initBot();
     } catch (err) {
       this.setState(false, err instanceof Error ? err.message : "getMe failed");
     }
@@ -206,10 +230,14 @@ export class TelegramChannel implements ChannelAdapter {
           AbortSignal.any([this.abort.signal, AbortSignal.timeout(65_000)]),
         );
         backoff = 1000;
-        if (!this.connected) this.setState(true, this.botUsername ? `@${this.botUsername}` : "polling");
+        if (!this.botUsername) {
+          void this.initBot().catch(() => {});
+        } else if (!this.connected) {
+          this.setState(true, `@${this.botUsername}`);
+        }
         for (const update of updates) {
           this.offset = update.update_id + 1;
-          void this.onMessage(update);
+          void this.onMessage(update).catch((err) => console.error("[telegram] update handler failed:", errorText(err)));
         }
       } catch (err) {
         if (!this.running) return;
@@ -228,45 +256,51 @@ export class TelegramChannel implements ChannelAdapter {
       await this.call("answerCallbackQuery", { callback_query_id: q.id, text: "Not allowed." }).catch(() => {});
       return;
     }
-    const a = this.hub.decideApproval(parsed.id, parsed.approve, "telegram");
+    const { approval: a, changed } = this.hub.decideApprovalDetailed(parsed.id, parsed.approve, "telegram");
     const text = !a
       ? "That request is gone."
-      : a.decidedVia === "telegram" && (a.status === "approved" || a.status === "denied")
+      : changed
         ? a.status === "approved"
           ? "Approved"
           : "Denied"
-        : `Already ${a.status}`;
+        : a.kind === "question" && parsed.approve
+          ? "Reply with text to answer."
+          : `Already ${a.status}`;
     // The message itself is updated by updateApproval() for every chat that got it.
     await this.call("answerCallbackQuery", { callback_query_id: q.id, text }).catch(() => {});
   }
 
   private async onMessage(update: Update): Promise<void> {
-    if (update.callback_query) return this.onButton(update.callback_query);
-    const msg = update.message;
-    if (!msg?.text) return;
-    const chatId = String(msg.chat.id);
-    if (!this.allowed.has(chatId)) {
-      // Only tells the sender their own chat id, so the owner can allowlist it.
-      await this.send(chatId, `Not authorized. Your chat id is ${chatId}. Add it to TELEGRAM_ALLOWED_CHAT_IDS to use this hub.`).catch(() => {});
-      return;
-    }
-    // A reply to a question message is the answer.
-    const repliedTo = msg.reply_to_message ? this.questionMessages.get(`${chatId}:${msg.reply_to_message.message_id}`) : undefined;
-    if (repliedTo) {
-      const a = this.hub.answerQuestion(repliedTo, msg.text, "telegram");
-      await this.send(chatId, a?.status === "approved" ? `✅ Sent your answer to ${a.agentName}.` : `That question was already ${a?.status ?? "closed"}.`);
-      return;
-    }
-    await this.call("sendChatAction", { chat_id: chatId, action: "typing" }).catch(() => {});
     try {
-      const { reply } = await this.hub.handleText(msg.text, {
-        channel: "telegram",
-        chatId,
-        from: msg.from?.username ?? msg.from?.first_name,
-      });
-      await this.send(chatId, reply);
+      if (update.callback_query) return await this.onButton(update.callback_query);
+      const msg = update.message;
+      if (!msg?.text) return;
+      const chatId = String(msg.chat.id);
+      if (!this.allowed.has(chatId)) {
+        // Only tells the sender their own chat id, so the owner can allowlist it.
+        await this.send(chatId, `Not authorized. Your chat id is ${chatId}. Add it to TELEGRAM_ALLOWED_CHAT_IDS to use this hub.`).catch(() => {});
+        return;
+      }
+      // A reply to a question message is the answer.
+      const repliedTo = msg.reply_to_message ? this.questionMessages.get(`${chatId}:${msg.reply_to_message.message_id}`) : undefined;
+      if (repliedTo) {
+        const { approval: a, changed } = this.hub.answerQuestionDetailed(repliedTo, msg.text, "telegram");
+        await this.send(chatId, changed && a ? `✅ Sent your answer to ${a.agentName}.` : `That question was already ${a?.status ?? "closed"}.`).catch(() => {});
+        return;
+      }
+      await this.call("sendChatAction", { chat_id: chatId, action: "typing" }).catch(() => {});
+      try {
+        const { reply } = await this.hub.handleText(msg.text, {
+          channel: "telegram",
+          chatId,
+          from: msg.from?.username ?? msg.from?.first_name,
+        });
+        await this.send(chatId, reply);
+      } catch (err) {
+        await this.send(chatId, `Error: ${errorText(err)}`).catch(() => {});
+      }
     } catch (err) {
-      await this.send(chatId, `Error: ${errorText(err)}`).catch(() => {});
+      console.error("[telegram] onMessage failed:", errorText(err));
     }
   }
 }

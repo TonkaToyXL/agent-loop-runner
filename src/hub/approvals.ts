@@ -53,7 +53,15 @@ export class ApprovalDesk {
       expiresAt: new Date(now + this.timeoutMs).toISOString(),
     };
     this.items.push(approval);
-    if (this.items.length > KEEP) this.items.splice(0, this.items.length - KEEP);
+    while (this.items.length > KEEP) {
+      const settledIdx = this.items.findIndex((x) => x.status !== "pending");
+      if (settledIdx >= 0) {
+        this.items.splice(settledIdx, 1);
+      } else {
+        const evicted = this.items.shift();
+        if (evicted && evicted.status === "pending") this.settle(evicted, "expired", "evicted");
+      }
+    }
     const outcome = new Promise<Outcome>((resolve) => {
       const timer = setTimeout(() => this.settle(approval, "expired", "timeout"), this.timeoutMs);
       timer.unref?.();
@@ -83,29 +91,48 @@ export class ApprovalDesk {
     return this.items.filter((a) => a.status === "pending");
   }
 
+  /** Record a yes/no (or skip, for questions) and report whether this call actually settled it. */
+  decideDetailed(id: string, approve: boolean, via: string): { approval?: Approval; changed: boolean } {
+    const approval = this.get(id);
+    if (!approval) return { changed: false };
+    if (approval.status === "pending") {
+      if (approval.kind === "question" && approve) return { approval, changed: false }; // a question needs text, not a yes
+      this.settle(approval, approve ? "approved" : "denied", via);
+      return { approval, changed: true };
+    }
+    return { approval, changed: false };
+  }
+
   /** Record a yes/no (or skip, for questions). Already-decided items are left as they are. */
   decide(id: string, approve: boolean, via: string): Approval | undefined {
+    return this.decideDetailed(id, approve, via).approval;
+  }
+
+  /** Answer a question and report whether this call actually settled it. */
+  answerDetailed(id: string, text: string, via: string): { approval?: Approval; changed: boolean } {
     const approval = this.get(id);
-    if (!approval) return undefined;
-    if (approval.status === "pending") {
-      if (approval.kind === "question" && approve) return approval; // a question needs text, not a yes
-      this.settle(approval, approve ? "approved" : "denied", via);
+    if (!approval) return { changed: false };
+    const clean = text.trim().slice(0, 2000);
+    if (approval.status === "pending" && approval.kind === "question" && clean) {
+      this.settle(approval, "approved", via, clean);
+      return { approval, changed: true };
     }
-    return approval;
+    return { approval, changed: false };
   }
 
   /** Answer a question. */
   answer(id: string, text: string, via: string): Approval | undefined {
-    const approval = this.get(id);
-    if (!approval) return undefined;
-    const clean = text.trim().slice(0, 2000);
-    if (approval.status === "pending" && approval.kind === "question" && clean) this.settle(approval, "approved", via, clean);
-    return approval;
+    return this.answerDetailed(id, text, via).approval;
   }
 
   /** Deny everything still waiting for a task (e.g. it was cancelled). */
   cancelForTask(taskId: string, via = "task cancelled"): void {
     for (const a of this.pending()) if (a.taskId === taskId) this.settle(a, "denied", via);
+  }
+
+  /** Deny all pending approvals (e.g. during graceful hub shutdown). */
+  cancelAll(via = "hub shutdown"): void {
+    for (const a of this.pending()) this.settle(a, "denied", via);
   }
 
   private settle(approval: Approval, status: Exclude<ApprovalStatus, "pending">, via: string, answer?: string): void {

@@ -3,6 +3,11 @@ import type { Approval } from "../approvals.js";
 import { errorText } from "../errors.js";
 import type { ChannelAdapter, Hub } from "../hub.js";
 import type { ChannelStatus } from "../types.js";
+import { chunk } from "./telegram.js";
+
+function scrubSecret(msg: string): string {
+  return msg.replace(/([?&]password=)[^&\s]+/gi, "$1[redacted]");
+}
 
 /**
  * iMessage through a BlueBubbles server running on a Mac.
@@ -56,11 +61,12 @@ export class IMessageChannel implements ChannelAdapter {
         const res = await fetch(this.url("api/v1/ping"), { signal: AbortSignal.timeout(8000) });
         this.set(res.ok, res.ok ? "BlueBubbles reachable" : `BlueBubbles HTTP ${res.status}`);
       } catch (err) {
-        this.set(false, err instanceof Error ? err.message : "unreachable");
+        this.set(false, scrubSecret(err instanceof Error ? err.message : "unreachable"));
       }
     };
     void ping();
     this.timer = setInterval(ping, 60_000);
+    this.timer.unref?.();
   }
 
   stop(): void {
@@ -83,19 +89,23 @@ export class IMessageChannel implements ChannelAdapter {
       );
       return;
     }
+    const mins = Math.max(1, Math.round((Date.parse(approval.expiresAt) - Date.parse(approval.createdAt)) / 60_000));
     await this.send(
       chatGuid,
-      `🛡 Needs your OK\n${approval.title}\n\n${approval.detail.slice(0, 700)}\n\nReply "yes ${approval.id}" to allow or "no ${approval.id}" to block. No answer in 15 min = no.`,
+      `🛡 Needs your OK\n${approval.title}\n\n${approval.detail.slice(0, 700)}\n\nReply "yes ${approval.id}" to allow or "no ${approval.id}" to block. No answer in ${mins} min = no.`,
     );
   }
 
   async send(chatGuid: string, text: string): Promise<void> {
-    const res = await fetch(this.url("api/v1/message/text"), {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ chatGuid, tempGuid: `relay-${randomUUID()}`, message: text, method: "apple-script" }),
-    });
-    if (!res.ok) throw new Error(`BlueBubbles send HTTP ${res.status}`);
+    for (const part of chunk(text, 4000)) {
+      const res = await fetch(this.url("api/v1/message/text"), {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        signal: AbortSignal.timeout(15_000),
+        body: JSON.stringify({ chatGuid, tempGuid: `relay-${randomUUID()}`, message: part, method: "apple-script" }),
+      });
+      if (!res.ok) throw new Error(`BlueBubbles send HTTP ${res.status}`);
+    }
   }
 
   /** Called by the HTTP server for each BlueBubbles webhook. */
@@ -110,12 +120,16 @@ export class IMessageChannel implements ChannelAdapter {
       return;
     }
     const chatGuid = chats?.[0]?.guid ?? `iMessage;-;${handle.address}`;
+    if (chatGuid.includes(";+;")) {
+      console.warn(`[imessage] ignored group chat message (${chatGuid})`);
+      return;
+    }
     this.set(true, "receiving");
     try {
       const { reply } = await this.hub.handleText(text, { channel: "imessage", chatId: chatGuid, from: sender });
       await this.send(chatGuid, reply);
     } catch (err) {
-      await this.send(chatGuid, `Error: ${errorText(err)}`).catch(() => {});
+      await this.send(chatGuid, `Error: ${scrubSecret(errorText(err))}`).catch(() => {});
     }
   }
 }

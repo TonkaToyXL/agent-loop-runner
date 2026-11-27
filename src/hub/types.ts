@@ -32,6 +32,8 @@ export interface ConnectorConfig {
   requiresEnv?: string[];
   /** cli: environment variables removed before starting the command (e.g. pay-per-use API keys a subscription CLI would otherwise bill). */
   dropEnv?: string[];
+  /** cli: additional environment variable names explicitly forwarded to the command on top of the safe allowlist. */
+  passEnv?: string[];
   /** openai: base URL such as https://api.x.ai/v1. */
   baseUrl?: string;
   /** openai: env var that overrides baseUrl. */
@@ -76,11 +78,28 @@ export interface AgentPricing {
   outputPerMTok: number;
 }
 
+export interface AgentQuickAction {
+  label: string;
+  prompt: string;
+}
+
 export interface AgentConfig {
   id: string;
   name: string;
   color: string;
   tagline: string;
+  /** Short human role title shown in the UI, e.g. "Chief Operator" or "Live Scout". */
+  role?: string;
+  /** One-line personality summary shown on cards and in settings. */
+  personality?: string;
+  /** 2-3 concise character trait chips shown on the profile card. */
+  traits?: string[];
+  /** Signature motto / voice quote shown on the character profile. */
+  motto?: string;
+  /** Short verb phrase shown while this assistant is working, e.g. "Scanning the wire". */
+  thinkingLabel?: string;
+  /** One-click starter action surfaced on this assistant's Studio card. */
+  quickAction?: AgentQuickAction;
   model: string;
   /** For connectors with supportsProvider: provider slug that serves `model`. Empty = endpoint default. */
   provider: string;
@@ -101,7 +120,7 @@ export interface AgentConfig {
 
 export type EditableAgentFields = Pick<
   AgentConfig,
-  "model" | "provider" | "reasoning" | "skills" | "limits" | "pricing" | "enabled" | "tagline" | "maxConcurrent"
+  "model" | "provider" | "reasoning" | "skills" | "limits" | "pricing" | "enabled" | "tagline" | "role" | "personality" | "traits" | "motto" | "system" | "maxConcurrent"
 >;
 
 export interface HubConfig {
@@ -154,6 +173,8 @@ export interface Task {
   after?: number[];
   /** What the user actually typed, when the prompt sent to the agent is longer (e.g. inbox summaries). */
   display?: string;
+  /** True when the task processes untrusted external data (e.g. email) that must never cross into action-capable agents. */
+  untrustedData?: boolean;
   /** Id of the approval this task is waiting on, if any. */
   awaitingApproval?: string;
   replyTo?: ReplyTarget;

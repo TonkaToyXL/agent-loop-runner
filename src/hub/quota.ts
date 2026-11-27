@@ -184,11 +184,16 @@ export function parseCodexQuota(payload: unknown, now = new Date()): ProviderQuo
 }
 
 /** Shared cache key so agents on the same provider account (e.g. Cline + Muse on ClinePass) share one fetch. */
-export function providerQuotaKey(config: ConnectorConfig): string | undefined {
+export function providerQuotaKey(config: ConnectorConfig, discoveredProvider?: string): string | undefined {
   const baseUrl = (env(config.baseUrlEnv) || config.baseUrl || "").toLowerCase();
   if (config.apiKeyEnv === "CLINEPASS_API_KEY" || baseUrl.includes("api.cline.bot")) return "clinepass";
   if (config.apiKeyEnv === "OPENCODE_ZEN_API_KEY" || baseUrl.includes("opencode.ai/zen")) return "opencode-zen";
-  if (config.kind === "openai" && config.supportsProvider && config.healthPath) return "hermes-nous";
+  if (config.kind === "openai" && config.supportsProvider && config.healthPath) {
+    const prov = discoveredProvider?.trim().toLowerCase() ?? "";
+    if (!prov || prov.includes("nous")) return "hermes-nous";
+    if (prov.includes("cline")) return "clinepass";
+    return undefined;
+  }
   if (config.kind === "cli" && config.command === "codex") return "codex";
   if (config.kind === "webhook") return `webhook:${config.webhookUrlEnv ?? config.label}`;
   return undefined;
@@ -261,15 +266,18 @@ async function fetchJson(url: string, headers: Record<string, string>, timeoutMs
  */
 export async function fetchProviderQuota(
   config: ConnectorConfig,
-  opts?: { hermesHome?: string },
+  opts?: { hermesHome?: string; discoveredProvider?: string },
 ): Promise<ProviderQuota | undefined> {
-  const key = providerQuotaKey(config);
+  const key = providerQuotaKey(config, opts?.discoveredProvider);
   if (!key) return undefined;
 
   if (key === "clinepass") {
-    const apiKey = env(config.apiKeyEnv || "CLINEPASS_API_KEY");
+    const apiKey = env(config.apiKeyEnv === "CLINEPASS_API_KEY" ? config.apiKeyEnv : "CLINEPASS_API_KEY");
     if (!apiKey) return undefined;
-    const base = (env(config.baseUrlEnv) || config.baseUrl || "https://api.cline.bot/api/v1").replace(/\/$/, "");
+    const base = (
+      (config.apiKeyEnv === "CLINEPASS_API_KEY" ? env(config.baseUrlEnv) || config.baseUrl : env("CLINEPASS_BASE_URL")) ||
+      "https://api.cline.bot/api/v1"
+    ).replace(/\/$/, "");
     const headers = { authorization: `Bearer ${apiKey}` };
     try {
       const [limitsPayload, planPayload] = await Promise.all([

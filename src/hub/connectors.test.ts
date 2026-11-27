@@ -354,12 +354,41 @@ describe("pickModelForTask (auto model mode)", () => {
 });
 
 describe("cliEnv", () => {
-  it("keeps pay-per-use API keys away from a subscription CLI", () => {
-    const base = { PATH: "/bin", OPENAI_API_KEY: "sk-paid", CODEX_API_KEY: "sk-paid2", HOME: "/h" };
-    const conn: ConnectorConfig = { kind: "cli", label: "Codex", command: "codex", dropEnv: ["CODEX_API_KEY", "OPENAI_API_KEY"] };
-    expect(cliEnv(conn, base)).toEqual({ PATH: "/bin", HOME: "/h" });
+  it("uses a strict allowlist so Relay secrets and pay-per-use keys never leak to spawned CLIs", () => {
+    const base = {
+      PATH: "/bin",
+      HOME: "/h",
+      CODEX_HOME: "/h/.codex",
+      LC_ALL: "en_US.UTF-8",
+      OPENAI_API_KEY: "sk-paid",
+      CODEX_API_KEY: "sk-paid2",
+      HUB_TOKEN: "secret-hub",
+      TELEGRAM_BOT_TOKEN: "secret-tg",
+      MAIL_IMAP_PASSWORD: "secret-mail",
+      CLINEPASS_API_KEY: "secret-cp",
+      CUSTOM_OK: "yes",
+    };
+    const conn: ConnectorConfig = {
+      kind: "cli",
+      label: "Codex",
+      command: "codex",
+      dropEnv: ["CODEX_API_KEY", "OPENAI_API_KEY"],
+    };
+    expect(cliEnv(conn, base)).toEqual({
+      PATH: "/bin",
+      HOME: "/h",
+      CODEX_HOME: "/h/.codex",
+      LC_ALL: "en_US.UTF-8",
+    });
     expect(base.OPENAI_API_KEY).toBe("sk-paid");
-    expect(cliEnv({ kind: "cli", label: "x", command: "x" }, base)).toBe(base);
+    // Even without dropEnv, secrets are excluded; passEnv explicitly opts a var in.
+    expect(cliEnv({ kind: "cli", label: "x", command: "x", passEnv: ["CUSTOM_OK"] }, base)).toEqual({
+      PATH: "/bin",
+      HOME: "/h",
+      CODEX_HOME: "/h/.codex",
+      LC_ALL: "en_US.UTF-8",
+      CUSTOM_OK: "yes",
+    });
   });
 
   it("is configured on the ChatGPT connector", async () => {
@@ -367,5 +396,35 @@ describe("cliEnv", () => {
     const cfg = JSON.parse(readFileSync(new URL("../../relay.config.json", import.meta.url), "utf8"));
     const codex = cfg.agents.find((a: { id: string }) => a.id === "chatgpt").connectors[0];
     expect(codex.dropEnv).toEqual(expect.arrayContaining(["CODEX_API_KEY", "OPENAI_API_KEY"]));
+  });
+
+  it("treats non-zero CLI exits as failures even when stdout contains text", async () => {
+    const { runAgent } = await import("./connectors.js");
+    const a = normalizeAgent(
+      {
+        id: "failcli",
+        model: "m",
+        connectors: [
+          {
+            kind: "cli",
+            label: "FailCLI",
+            billing: "local",
+            command: "sh",
+            args: ["-c", "echo partial-output; echo boom >&2; exit 2"],
+          },
+        ],
+      },
+      0,
+    );
+    await expect(
+      runAgent({
+        agent: a,
+        prompt: "hi",
+        purpose: "work",
+        taskId: "t-fail",
+        signal: new AbortController().signal,
+        team: [],
+      }),
+    ).rejects.toThrow(/exited with code 2.*boom/);
   });
 });

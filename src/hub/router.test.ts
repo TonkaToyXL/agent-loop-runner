@@ -92,4 +92,32 @@ describe("pickAgent", () => {
       ),
     ).toBe("zen");
   });
+
+  it("routes real-world intents accurately across the full crew and conserves quota on ties", () => {
+    const full = [
+      { id: "grok", skills: ["x", "news", "trends", "realtime"], enabled: true },
+      { id: "muse", skills: ["write", "copy", "hooks", "caption"], enabled: true },
+      { id: "hermes", skills: ["code", "terminal", "files", "automate", "deploy"], enabled: true, actsInWorld: true },
+      { id: "cline", skills: ["code", "debug", "refactor", "regex", "sql", "typescript"], enabled: true },
+      { id: "zen", skills: ["review", "critique", "audit", "compare", "analysis"], enabled: true },
+      { id: "chatgpt", skills: ["strategy", "second-opinion", "chatgpt"], enabled: true, conserveQuota: true },
+    ];
+    expect(pickAgent("What's new in AI today?", full, "hermes")).toBe("grok");
+    expect(pickAgent("Restart the LaunchAgent on my Mac mini", full, "hermes")).toBe("hermes");
+    expect(pickAgent("Pitch 3 sharp hooks for my YouTube video", full, "hermes")).toBe("muse");
+    expect(pickAgent("Fix this TypeScript bug in my regex", full, "hermes")).toBe("cline");
+    expect(pickAgent("write a python script to parse CSV", full, "hermes")).toBe("cline");
+    expect(pickAgent("Pressure-test this design and list tradeoffs", full, "hermes")).toBe("zen");
+    expect(pickAgent("Give me a second opinion on this strategic decision", full, "hermes")).toBe("chatgpt");
+    expect(
+      pickAgent(
+        "quick strategy note",
+        [
+          { id: "chatgpt", skills: ["strategy"], enabled: true, conserveQuota: true },
+          { id: "zen", skills: ["strategy"], enabled: true, conserveQuota: false },
+        ],
+        "chatgpt",
+      ),
+    ).toBe("zen");
+  });
 });

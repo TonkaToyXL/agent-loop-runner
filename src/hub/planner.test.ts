@@ -1,5 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { fallbackPlan, parsePlan, planPrompt, readySteps, stepPrompt, synthesisPrompt, type PlannerAgent } from "./planner.js";
+import {
+  fallbackPlan,
+  parsePlan,
+  planPrompt,
+  readySteps,
+  refinePlan,
+  shouldFastTrackSingleStep,
+  stepPrompt,
+  synthesisPrompt,
+  type PlannerAgent,
+} from "./planner.js";
 
 const team: PlannerAgent[] = [
   { id: "grok", name: "Grok", skills: ["x", "news", "research"], tagline: "Live scout", enabled: true },
@@ -71,13 +81,24 @@ describe("parsePlan", () => {
     expect(parsePlan("[not json]", ids)).toBeNull();
   });
 
-  it("extracts JSON arrays even when surrounding prose contains square brackets", () => {
+  it("extracts JSON arrays even when surrounding prose contains square brackets or an unmatched quote", () => {
     const reply =
-      'Plan [2 steps]:\n```json\n[{"step":1,"agent":"grok","task":"scan X [today]"},{"step":2,"agent":"muse","task":"write copy","after":[1]}]\n```\n[ready]';
+      'Plan "ready [2 steps]:\n```json\n[{"step":1,"agent":"grok","task":"scan X [today]"},{"step":2,"agent":"muse","task":"write copy","after":[1]}]\n```\n[ready]';
     expect(parsePlan(reply, ids)).toEqual([
       { agentId: "grok", task: "scan X [today]", after: [] },
       { agentId: "muse", task: "write copy", after: [0] },
     ]);
+    // Unfenced JSON after an unmatched quote in prose still parses cleanly.
+    const unfenced = 'Here is the "plan: [{"step":1,"agent":"grok","task":"scan X"}]';
+    expect(parsePlan(unfenced, ids)).toEqual([{ agentId: "grok", task: "scan X", after: [] }]);
+  });
+
+  it("rejects a plan when a surviving step depends on a dropped unknown-agent step", () => {
+    const broken = JSON.stringify([
+      { step: 1, agent: "zeus", task: "dropped" },
+      { step: 2, agent: "muse", task: "write based on step 1", after: [1] },
+    ]);
+    expect(parsePlan(broken, ids)).toBeNull();
   });
 });
 
@@ -157,5 +178,38 @@ describe("prompts", () => {
     expect(prompt).toContain('<teammate_output step="1" agent="Grok">\ndone\n</teammate_output>');
     expect(prompt).toContain("### Step 2 · Muse (failed)");
     expect(prompt).toContain("do not run tools");
+  });
+});
+
+describe("delegation refinement and fast-tracking", () => {
+  const fullTeam: PlannerAgent[] = [
+    { id: "grok", name: "Grok", skills: ["x", "news"], tagline: "Live scout", enabled: true, actsInWorld: true },
+    { id: "muse", name: "Muse", skills: ["write", "hooks"], tagline: "Creative", enabled: true },
+    { id: "hermes", name: "Hermes", skills: ["terminal", "files"], tagline: "Operator", enabled: true, actsInWorld: true },
+    { id: "cline", name: "Cline", skills: ["code", "debug"], tagline: "Coder", enabled: true },
+    { id: "zen", name: "Zen", skills: ["review", "audit"], tagline: "Critic", enabled: true },
+  ];
+
+  it("fast-tracks trivial greetings and tiny single-specialist asks, not multi-step goals", () => {
+    expect(shouldFastTrackSingleStep("hi")).toBe(true);
+    expect(shouldFastTrackSingleStep("What's new in AI today?")).toBe(true);
+    expect(shouldFastTrackSingleStep("plan and build")).toBe(false);
+    expect(shouldFastTrackSingleStep("code & test")).toBe(false);
+    expect(shouldFastTrackSingleStep("research AI news on X and write 3 hooks")).toBe(false);
+    expect(shouldFastTrackSingleStep("audit these posts")).toBe(false);
+    expect(shouldFastTrackSingleStep("draft hooks -> review them")).toBe(false);
+  });
+
+  it("corrects live X, local Mac ops, and self-review delegation mistakes without pulling downstream copy steps back to Grok", () => {
+    const refined = refinePlan(
+      [
+        { agentId: "muse", task: "Check what is trending on X today", after: [] },
+        { agentId: "cline", task: "Check local files and restart service on my Mac mini", after: [] },
+        { agentId: "muse", task: "Draft 3 video hooks based on the trending X posts", after: [0] },
+        { agentId: "muse", task: "Review and critique the 3 hooks", after: [2] },
+      ],
+      fullTeam,
+    );
+    expect(refined.map((s) => s.agentId)).toEqual(["grok", "hermes", "muse", "zen"]);
   });
 });

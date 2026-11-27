@@ -42,7 +42,8 @@ describe("ApprovalDesk", () => {
   it("decides once: a second answer doesn't flip the first", async () => {
     const desk = new ApprovalDesk(() => {}, 60_000);
     const { approval, decision } = desk.request(req);
-    desk.decide(approval.id, false, "telegram");
+    expect(desk.decideDetailed(approval.id, false, "telegram").changed).toBe(true);
+    expect(desk.decideDetailed(approval.id, false, "telegram").changed).toBe(false);
     desk.decide(approval.id, true, "web");
     await expect(decision).resolves.toBe(false);
     expect(approval.status).toBe("denied");

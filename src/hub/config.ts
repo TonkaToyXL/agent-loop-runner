@@ -22,6 +22,14 @@ export function normalizeAgent(raw: Partial<AgentConfig>, index: number): AgentC
     name: raw.name ?? raw.id,
     color: raw.color ?? "#c6f432",
     tagline: raw.tagline ?? "",
+    ...(raw.role ? { role: raw.role } : {}),
+    ...(raw.personality ? { personality: raw.personality } : {}),
+    ...(Array.isArray(raw.traits) && raw.traits.length ? { traits: raw.traits.map((t) => String(t).trim()).filter(Boolean).slice(0, 4) } : {}),
+    ...(raw.motto ? { motto: raw.motto } : {}),
+    ...(raw.thinkingLabel ? { thinkingLabel: raw.thinkingLabel } : {}),
+    ...(raw.quickAction?.label && raw.quickAction?.prompt
+      ? { quickAction: { label: raw.quickAction.label, prompt: raw.quickAction.prompt } }
+      : {}),
     model: raw.model,
     provider: raw.provider ?? "",
     modelOptions: Array.from(new Set([raw.model, ...(raw.modelOptions ?? [])])),

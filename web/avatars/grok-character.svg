@@ -1,0 +1,83 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="42%" r="65%">
+      <stop offset="0%" stop-color="#14232d"/>
+      <stop offset="68%" stop-color="#0d1018"/>
+      <stop offset="100%" stop-color="#090b10"/>
+    </radialGradient>
+    <radialGradient id="rim" cx="76%" cy="32%" r="58%">
+      <stop offset="0%" stop-color="#5ee0ff" stop-opacity="0.48"/>
+      <stop offset="55%" stop-color="#5ee0ff" stop-opacity="0.08"/>
+      <stop offset="100%" stop-color="#5ee0ff" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="skin" x1="25%" y1="15%" x2="80%" y2="85%">
+      <stop offset="0%" stop-color="#ecc0a2"/>
+      <stop offset="65%" stop-color="#d59e7d"/>
+      <stop offset="100%" stop-color="#b47b5c"/>
+    </linearGradient>
+    <linearGradient id="jacket" x1="10%" y1="0%" x2="90%" y2="100%">
+      <stop offset="0%" stop-color="#222a36"/>
+      <stop offset="100%" stop-color="#11151d"/>
+    </linearGradient>
+    <linearGradient id="lens" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#5ee0ff" stop-opacity="0.45"/>
+      <stop offset="55%" stop-color="#152432" stop-opacity="0.82"/>
+      <stop offset="100%" stop-color="#0c141d" stop-opacity="0.9"/>
+    </linearGradient>
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="4" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <style>
+      .blink { transform-origin: 128px 116px; animation: blink 5.2s ease-in-out infinite; }
+      .glint { animation: glint 4.6s ease-in-out infinite; }
+      @keyframes blink { 0%, 92%, 100% { transform: scaleY(1); } 96% { transform: scaleY(0.12); } }
+      @keyframes glint { 0%, 100% { opacity: 0.45; transform: translateX(0); } 50% { opacity: 0.95; transform: translateX(4px); } }
+    </style>
+  </defs>
+  <rect width="256" height="256" fill="url(#bg)"/>
+  <rect width="256" height="256" fill="url(#rim)"/>
+  <!-- Rim silhouette glow -->
+  <path d="M52 256 C56 206, 80 184, 128 184 C176 184, 200 206, 204 256 Z" fill="url(#jacket)" stroke="#5ee0ff" stroke-opacity="0.42" stroke-width="2.5"/>
+  <!-- Hoodie collar & inner tee -->
+  <path d="M88 188 Q128 214 168 188 L178 214 Q128 236 78 214 Z" fill="#171d27" stroke="#2d3848" stroke-width="1.5"/>
+  <path d="M104 198 Q128 220 152 198 L148 256 L108 256 Z" fill="#0f131b"/>
+  <!-- Neck -->
+  <path d="M109 162 L147 162 L150 198 Q128 212 106 198 Z" fill="#c68f6f"/>
+  <path d="M109 162 Q128 182 147 162 L148 176 Q128 190 108 176 Z" fill="#9c664a" opacity="0.55"/>
+  <!-- Ears -->
+  <ellipse cx="81" cy="122" rx="8" ry="14" fill="#d59e7d" stroke="#0d1018" stroke-width="2"/>
+  <ellipse cx="175" cy="122" rx="8" ry="14" fill="#e2b192" stroke="#5ee0ff" stroke-opacity="0.7" stroke-width="2"/>
+  <!-- Face -->
+  <path d="M84 98 C84 62, 172 62, 172 98 C172 138, 158 168, 128 176 C98 168, 84 138, 84 98 Z" fill="url(#skin)" stroke="#1a1f29" stroke-width="2.2"/>
+  <!-- Cyan rim highlight on right cheek & jaw -->
+  <path d="M168 96 C169 132, 156 161, 134 172" fill="none" stroke="#5ee0ff" stroke-width="2.8" stroke-linecap="round" opacity="0.75" filter="url(#glow)"/>
+  <!-- Stylish swept dark hair -->
+  <path d="M77 110 C72 72, 92 44, 130 42 C164 41, 184 65, 180 108 C174 88, 162 76, 146 74 C132 72, 114 82, 94 84 C84 85, 80 96, 77 110 Z" fill="#141822" stroke="#0a0d13" stroke-width="2"/>
+  <path d="M116 47 C146 44, 174 60, 179 92" fill="none" stroke="#5ee0ff" stroke-width="2.4" stroke-linecap="round" opacity="0.72" filter="url(#glow)"/>
+  <path d="M96 66 Q124 54 156 64" fill="none" stroke="#2d3648" stroke-width="3" stroke-linecap="round"/>
+  <!-- Eyebrows (confident slight lift) -->
+  <path d="M97 103 Q109 98 119 102" fill="none" stroke="#181c24" stroke-width="3.4" stroke-linecap="round"/>
+  <path d="M137 101 Q148 95 160 100" fill="none" stroke="#181c24" stroke-width="3.4" stroke-linecap="round"/>
+  <!-- Eyes (blinking) -->
+  <g class="blink">
+    <ellipse cx="108" cy="116" rx="7" ry="4.5" fill="#f5f8fc"/>
+    <circle cx="109" cy="116" r="3.4" fill="#15202b"/>
+    <circle cx="110.5" cy="114.6" r="1.2" fill="#5ee0ff"/>
+    <ellipse cx="148" cy="116" rx="7" ry="4.5" fill="#f5f8fc"/>
+    <circle cx="149" cy="116" r="3.4" fill="#15202b"/>
+    <circle cx="150.5" cy="114.6" r="1.2" fill="#5ee0ff"/>
+  </g>
+  <!-- Sleek smart glasses -->
+  <g>
+    <rect x="91" y="106" width="32" height="20" rx="6" fill="url(#lens)" stroke="#1b2430" stroke-width="2.4"/>
+    <rect x="133" y="106" width="32" height="20" rx="6" fill="url(#lens)" stroke="#1b2430" stroke-width="2.4"/>
+    <path d="M123 114 H133" stroke="#5ee0ff" stroke-opacity="0.7" stroke-width="2.2"/>
+    <path class="glint" d="M96 111 L107 122 M138 111 L149 122" stroke="#5ee0ff" stroke-width="2.2" stroke-linecap="round"/>
+  </g>
+  <!-- Nose & witty smirk -->
+  <path d="M128 118 L125 137 Q128 140 133 137" fill="none" stroke="#a67255" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M115 151 Q129 156 144 148" fill="none" stroke="#7d4a35" stroke-width="2.8" stroke-linecap="round"/>
+  <!-- Jacket cyan edge accent -->
+  <path d="M174 196 C190 210, 198 232, 202 256" fill="none" stroke="#5ee0ff" stroke-width="2.6" opacity="0.7" filter="url(#glow)"/>
+</svg>

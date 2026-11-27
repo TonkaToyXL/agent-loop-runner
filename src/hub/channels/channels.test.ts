@@ -27,6 +27,13 @@ describe("chunk", () => {
     expect(parts.every((p) => p.length <= 200)).toBe(true);
     expect(parts.join("\n")).toBe(text);
   });
+
+  it("never splits inside a UTF-16 surrogate pair (emoji)", () => {
+    const text = "a".repeat(9) + "🚀" + "b".repeat(5);
+    const parts = chunk(text, 10);
+    expect(parts[0]).toBe("a".repeat(9));
+    expect(parts[1]).toBe("🚀" + "b".repeat(5));
+  });
 });
 
 describe("buildBotCommands", () => {

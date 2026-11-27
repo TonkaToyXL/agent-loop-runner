@@ -101,6 +101,8 @@ describe("providerQuotaKey & readHermesNousAuth", () => {
     expect(providerQuotaKey({ kind: "openai", label: "ClinePass", apiKeyEnv: "CLINEPASS_API_KEY" })).toBe("clinepass");
     expect(providerQuotaKey({ kind: "openai", label: "OpenCode Zen", apiKeyEnv: "OPENCODE_ZEN_API_KEY" })).toBe("opencode-zen");
     expect(providerQuotaKey({ kind: "openai", label: "Hermes", supportsProvider: true, healthPath: "/health" })).toBe("hermes-nous");
+    expect(providerQuotaKey({ kind: "openai", label: "Hermes", supportsProvider: true, healthPath: "/health" }, "cline-pass")).toBe("clinepass");
+    expect(providerQuotaKey({ kind: "openai", label: "Hermes", supportsProvider: true, healthPath: "/health" }, "openrouter")).toBeUndefined();
     expect(providerQuotaKey({ kind: "cli", label: "Codex CLI", command: "codex" })).toBe("codex");
     expect(providerQuotaKey({ kind: "webhook", label: "Grok Bot webhook", webhookUrlEnv: "GROK_WEBHOOK_URL" })).toBe("webhook:GROK_WEBHOOK_URL");
   });

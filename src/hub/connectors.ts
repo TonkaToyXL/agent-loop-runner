@@ -1,8 +1,9 @@
 import { spawn } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { randomUUID, timingSafeEqual } from "node:crypto";
 import { accessSync, constants, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
+import { StringDecoder } from "node:string_decoder";
 import { fallbackPlan, type PlannerAgent } from "./planner.js";
 import { estimateTokens } from "./usage.js";
 import type { AgentConfig, Billing, ConnectorConfig, RateInfo, Reasoning, TokenUsage } from "./types.js";
@@ -100,10 +101,31 @@ type Settle = (err: Error | null, text?: string) => void;
 /** Pending webhook tasks, resolved when the agent POSTs to /hooks/agent/:taskId. */
 const pending = new Map<string, { token: string; settle: Settle }>();
 
+function safeTokenEqual(a: string, b: string): boolean {
+  const x = Buffer.from(a);
+  const y = Buffer.from(b);
+  return x.length === y.length && timingSafeEqual(x, y);
+}
+
+/** Check whether a webhook callback token matches a currently pending task before reading its body. */
+export function verifyWebhookToken(taskId: string, token: string): boolean {
+  const entry = pending.get(taskId);
+  return Boolean(entry && token && safeTokenEqual(entry.token, token));
+}
+
 export function resolveWebhook(taskId: string, token: string, body: { result?: string; error?: string }): boolean {
   const entry = pending.get(taskId);
-  if (!entry || entry.token !== token) return false;
-  entry.settle(body.error ? new Error(body.error) : null, String(body.result ?? ""));
+  if (!entry || !token || !safeTokenEqual(entry.token, token)) return false;
+  if (body.error) {
+    entry.settle(new Error(String(body.error)));
+    return true;
+  }
+  const text = typeof body.result === "string" ? body.result.trim() : "";
+  if (!text) {
+    entry.settle(new Error("Webhook returned an empty reply"));
+    return true;
+  }
+  entry.settle(null, text);
   return true;
 }
 
@@ -131,7 +153,8 @@ async function runWebhook(req: RunRequest, config: ConnectorConfig): Promise<Run
   const url = env(config.webhookUrlEnv);
   const secret = env(config.apiKeyEnv);
   const publicUrl = (process.env.RELAY_PUBLIC_URL?.trim() || `http://127.0.0.1:${process.env.PORT?.trim() || 4747}`).replace(/\/$/, "");
-  const wait = waitForWebhook(req.taskId, config.timeoutMs ?? 540_000, req.signal);
+  const timeoutMs = config.timeoutMs ?? 540_000;
+  const wait = waitForWebhook(req.taskId, timeoutMs, req.signal);
 
   const headers: Record<string, string> = { "content-type": "application/json" };
   const headerName = (env(config.webhookHeaderEnv) || config.webhookHeader || "").toLowerCase();
@@ -139,12 +162,13 @@ async function runWebhook(req: RunRequest, config: ConnectorConfig): Promise<Run
     if (headerName && headerName !== "authorization") headers[headerName] = secret;
     else headers.authorization = /^(bearer|basic)\s/i.test(secret) ? secret : `Bearer ${secret}`;
   }
+  const fetchTimeout = AbortSignal.timeout(timeoutMs);
   let res: Response;
   try {
     res = await fetch(url, {
       method: "POST",
       headers,
-      signal: req.signal,
+      signal: AbortSignal.any([req.signal, fetchTimeout]),
       body: JSON.stringify({
         request_id: req.taskId,
         task: req.prompt,
@@ -157,8 +181,15 @@ async function runWebhook(req: RunRequest, config: ConnectorConfig): Promise<Run
       }),
     });
   } catch (err) {
-    wait.settle(err instanceof Error ? err : new Error(String(err)));
-    throw err;
+    const outErr = req.signal.aborted
+      ? new Error("Cancelled")
+      : fetchTimeout.aborted
+        ? new Error(`${config.label} took longer than ${Math.round(timeoutMs / 1000)}s`)
+        : err instanceof Error
+          ? err
+          : new Error(String(err));
+    wait.settle(outErr);
+    throw outErr;
   }
   if (!res.ok) {
     const err = new Error(`Webhook returned HTTP ${res.status}`);
@@ -276,7 +307,11 @@ export function pickReasoningForTask(
   reasoning: Reasoning,
   prompt: string,
   conserveQuota = false,
+  purpose: Purpose = "work",
 ): Exclude<Reasoning, "auto"> {
+  if (purpose === "plan" || purpose === "synthesis") {
+    return reasoning === "off" ? "off" : "low";
+  }
   if (reasoning !== "auto") return reasoning;
   const kind = classifyTask(prompt);
   if (conserveQuota) {
@@ -319,9 +354,10 @@ export function pickModelForTask(
   config: ConnectorConfig,
   prompt: string,
   exclude: Iterable<string> = [],
+  purpose: Purpose = "work",
 ): TaskRoutingChoice {
   const conserve = Boolean(config.conserveQuota);
-  const reasoning = pickReasoningForTask(agent.reasoning, prompt, conserve);
+  const reasoning = pickReasoningForTask(agent.reasoning, prompt, conserve, purpose);
   const fixed = config.model || agent.model;
   if (fixed !== "auto") return { model: fixed, reasoning };
   const skip = new Set(exclude);
@@ -335,6 +371,15 @@ export function pickModelForTask(
     }
     return candidates[0];
   };
+
+  // Team planning and wrap-up synthesis are fast orchestration calls — use fast models so the crew starts immediately.
+  if (purpose === "plan" || purpose === "synthesis") {
+    return {
+      model: prefer("gpt-6-astra", "deepseek-v4.1-flash", "glm-5.3-flash", "gpt-6-luna", "kimi-k3.1-pro"),
+      reasoning,
+      reason: purpose === "plan" ? "fast team planner" : "fast wrap-up",
+    };
+  }
 
   const kind = classifyTask(prompt);
   if (conserve) {
@@ -370,7 +415,12 @@ export function pickModelForTask(
   }
 }
 
-export function buildChatBody(agent: AgentConfig, config: ConnectorConfig, prompt: string): Record<string, unknown> {
+export function buildChatBody(
+  agent: AgentConfig,
+  config: ConnectorConfig,
+  prompt: string,
+  purpose: Purpose = "work",
+): Record<string, unknown> {
   const body: Record<string, unknown> = {
     ...config.body,
     model: config.model || agent.model,
@@ -379,7 +429,7 @@ export function buildChatBody(agent: AgentConfig, config: ConnectorConfig, promp
       { role: "user", content: prompt },
     ],
   };
-  const resolvedReasoning = pickReasoningForTask(agent.reasoning, prompt);
+  const resolvedReasoning = pickReasoningForTask(agent.reasoning, prompt, Boolean(config.conserveQuota), purpose);
   const effort = resolvedReasoning === "max" ? "high" : resolvedReasoning;
   if (resolvedReasoning !== "off") {
     if (config.reasoningIn === "model_options") body.model_options = { reasoning_effort: effort };
@@ -505,16 +555,17 @@ async function runOpenAI(req: RunRequest, config: ConnectorConfig): Promise<RunR
   const key = env(config.apiKeyEnv);
   const covered = coveredModel(req.agent, config);
   if (covered.error) throw new Error(covered.error);
-  const chosen = pickModelForTask(req.agent, config, req.prompt);
+  const chosen = pickModelForTask(req.agent, config, req.prompt, [], req.purpose);
   const effectiveAgent =
     chosen.model !== req.agent.model || chosen.reasoning !== req.agent.reasoning
       ? { ...req.agent, model: chosen.model, reasoning: chosen.reasoning }
       : req.agent;
-  if (config.runsApi) {
+  // Never bypass Hermes's Runs API approval gate on an actsInWorld agent, even for plan/synthesis.
+  if (config.runsApi && (req.purpose === "work" || req.agent.actsInWorld)) {
     const headers = { ...config.headers, "content-type": "application/json", ...(key ? { authorization: `Bearer ${key}` } : {}) };
     if (await hermesSupportsRuns(base, headers, req.signal)) return runHermesRun({ ...req, agent: effectiveAgent }, config, base, headers);
   }
-  const body = buildChatBody(effectiveAgent, config, req.prompt);
+  const body = buildChatBody(effectiveAgent, config, req.prompt, req.purpose);
   const timeout = AbortSignal.timeout(config.timeoutMs ?? 300_000);
   let res: Response;
   try {
@@ -550,59 +601,102 @@ async function runOpenAI(req: RunRequest, config: ConnectorConfig): Promise<RunR
 
 // ---------------------------------------------------------------- cli (local, signed-in tools)
 const MAX_STDOUT = 4 * 1024 * 1024;
+const SAFE_CLI_ENV = new Set([
+  "PATH",
+  "HOME",
+  "USER",
+  "LOGNAME",
+  "SHELL",
+  "TMPDIR",
+  "TERM",
+  "COLORTERM",
+  "LANG",
+  "CODEX_HOME",
+  "NO_COLOR",
+  "CI",
+  "NODE_ENV",
+  "SSL_CERT_FILE",
+  "SSL_CERT_DIR",
+  "HTTP_PROXY",
+  "HTTPS_PROXY",
+  "NO_PROXY",
+  "http_proxy",
+  "https_proxy",
+  "no_proxy",
+]);
 
-/** The environment a CLI runs with: Relay's own, minus any variables the connector drops. Exported for tests. */
+/**
+ * The environment a CLI runs with: a minimal safe allowlist (preventing Relay secrets like
+ * HUB_TOKEN, TELEGRAM_BOT_TOKEN, MAIL_IMAP_PASSWORD, and pay-per-use API keys from leaking),
+ * plus any explicitly configured passEnv variables, minus dropEnv. Exported for tests.
+ */
 export function cliEnv(config: ConnectorConfig, base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
-  if (!config.dropEnv?.length) return base;
-  const env = { ...base };
-  for (const name of config.dropEnv) delete env[name];
-  return env;
+  const pass = new Set(config.passEnv ?? []);
+  const drop = new Set(config.dropEnv ?? []);
+  const out: NodeJS.ProcessEnv = {};
+  for (const [k, v] of Object.entries(base)) {
+    if (v === undefined || drop.has(k)) continue;
+    if (SAFE_CLI_ENV.has(k) || k.startsWith("LC_") || k.startsWith("XDG_") || pass.has(k)) {
+      out[k] = v;
+    }
+  }
+  return out;
+}
+
+function unwrapCliError(raw: string): string {
+  let errMsg = raw.trim();
+  if (!errMsg) return "";
+  try {
+    const nested = JSON.parse(errMsg) as { error?: { message?: string } };
+    if (nested.error?.message) errMsg = nested.error.message;
+  } catch {}
+  return errMsg.slice(0, 300);
+}
+
+interface CodexJsonlAcc {
+  messages: string[];
+  usage?: TokenUsage;
+  errMsg: string;
+  partial: string;
+}
+
+function feedCodexJsonlLine(acc: CodexJsonlAcc, rawLine: string): void {
+  const line = rawLine.trim();
+  if (!line.startsWith("{")) return;
+  let ev: Record<string, unknown>;
+  try {
+    ev = JSON.parse(line) as Record<string, unknown>;
+  } catch {
+    return;
+  }
+  if (ev.type === "item.completed" && ev.item && typeof ev.item === "object") {
+    const item = ev.item as Record<string, unknown>;
+    if (item.type === "agent_message" && typeof item.text === "string" && item.text.trim()) {
+      acc.messages.push(item.text.trim());
+    }
+  } else if (ev.type === "turn.completed" && ev.usage && typeof ev.usage === "object") {
+    const u = ev.usage as Record<string, unknown>;
+    const input = Number(u.input_tokens ?? 0);
+    const output = Number(u.output_tokens ?? 0);
+    if (Number.isFinite(input) && Number.isFinite(output)) acc.usage = { input, output };
+  } else if (ev.type === "turn.failed" && ev.error && typeof ev.error === "object") {
+    const m = (ev.error as { message?: unknown }).message;
+    if (typeof m === "string" && m.trim()) acc.errMsg = m.trim();
+  } else if (ev.type === "error" && typeof ev.message === "string" && ev.message.trim()) {
+    acc.errMsg = ev.message.trim();
+  }
 }
 
 /** Parse a CLI's stdout into a result. Exported for tests. */
 export function parseCliOutput(stdout: string, format: ConnectorConfig["outputFormat"], label: string): Omit<RunResult, "rate"> & { usage?: TokenUsage } {
   if (format === "codex-jsonl") {
-    const messages: string[] = [];
-    let usage: TokenUsage | undefined;
-    let errMsg = "";
-    for (const rawLine of stdout.split("\n")) {
-      const line = rawLine.trim();
-      if (!line.startsWith("{")) continue;
-      let ev: Record<string, unknown>;
-      try {
-        ev = JSON.parse(line) as Record<string, unknown>;
-      } catch {
-        continue;
-      }
-      if (ev.type === "item.completed" && ev.item && typeof ev.item === "object") {
-        const item = ev.item as Record<string, unknown>;
-        if (item.type === "agent_message" && typeof item.text === "string" && item.text.trim()) {
-          messages.push(item.text.trim());
-        }
-      } else if (ev.type === "turn.completed" && ev.usage && typeof ev.usage === "object") {
-        const u = ev.usage as Record<string, unknown>;
-        const input = Number(u.input_tokens ?? 0);
-        const output = Number(u.output_tokens ?? 0);
-        if (Number.isFinite(input) && Number.isFinite(output)) usage = { input, output };
-      } else if (ev.type === "turn.failed" && ev.error && typeof ev.error === "object") {
-        const m = (ev.error as { message?: unknown }).message;
-        if (typeof m === "string" && m.trim()) errMsg = m.trim();
-      } else if (ev.type === "error" && typeof ev.message === "string" && ev.message.trim()) {
-        errMsg = ev.message.trim();
-      }
+    const acc: CodexJsonlAcc = { messages: [], errMsg: "", partial: "" };
+    for (const rawLine of stdout.split("\n")) feedCodexJsonlLine(acc, rawLine);
+    if (acc.messages.length) {
+      const text = acc.messages.join("\n\n").trim();
+      return { text, usage: acc.usage ?? { input: 0, output: estimateTokens(text) } };
     }
-    if (messages.length) {
-      const text = messages.join("\n\n").trim();
-      return { text, usage: usage ?? { input: 0, output: estimateTokens(text) } };
-    }
-    if (errMsg) {
-      // Unwrap nested JSON error payloads if Codex printed an API error string.
-      try {
-        const nested = JSON.parse(errMsg) as { error?: { message?: string } };
-        if (nested.error?.message) errMsg = nested.error.message;
-      } catch {}
-      throw new Error(errMsg.slice(0, 300));
-    }
+    if (acc.errMsg) throw new Error(unwrapCliError(acc.errMsg));
     throw new Error(`${label} returned an empty reply`);
   }
   const text = stdout.trim();
@@ -611,7 +705,7 @@ export function parseCliOutput(stdout: string, format: ConnectorConfig["outputFo
 }
 
 async function runCli(req: RunRequest, config: ConnectorConfig): Promise<RunResult> {
-  const chosen = pickModelForTask(req.agent, config, req.prompt);
+  const chosen = pickModelForTask(req.agent, config, req.prompt, [], req.purpose);
   const effectiveModel = chosen.model;
   const effectiveReasoning = chosen.reasoning;
   const template = config.args ?? [];
@@ -635,13 +729,27 @@ async function runCli(req: RunRequest, config: ConnectorConfig): Promise<RunResu
   mkdirSync(cwd, { recursive: true });
   if (req.signal.aborted) throw new Error("Cancelled");
   const child = spawn(config.command!, args, { cwd, env: cliEnv(config), stdio: ["pipe", "pipe", "pipe"] });
+  const outDec = new StringDecoder("utf8");
+  const errDec = new StringDecoder("utf8");
+  const jsonl: CodexJsonlAcc = { messages: [], errMsg: "", partial: "" };
   let stdout = "";
   let stderr = "";
+  const ingestJsonl = (chunk: string) => {
+    jsonl.partial += chunk;
+    let nl = jsonl.partial.indexOf("\n");
+    while (nl !== -1) {
+      feedCodexJsonlLine(jsonl, jsonl.partial.slice(0, nl));
+      jsonl.partial = jsonl.partial.slice(nl + 1);
+      nl = jsonl.partial.indexOf("\n");
+    }
+  };
   child.stdout.on("data", (d: Buffer) => {
-    if (stdout.length < MAX_STDOUT) stdout += d.toString("utf8");
+    const chunk = outDec.write(d);
+    if (config.outputFormat === "codex-jsonl") ingestJsonl(chunk);
+    else if (stdout.length < MAX_STDOUT) stdout += chunk.slice(0, MAX_STDOUT - stdout.length);
   });
   child.stderr.on("data", (d: Buffer) => {
-    stderr = (stderr + d.toString("utf8")).slice(-4000);
+    stderr = (stderr + errDec.write(d)).slice(-4000);
   });
   child.stdin.on("error", () => {});
   const stdinText = promptInArgs
@@ -663,25 +771,44 @@ async function runCli(req: RunRequest, config: ConnectorConfig): Promise<RunResu
     req.signal.addEventListener("abort", onAbort, { once: true });
     child.on("error", (err) => {
       clearTimeout(timer);
+      req.signal.removeEventListener("abort", onAbort);
       reject(new Error(`${config.label} couldn't start: ${err.message}`));
     });
     child.on("close", (c) => {
       clearTimeout(timer);
       req.signal.removeEventListener("abort", onAbort);
+      const tailOut = outDec.end();
+      const tailErr = errDec.end();
+      if (tailOut) {
+        if (config.outputFormat === "codex-jsonl") ingestJsonl(tailOut);
+        else if (stdout.length < MAX_STDOUT) stdout += tailOut.slice(0, MAX_STDOUT - stdout.length);
+      }
+      if (jsonl.partial) {
+        feedCodexJsonlLine(jsonl, jsonl.partial);
+        jsonl.partial = "";
+      }
+      if (tailErr) stderr = (stderr + tailErr).slice(-4000);
       resolve(c);
     });
   });
   if (code !== 0) {
-    // Some CLIs print JSON errors on stdout; prefer that message when present.
-    try {
-      return parseCliOutput(stdout, config.outputFormat, config.label) as RunResult;
-    } catch (err) {
-      const parsedErr = err instanceof Error && !err.message.endsWith("returned an empty reply") ? err.message : "";
-      const tail = stderr.trim().split("\n").slice(-3).join(" ").slice(0, 300);
-      throw new Error(`${config.label} exited with code ${code}${parsedErr ? `: ${parsedErr}` : tail ? `: ${tail}` : ""}`);
-    }
+    // Non-zero exit is always a failure; never treat partial stdout as a successful reply.
+    const parsedErr = config.outputFormat === "codex-jsonl" && jsonl.errMsg ? unwrapCliError(jsonl.errMsg) : "";
+    const tail = stderr.trim().split("\n").slice(-3).join(" ").slice(0, 300);
+    throw new Error(`${config.label} exited with code ${code}${parsedErr ? `: ${parsedErr}` : tail ? `: ${tail}` : ""}`);
   }
-  const parsed = parseCliOutput(stdout, config.outputFormat, config.label);
+  const parsed =
+    config.outputFormat === "codex-jsonl"
+      ? jsonl.messages.length
+        ? {
+            text: jsonl.messages.join("\n\n").trim(),
+            usage: jsonl.usage ?? { input: 0, output: estimateTokens(jsonl.messages.join("\n\n").trim()) },
+          }
+        : (() => {
+            if (jsonl.errMsg) throw new Error(unwrapCliError(jsonl.errMsg));
+            throw new Error(`${config.label} returned an empty reply`);
+          })()
+      : parseCliOutput(stdout, config.outputFormat, config.label);
   return {
     ...parsed,
     served: req.agent.model === "auto" ? effectiveModel : parsed.served,
@@ -732,24 +859,30 @@ export function pendingControls(run: Record<string, unknown>): PendingControl[] 
 const runsSupport = new Map<string, { ok: boolean; at: number }>();
 
 async function hermesSupportsRuns(base: string, headers: Record<string, string>, signal: AbortSignal): Promise<boolean> {
+  if (signal.aborted) throw new Error("Cancelled");
   const cached = runsSupport.get(base);
   if (cached && Date.now() - cached.at < 10 * 60_000) return cached.ok;
-  let ok = false;
   try {
     const res = await fetch(`${base}/capabilities`, { headers, signal: AbortSignal.any([signal, AbortSignal.timeout(5000)]) });
     if (res.ok) {
       const caps = (await res.json()) as { features?: Record<string, unknown> };
-      ok = Boolean(caps.features?.run_submission && caps.features?.run_status);
+      const ok = Boolean(caps.features?.run_submission && caps.features?.run_status);
+      runsSupport.set(base, { ok, at: Date.now() });
+      return ok;
     }
+    if (res.status === 404 || res.status === 501) {
+      runsSupport.set(base, { ok: false, at: Date.now() });
+    }
+    return false;
   } catch {
-    ok = false;
+    if (signal.aborted) throw new Error("Cancelled");
+    // Transient network/timeout failure: don't poison the 10-minute cache.
+    return false;
   }
-  runsSupport.set(base, { ok, at: Date.now() });
-  return ok;
 }
 
 async function runHermesRun(req: RunRequest, config: ConnectorConfig, base: string, headers: Record<string, string>): Promise<RunResult> {
-  const chat = buildChatBody(req.agent, config, req.prompt);
+  const chat = buildChatBody(req.agent, config, req.prompt, req.purpose);
   const body: Record<string, unknown> = { input: req.prompt, instructions: req.agent.system, model: chat.model };
   if (chat.provider) body.provider = chat.provider;
   if (chat.model_options) body.model_options = chat.model_options;
@@ -757,7 +890,7 @@ async function runHermesRun(req: RunRequest, config: ConnectorConfig, base: stri
   const deadline = Date.now() + (config.timeoutMs ?? 1_800_000);
   const created = await fetch(`${base}/runs`, {
     method: "POST",
-    headers: { ...headers, "Idempotency-Key": `relay-${req.taskId}` },
+    headers: { ...headers, "Idempotency-Key": `relay-${req.taskId}-${randomUUID().slice(0, 6)}` },
     body: JSON.stringify(body),
     signal: AbortSignal.any([req.signal, AbortSignal.timeout(30_000)]),
   });
@@ -765,22 +898,45 @@ async function runHermesRun(req: RunRequest, config: ConnectorConfig, base: stri
   const runId = String(((await created.json()) as { run_id?: string }).run_id ?? "");
   if (!runId) throw new Error(`${config.label} didn't return a run id`);
 
-  const stop = () => fetch(`${base}/runs/${runId}/stop`, { method: "POST", headers, body: "{}" }).catch(() => {});
+  const stop = () =>
+    fetch(`${base}/runs/${runId}/stop`, { method: "POST", headers, body: "{}", signal: AbortSignal.timeout(15_000) }).catch(() => {});
   const handled = new Set<string>();
+  const decisions = new Map<string, { kind: "clarify"; answer: string } | { kind: "approval"; ok: boolean }>();
   let warned = false;
+  let terminal = false;
+  let pollErrors = 0;
+  const pollDelays = [250, 400, 650, 1000, 1200];
+  let pollIdx = 0;
   try {
     for (;;) {
       if (Date.now() > deadline) {
-        void stop();
         throw new Error(`${config.label} took longer than ${Math.round((config.timeoutMs ?? 1_800_000) / 60_000)} minutes`);
       }
-      await sleep(1500, req.signal);
-      const res = await fetch(`${base}/runs/${runId}`, { headers, signal: AbortSignal.any([req.signal, AbortSignal.timeout(15_000)]) });
-      if (!res.ok) throw new Error(`${config.label} status HTTP ${res.status}`);
+      await sleep(pollDelays[Math.min(pollIdx++, pollDelays.length - 1)], req.signal);
+      let res: Response;
+      try {
+        res = await fetch(`${base}/runs/${runId}`, { headers, signal: AbortSignal.any([req.signal, AbortSignal.timeout(15_000)]) });
+      } catch (err) {
+        if (req.signal.aborted) throw new Error("Cancelled");
+        pollErrors++;
+        if (pollErrors >= 4) throw new Error(`${config.label} status poll failed (${networkReason(err)})`);
+        await sleep(Math.min(4000, pollErrors * 1000), req.signal);
+        continue;
+      }
+      if (!res.ok) {
+        if (res.status >= 500 && pollErrors < 3) {
+          pollErrors++;
+          await sleep(Math.min(4000, pollErrors * 1000), req.signal);
+          continue;
+        }
+        throw new Error(`${config.label} status HTTP ${res.status}`);
+      }
+      pollErrors = 0;
       const run = (await res.json()) as Record<string, unknown>;
       const status = String(run.status ?? "").toLowerCase();
 
       if (TERMINAL_OK.has(status)) {
+        terminal = true;
         const text = short(run.output ?? run.response ?? "", 1_000_000).trim();
         if (!text) throw new Error(`${config.label} returned an empty reply`);
         const u = run.usage as { input_tokens?: number; output_tokens?: number } | undefined;
@@ -792,35 +948,65 @@ async function runHermesRun(req: RunRequest, config: ConnectorConfig, base: stri
         };
       }
       if (TERMINAL_BAD.has(status)) {
+        terminal = true;
         throw new Error(`${config.label} run ${status}${run.error ? `: ${short(run.error, 300)}` : ""}`);
       }
 
       for (const control of pendingControls(run)) {
         const key = `${control.requestId}:${control.generation}`;
         if (handled.has(key)) continue;
-        handled.add(key);
         if (/clarif|question/i.test(control.kind)) {
-          const reply = req.ask ? await req.ask({ title: `${req.agent.name} has a question`, detail: control.summary }) : null;
-          if (reply === null) {
-            void stop();
-            throw new Error(`${req.agent.name} asked a question and got no answer, so the task stopped.`);
+          let decision = decisions.get(key);
+          if (!decision) {
+            const reply = req.ask ? await req.ask({ title: `${req.agent.name} has a question`, detail: control.summary }) : null;
+            if (reply === null) {
+              throw new Error(`${req.agent.name} asked a question and got no answer, so the task stopped.`);
+            }
+            decision = { kind: "clarify", answer: reply };
+            decisions.set(key, decision);
           }
-          const res = await fetch(`${base}/runs/${runId}/clarify`, {
+          const post = await fetch(`${base}/runs/${runId}/clarify`, {
             method: "POST",
             headers,
-            body: JSON.stringify({ request_id: control.requestId, execution_generation: control.generation, answer: reply }),
+            signal: AbortSignal.timeout(15_000),
+            body: JSON.stringify({
+              request_id: control.requestId,
+              execution_generation: control.generation,
+              answer: decision.kind === "clarify" ? decision.answer : "",
+            }),
           }).catch(() => null);
-          if (!res?.ok) console.warn(`[hermes] couldn't deliver your answer to run ${runId}`);
+          if (post?.ok) {
+            handled.add(key);
+            decisions.delete(key);
+          } else {
+            console.warn(`[hermes] couldn't deliver your answer to run ${runId}; will retry on next poll`);
+          }
           continue;
         }
-        const ok = req.approve
-          ? await req.approve({ title: `${req.agent.name} wants to run an action`, detail: control.summary })
-          : false;
-        await fetch(`${base}/runs/${runId}/approval`, {
+        let decision = decisions.get(key);
+        if (!decision) {
+          const ok = req.approve
+            ? await req.approve({ title: `${req.agent.name} wants to run an action`, detail: control.summary })
+            : false;
+          decision = { kind: "approval", ok };
+          decisions.set(key, decision);
+        }
+        const post = await fetch(`${base}/runs/${runId}/approval`, {
           method: "POST",
           headers,
-          body: JSON.stringify({ request_id: control.requestId, execution_generation: control.generation, choice: ok ? "once" : "deny" }),
-        }).catch(() => {});
+          signal: AbortSignal.timeout(15_000),
+          body: JSON.stringify({
+            request_id: control.requestId,
+            execution_generation: control.generation,
+            choice: decision.kind === "approval" && decision.ok ? "once" : "deny",
+          }),
+        }).catch(() => null);
+        if (post?.ok) {
+          handled.add(key);
+          decisions.delete(key);
+        } else {
+          console.warn(`[hermes] couldn't deliver approval to run ${runId}; will retry on next poll`);
+        }
       }
       if (/approval/.test(status) && !pendingControls(run).length && !warned) {
         warned = true;
@@ -828,7 +1014,7 @@ async function runHermesRun(req: RunRequest, config: ConnectorConfig, base: stri
       }
     }
   } catch (err) {
-    if (req.signal.aborted) void stop();
+    if (!terminal) void stop();
     throw err;
   }
 }

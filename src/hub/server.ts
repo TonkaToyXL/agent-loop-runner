@@ -1,14 +1,22 @@
 import { timingSafeEqual } from "node:crypto";
-import { statSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { realpathSync, statSync } from "node:fs";
+import { readFile, stat } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { extname, join, normalize, resolve, sep } from "node:path";
-import { resolveWebhook } from "./connectors.js";
+import { resolveWebhook, verifyWebhookToken } from "./connectors.js";
 import { errorText, PublicError } from "./errors.js";
 import type { IMessageChannel, BlueBubblesMessage } from "./channels/imessage.js";
 import type { Hub } from "./hub.js";
 
 const WEB_ROOT = resolve(process.env.RELAY_WEB_ROOT?.trim() || "web");
+const REAL_WEB_ROOT = (() => {
+  try {
+    return realpathSync(WEB_ROOT);
+  } catch {
+    return WEB_ROOT;
+  }
+})();
+const MAX_SSE_CLIENTS = 50;
 const MIME: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
   ".css": "text/css; charset=utf-8",
@@ -75,26 +83,39 @@ function webAssetVersion(): string {
 }
 
 export function createHubServer({ hub, token, imessage }: ServerOptions) {
-  const authorized = (req: IncomingMessage, url: URL): boolean => {
+  const authorized = (req: IncomingMessage, url: URL, allowQueryToken = false): boolean => {
     if (!token) return true;
     const header = req.headers.authorization?.replace(/^Bearer\s+/i, "") ?? "";
-    const query = url.searchParams.get("token") ?? "";
+    const query = allowQueryToken ? url.searchParams.get("token") ?? "" : "";
     return safeEqual(header || query, token);
   };
+  let sseClients = 0;
 
   return createServer(async (req, res) => {
-    const url = new URL(req.url ?? "/", "http://localhost");
+    let url: URL;
+    try {
+      url = new URL(req.url ?? "/", "http://localhost");
+    } catch {
+      return send(res, 400, { error: "malformed URL" });
+    }
     const path = url.pathname;
     try {
       // -------- inbound hooks (own auth)
       const hook = /^\/hooks\/agent\/([\w-]+)$/.exec(path);
       if (hook && req.method === "POST") {
-        const body = await readJson<{ result?: string; error?: string }>(req);
         const tokenHeader = String(req.headers["x-relay-token"] ?? url.searchParams.get("token") ?? "");
-        return send(res, resolveWebhook(hook[1], tokenHeader, body) ? 200 : 404, { ok: true });
+        if (!verifyWebhookToken(hook[1], tokenHeader)) return send(res, 404, { error: "not found" });
+        const body = await readJson<{ result?: string; error?: string }>(req);
+        return resolveWebhook(hook[1], tokenHeader, body) ? send(res, 200, { ok: true }) : send(res, 404, { error: "not found" });
       }
       if (path === "/hooks/imessage" && req.method === "POST") {
-        if (!imessage || !safeEqual(url.searchParams.get("token") ?? "", imessage.hookToken)) {
+        const imsgToken = String(
+          req.headers["x-imessage-token"] ??
+            req.headers.authorization?.replace(/^Bearer\s+/i, "") ??
+            url.searchParams.get("token") ??
+            "",
+        );
+        if (!imessage || !safeEqual(imsgToken, imessage.hookToken)) {
           return send(res, 401, { error: "unauthorized" });
         }
         const payload = await readJson<BlueBubblesMessage>(req);
@@ -106,30 +127,60 @@ export function createHubServer({ hub, token, imessage }: ServerOptions) {
       if (path.startsWith("/api/")) {
         // Browser-side protections: a web page you visit must not be able to drive your agents.
         const origin = req.headers.origin;
-        if (origin && new URL(origin).host !== req.headers.host) return send(res, 403, { error: "cross-origin request blocked" });
+        if (origin) {
+          let originHost = "";
+          try {
+            originHost = new URL(origin).host;
+          } catch {
+            return send(res, 403, { error: "cross-origin request blocked" });
+          }
+          if (!originHost || originHost !== req.headers.host) return send(res, 403, { error: "cross-origin request blocked" });
+        }
         if (!token && !isLocalHost(req.headers.host)) return send(res, 403, { error: "set HUB_TOKEN to use a non-local hostname" });
         if (req.method !== "GET" && !String(req.headers["content-type"] ?? "").startsWith("application/json")) {
           return send(res, 415, { error: "content-type must be application/json" });
         }
-        if (!authorized(req, url)) return send(res, 401, { error: "unauthorized" });
+        const isSse = path === "/api/events" && req.method === "GET";
+        if (!authorized(req, url, isSse)) return send(res, 401, { error: "unauthorized" });
 
         if (path === "/api/state" && req.method === "GET") return send(res, 200, hub.snapshot());
 
-        if (path === "/api/events" && req.method === "GET") {
+        if (isSse) {
+          if (sseClients >= MAX_SSE_CLIENTS) return send(res, 503, { error: "too many event streams" });
+          sseClients++;
           res.writeHead(200, {
             "content-type": "text/event-stream",
             "cache-control": "no-store",
             connection: "keep-alive",
             "x-accel-buffering": "no",
           });
-          res.write(`event: hello\ndata: ${JSON.stringify({ uiVersion: webAssetVersion() })}\n\n`);
-          const onEvent = (e: { type: string; data: unknown }) => res.write(`event: ${e.type}\ndata: ${JSON.stringify(e.data)}\n\n`);
-          const ping = setInterval(() => res.write(`: ping\n\n`), 25_000);
-          hub.bus.on("event", onEvent);
-          req.on("close", () => {
+          let closed = false;
+          const writeSse = (chunk: string) => {
+            if (closed || res.destroyed || res.writableEnded) {
+              cleanup();
+              return;
+            }
+            try {
+              res.write(chunk);
+            } catch {
+              cleanup();
+            }
+          };
+          const onEvent = (e: { type: string; data: unknown }) => writeSse(`event: ${e.type}\ndata: ${JSON.stringify(e.data)}\n\n`);
+          const ping = setInterval(() => writeSse(`: ping\n\n`), 25_000);
+          ping.unref?.();
+          const cleanup = () => {
+            if (closed) return;
+            closed = true;
+            sseClients = Math.max(0, sseClients - 1);
             clearInterval(ping);
             hub.bus.off("event", onEvent);
-          });
+          };
+          hub.bus.on("event", onEvent);
+          req.on("close", cleanup);
+          res.on("close", cleanup);
+          res.on("error", cleanup);
+          writeSse(`event: hello\ndata: ${JSON.stringify({ uiVersion: webAssetVersion() })}\n\n`);
           return;
         }
 
@@ -159,6 +210,11 @@ export function createHubServer({ hub, token, imessage }: ServerOptions) {
             return a ? send(res, 200, a) : send(res, 404, { error: "unknown question" });
           }
           if (typeof approve !== "boolean") return send(res, 400, { error: "send approve (true/false) or answer" });
+          const existing = hub.approvals.get(decide[1]);
+          if (!existing) return send(res, 404, { error: "unknown approval" });
+          if (existing.kind === "question" && approve) {
+            return send(res, 400, { error: "questions require a text answer (or approve: false to skip)" });
+          }
           const a = hub.decideApproval(decide[1], approve, "web");
           return a ? send(res, 200, a) : send(res, 404, { error: "unknown approval" });
         }
@@ -171,12 +227,32 @@ export function createHubServer({ hub, token, imessage }: ServerOptions) {
 
       // -------- static dashboard
       if (req.method !== "GET" && req.method !== "HEAD") return send(res, 405, { error: "method not allowed" });
-      const rel = path === "/" ? "index.html" : normalize(decodeURIComponent(path)).replace(/^[/\\]+/, "");
+      let decodedPath: string;
+      try {
+        decodedPath = decodeURIComponent(path);
+      } catch {
+        return send(res, 400, { error: "malformed path" });
+      }
+      const rel = path === "/" ? "index.html" : normalize(decodedPath).replace(/^[/\\]+/, "");
       const file = join(WEB_ROOT, rel);
       if (!file.startsWith(WEB_ROOT + sep)) return send(res, 403, { error: "forbidden" });
       try {
-        const data = await readFile(file);
-        res.writeHead(200, { "content-type": MIME[extname(file)] ?? "application/octet-stream", "cache-control": "no-store" });
+        const realFile = realpathSync(file);
+        if (!realFile.startsWith(REAL_WEB_ROOT + sep)) return send(res, 403, { error: "forbidden" });
+        const info = await stat(realFile);
+        if (!info.isFile()) return send(res, 404, { error: "not found" });
+        const headers = {
+          "content-type": MIME[extname(realFile)] ?? "application/octet-stream",
+          "content-length": String(info.size),
+          "cache-control": "no-store",
+        };
+        if (req.method === "HEAD") {
+          res.writeHead(200, headers);
+          res.end();
+          return;
+        }
+        const data = await readFile(realFile);
+        res.writeHead(200, headers);
         res.end(data);
       } catch {
         send(res, 404, { error: "not found" });

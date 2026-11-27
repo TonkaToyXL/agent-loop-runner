@@ -198,23 +198,104 @@ function matchesSkill(words: string[], skill: string): boolean {
   return words.some((w) => w.startsWith(stem) && w.length <= stem.length + 5);
 }
 
-/** Pick the agent whose skills best match the text. Ties prefer idle agents, then fallback (lead). */
-export function pickAgent(
-  text: string,
-  agents: { id: string; skills: string[]; enabled: boolean; busy?: number }[],
-  fallback: string,
-): string {
+interface IntentRule {
+  pattern: RegExp;
+  /** Agent IDs or skill markers that strongly own this intent. */
+  agentIds: string[];
+  requiredSkills: string[];
+  weight: number;
+}
+
+const INTENT_RULES: IntentRule[] = [
+  {
+    // Real-time news, X/Twitter, what's new/latest today -> live scout (Grok)
+    pattern: /\b(what'?s\s+new|what\s+is\s+new|latest\s+(?:news|updates?|ai|on)|breaking|trending|headlines?|today'?s\s+news|in\s+ai\s+today|on\s+x\b|twitter|tweets?|viral|live\s+pulse)\b/i,
+    agentIds: ["grok"],
+    requiredSkills: ["x", "news", "trends", "realtime"],
+    weight: 4,
+  },
+  {
+    // Local Mac, files, shell, automation, deployment -> operator (Hermes)
+    pattern: /\b(my\s+mac|mac\s*mini|macbook|terminal|shell|bash|launchagent|launchd|local\s+files?|folder|directory|restart\s+the|deploy|cron|automate|automation|ssh)\b/i,
+    agentIds: ["hermes"],
+    requiredSkills: ["terminal", "bash", "automate", "files", "deploy"],
+    weight: 4,
+  },
+  {
+    // Creative copy, hooks, video scripts, headlines, naming -> creative lead (Muse)
+    pattern: /\b(hook|hooks|caption|captions|tagline|taglines|slogan|(?:video|youtube|podcast|ad|short)\s+script|youtube\s+title|thumbnail\s+text|headline|copywriting|brainstorm|name\s+ideas|pitch\s+\d|write\s+(?:a|an|some|me|\d+)\s+(?:post|caption|hook|tagline|headline|email|story|bio))\b/i,
+    agentIds: ["muse"],
+    requiredSkills: ["copy", "hooks", "caption", "creative", "write"],
+    weight: 4,
+  },
+  {
+    // Code writing, debugging, SQL, regex, refactoring -> coder (Cline)
+    pattern: /```|\b(regex|regexp|sql\s+query|typescript|javascript|python|function|refactor|unit\s+test|stack\s*trace|debug(?:ging)?|fix\s+(?:this|the|my)\s+(?:bug|code|error|script)|write\s+(?:a\s+)?(?:script|function|query|regex|code))\b/i,
+    agentIds: ["cline"],
+    requiredSkills: ["code", "coding", "debug", "refactor", "regex", "sql"],
+    weight: 3,
+  },
+  {
+    // Reviews, critiques, audits, comparisons, tradeoffs -> analyst/critic (Zen)
+    pattern: /\b(review|critique|audit|pressure[- ]?test|trade[- ]?offs?|pros\s+and\s+cons|compare|benchmark|blind\s+spots?|architecture\s+review|security\s+check|what'?s\s+wrong\s+with)\b/i,
+    agentIds: ["zen"],
+    requiredSkills: ["review", "critique", "audit", "compare", "analysis"],
+    weight: 3,
+  },
+  {
+    // High-stakes second opinion / executive strategy -> advisor (ChatGPT)
+    pattern: /\b(second\s+opinion|executive\s+advice|high[- ]?stakes|big\s+picture|strategic\s+decision|sanity\s+check)\b/i,
+    agentIds: ["chatgpt"],
+    requiredSkills: ["second-opinion", "strategy", "chatgpt"],
+    weight: 4,
+  },
+];
+
+export interface RoutableAgent {
+  id: string;
+  skills: string[];
+  enabled: boolean;
+  busy?: number;
+  actsInWorld?: boolean;
+  conserveQuota?: boolean;
+}
+
+/** Pick the agent whose intent + skills best match the text. Ties prefer non-quota-capped, text-only, idle agents, then fallback. */
+export function pickAgent(text: string, agents: RoutableAgent[], fallback: string): string {
   const words = text.toLowerCase().match(/[a-z0-9]+/g) ?? [];
+  const enabledIds = new Set(agents.filter((a) => a.enabled).map((a) => a.id));
   let best = fallback;
   let bestScore = 0;
+  let bestConserve = true;
+  let bestActs = true;
   let bestBusy = Number.POSITIVE_INFINITY;
+
   for (const agent of agents) {
     if (!agent.enabled) continue;
-    const score = agent.skills.reduce((n, skill) => n + (matchesSkill(words, skill) ? 1 : 0), 0);
+    let score = agent.skills.reduce((n, skill) => n + (matchesSkill(words, skill) ? 1 : 0), 0);
+    const skillSet = new Set(agent.skills.map((s) => s.toLowerCase()));
+    for (const rule of INTENT_RULES) {
+      if (!rule.pattern.test(text)) continue;
+      // When a dedicated owner for this intent is enabled, award the intent boost only to its owner(s)
+      // so generalists with overlapping skills (e.g. Hermes sharing "code") don't hijack specialist asks.
+      const hasDirectOwner = rule.agentIds.some((id) => enabledIds.has(id));
+      const matched = hasDirectOwner ? rule.agentIds.includes(agent.id) : rule.requiredSkills.some((s) => skillSet.has(s));
+      if (matched) score += rule.weight;
+    }
     const busy = agent.busy ?? 0;
-    if (score > bestScore || (score > 0 && score === bestScore && busy < bestBusy)) {
+    const conserve = Boolean(agent.conserveQuota);
+    const acts = Boolean(agent.actsInWorld);
+    const better =
+      score > bestScore ||
+      (score > 0 &&
+        score === bestScore &&
+        ((!conserve && bestConserve) ||
+          (conserve === bestConserve && ((!acts && bestActs) || (acts === bestActs && busy < bestBusy)))));
+    if (better) {
       best = agent.id;
       bestScore = score;
+      bestConserve = conserve;
+      bestActs = acts;
       bestBusy = busy;
     }
   }

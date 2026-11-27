@@ -3,19 +3,19 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <meta name="theme-color" content="#0a0a0c" />
+  <meta name="theme-color" content="#0b0c10" />
   <title>Relay</title>
   <link rel="icon" href="icon.svg" type="image/svg+xml" />
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="app.css?v=6" />
+  <link rel="stylesheet" href="app.css?v=12" />
 </head>
 <body>
   <div class="app" id="app">
     <header class="top">
-      <a class="brand" href="#" aria-label="Relay home">
+      <a class="brand" id="brandLink" href="#studio" aria-label="Relay home">
         <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true">
           <path d="M5 23 C 10 9, 22 9, 27 23" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-dasharray="2 4.2" />
           <circle cx="5" cy="23" r="3.2" fill="var(--a1)" />
@@ -24,20 +24,30 @@
         </svg>
         <span class="brand-word">Relay</span>
       </a>
-      <div class="kpis" id="kpis"></div>
+
+      <nav class="view-nav" id="viewNav" aria-label="Workspace views">
+        <button type="button" data-view="studio" class="on">Studio</button>
+        <button type="button" data-view="map">Map</button>
+        <button type="button" data-view="activity">Activity</button>
+        <button type="button" data-view="stats">Stats</button>
+      </nav>
+
+      <div class="top-spacer"></div>
+
       <div class="top-right">
+        <div class="kpis" id="kpis"></div>
         <div class="channels" id="channels"></div>
-        <button class="cmd-btn" id="cmdBtn" title="Command palette (⌘K)" aria-label="Open command palette">
+        <button class="cmd-btn" id="cmdBtn" title="Quick actions (⌘K)" aria-label="Open quick actions">
           <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M16 16l4 4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
           <kbd>⌘K</kbd>
         </button>
-        <button class="icon-btn" id="focusBtn" title="Toggle focus mode (hide Board & Ranks)" aria-label="Toggle focus mode" aria-pressed="false">
+        <button class="icon-btn" id="focusBtn" title="Wide chat view" aria-label="Toggle wide chat view" aria-pressed="false">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V5h4M20 9V5h-4M4 15v4h4M20 15v4h-4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </button>
-        <button class="icon-btn" id="soundBtn" title="Toggle subtle sound effects" aria-label="Toggle sound effects" aria-pressed="false">
+        <button class="icon-btn" id="soundBtn" title="Sound cues" aria-label="Toggle sound cues" aria-pressed="false">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5L6 9H3v6h3l5 4V5Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path class="snd-waves" d="M15.5 8.8a4.5 4.5 0 0 1 0 6.4M18.3 6a8.5 8.5 0 0 1 0 12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path class="snd-mute" d="M15.5 9.5l5 5M20.5 9.5l-5 5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
         </button>
-        <button class="icon-btn" id="themeBtn" title="Toggle theme" aria-label="Toggle theme">
+        <button class="icon-btn" id="themeBtn" title="Switch light or dark theme" aria-label="Switch theme">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9 7 7 0 0 1-9-9Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
         </button>
       </div>
@@ -45,109 +55,160 @@
     </header>
 
     <main class="main" id="main">
-      <section class="panel mission" data-tab="crew">
-        <div class="mission-map">
-          <svg id="map" viewBox="0 0 340 342" role="img" aria-label="Crew map: click any assistant to chat or watch live handoffs"></svg>
-          <div class="map-caption" id="mapCaption"></div>
-        </div>
-        <div class="mission-feed">
-          <div class="section-head mission-head">
-            <h2>Live mission</h2>
-            <div class="mission-meta">
-              <span class="muted small" id="leadLabel"></span>
-              <button type="button" class="replay-btn" id="replayBtn" hidden title="Replay the last team relay on the map">
-                <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 3.5L12.5 8l-8 4.5V3.5Z" fill="currentColor"/></svg>
-                Replay
-              </button>
-            </div>
+      <!-- STUDIO VIEW (Default) -->
+      <section class="view-pane" data-view-pane="studio">
+        <div class="quick-strip" id="quickStrip">
+          <div class="section-head compact">
+            <h2>Quick launch</h2>
+            <span class="muted small" id="studioSub"></span>
           </div>
-          <div class="pipeline" id="missionPipeline" hidden></div>
-          <ol class="handoffs" id="handoffs"></ol>
+          <div class="quick-grid" id="quickActions"></div>
+        </div>
+
+        <div class="studio-live" id="studioLive" hidden></div>
+
+        <div class="crew-section">
+          <div class="section-head compact">
+            <h2>Your crew</h2>
+            <span class="muted small" id="crewSummary"></span>
+          </div>
+          <div class="crew" id="crew"></div>
         </div>
       </section>
 
-      <section data-tab="crew">
-        <div class="section-head pad-x">
-          <h2>Your assistants</h2>
-          <span class="muted small">Switch models right on each card, or click Settings for limits</span>
+      <!-- MAP VIEW -->
+      <section class="view-pane" data-view-pane="map">
+        <div class="panel mission">
+          <div class="mission-map">
+            <div class="map-toolbar">
+              <div class="seg small" id="mapModeSeg" role="tablist" aria-label="Map mode">
+                <button type="button" data-map-mode="explore" class="on" role="tab" aria-selected="true">Explore</button>
+                <button type="button" data-map-mode="chain" role="tab" aria-selected="false">Build relay</button>
+              </div>
+              <button type="button" class="map-pulse-btn" id="mapPulseBtn" title="Test relay pulse across your crew">Pulse</button>
+            </div>
+            <svg id="map" viewBox="0 0 340 342" role="img" aria-label="Crew map: click any assistant to chat or wire a custom relay">
+              <defs>
+                <clipPath id="mapAvatarClip" clipPathUnits="objectBoundingBox">
+                  <circle cx="0.5" cy="0.5" r="0.5" />
+                </clipPath>
+              </defs>
+              <g id="mapLines"></g>
+              <g id="mapArcs"></g>
+              <g id="mapNodes"></g>
+              <g id="mapBatons"></g>
+            </svg>
+            <div class="map-caption" id="mapCaption"></div>
+            <div class="chain-bar" id="mapChainBar" hidden></div>
+          </div>
+          <div class="mission-feed">
+            <div class="section-head mission-head">
+              <h2>Team relay</h2>
+              <div class="mission-meta">
+                <select class="mission-select" id="missionSelect" aria-label="Select team mission" hidden></select>
+                <span class="muted small" id="leadLabel"></span>
+                <button type="button" class="replay-btn" id="replayBtn" hidden title="Replay this team handoff">
+                  <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 3.5L12.5 8l-8 4.5V3.5Z" fill="currentColor"/></svg>
+                  Replay
+                </button>
+              </div>
+            </div>
+            <div class="pipeline" id="missionPipeline" hidden></div>
+            <ol class="handoffs" id="handoffs"></ol>
+          </div>
         </div>
-        <div class="crew" id="crew"></div>
       </section>
 
-      <section data-tab="board">
-        <div class="section-head pad-x">
-          <h2>Board</h2>
+      <!-- ACTIVITY VIEW -->
+      <section class="view-pane" data-view-pane="activity">
+        <div class="section-head compact">
+          <h2>Activity</h2>
           <span class="muted small" id="boardCount"></span>
+        </div>
+        <div class="activity-bar" id="activityBar">
+          <div class="activity-search-wrap">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M16 16l4 4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+            <input type="search" id="activitySearch" class="activity-search" placeholder="Filter tasks by keyword…" aria-label="Filter activity tasks" autocomplete="off" />
+          </div>
+          <div class="agent-filters" id="activityFilters" role="group" aria-label="Filter by assistant"></div>
         </div>
         <div class="lanes" id="lanes"></div>
       </section>
 
-      <section class="panel ranks" data-tab="ranks">
-        <div class="section-head">
-          <h2>Who's carrying the team</h2>
-          <div class="seg" id="rankSeg" role="tablist">
-            <button data-p="today" role="tab">Today</button>
-            <button data-p="week" role="tab" class="on">7 days</button>
-            <button data-p="all" role="tab">All time</button>
+      <!-- STATS VIEW -->
+      <section class="view-pane" data-view-pane="stats">
+        <div class="panel ranks">
+          <div class="section-head stats-head">
+            <h2>Crew stats</h2>
+            <div class="stats-controls">
+              <div class="seg small" id="rankMetricSeg" role="tablist" aria-label="Rank metric">
+                <button type="button" data-m="done" role="tab" class="on" aria-selected="true">Completed</button>
+                <button type="button" data-m="tokens" role="tab" aria-selected="false">Tokens</button>
+                <button type="button" data-m="speed" role="tab" aria-selected="false">Speed</button>
+                <button type="button" data-m="reliability" role="tab" aria-selected="false">Reliability</button>
+              </div>
+              <div class="seg" id="rankSeg" role="tablist" aria-label="Time range">
+                <button type="button" data-p="today" role="tab" aria-selected="false">Today</button>
+                <button type="button" data-p="week" role="tab" class="on" aria-selected="true">7 days</button>
+                <button type="button" data-p="all" role="tab" aria-selected="false">All time</button>
+              </div>
+            </div>
           </div>
+          <div class="stats-summary" id="statsSummary"></div>
+          <div class="podium" id="podium"></div>
+          <div class="rank-table" id="rankTable"></div>
+          <div class="stats-detail" id="statsDetail" hidden></div>
         </div>
-        <div class="podium" id="podium"></div>
-        <div class="rank-table" id="rankTable"></div>
       </section>
     </main>
 
-    <aside class="thread" data-tab="thread" id="threadPane">
+    <aside class="thread" id="threadPane">
       <div class="thread-head">
         <div class="thread-title">
-          <h2>Thread</h2>
-          <div class="crew-strip" id="crewStrip" aria-label="Active assistants"></div>
+          <h2>Chat</h2>
+          <div class="crew-strip" id="crewStrip" aria-label="Jump to an assistant"></div>
         </div>
-        <div class="seg small" id="threadFilter">
-          <button data-f="all" class="on">All</button>
-          <button data-f="web">Web</button>
-          <button data-f="telegram">Telegram</button>
-          <button data-f="imessage">iMessage</button>
-        </div>
+        <div class="seg small" id="threadFilter"></div>
       </div>
       <div class="approvals" id="approvals" aria-live="polite"></div>
       <div class="thread-body" id="thread"></div>
       <form class="composer" id="composer" autocomplete="off">
         <div class="targets" id="targets"></div>
-        <div class="active-bar" id="activeBar"></div>
-        <div class="slash" id="slash" hidden></div>
+        <div class="active-bar" id="activeBar" hidden></div>
+        <div class="slash" id="slash" hidden role="listbox" aria-label="Commands and mentions"></div>
         <div class="compose-row">
-          <textarea id="input" rows="1" placeholder="Ask anyone…" aria-label="Message"></textarea>
+          <textarea id="input" rows="1" placeholder="What do you need?" aria-label="Message"></textarea>
           <button class="send" type="submit" aria-label="Send">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h13M13 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
           </button>
         </div>
-        <div class="compose-hint"><kbd>@grok</kbd> one assistant · <kbd>@team</kbd> split the work · <kbd>/</kbd> commands</div>
       </form>
     </aside>
 
-    <nav class="tabbar" id="tabbar">
-      <button data-go="thread" class="on"><svg viewBox="0 0 24 24"><path d="M4 5h16v11H9l-5 4z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>Thread</button>
-      <button data-go="crew"><svg viewBox="0 0 24 24"><circle cx="12" cy="6" r="2.6" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="5" cy="17" r="2.6" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="19" cy="17" r="2.6" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M7 15l3.5-6.5M17 15l-3.5-6.5M7.6 17h8.8" stroke="currentColor" stroke-width="1.4" stroke-dasharray="1.5 2"/></svg>Crew</button>
-      <button data-go="board"><svg viewBox="0 0 24 24"><rect x="3.5" y="4" width="5" height="16" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.8"/><rect x="10" y="4" width="5" height="11" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.8"/><rect x="16.5" y="4" width="4" height="7" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>Board</button>
-      <button data-go="ranks"><svg viewBox="0 0 24 24"><path d="M4 20V13h5v7M9.5 20V8h5v12M15 20v-9h5v9" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>Ranks</button>
+    <nav class="tabbar" id="tabbar" aria-label="Mobile navigation">
+      <button type="button" data-go="thread" class="on"><svg viewBox="0 0 24 24"><path d="M4 5h16v11H9l-5 4z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>Chat</button>
+      <button type="button" data-go="studio"><svg viewBox="0 0 24 24"><rect x="3.5" y="4" width="7.5" height="7.5" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><rect x="13" y="4" width="7.5" height="7.5" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><rect x="3.5" y="13.5" width="7.5" height="7" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><rect x="13" y="13.5" width="7.5" height="7" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>Studio</button>
+      <button type="button" data-go="map"><svg viewBox="0 0 24 24"><circle cx="12" cy="6" r="2.6" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="5" cy="17" r="2.6" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="19" cy="17" r="2.6" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M7 15l3.5-6.5M17 15l-3.5-6.5M7.6 17h8.8" stroke="currentColor" stroke-width="1.4" stroke-dasharray="1.5 2"/></svg>Map</button>
+      <button type="button" data-go="activity"><svg viewBox="0 0 24 24"><rect x="3.5" y="4" width="5" height="16" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.8"/><rect x="10" y="4" width="5" height="11" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.8"/><rect x="16.5" y="4" width="4" height="7" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>Activity</button>
+      <button type="button" data-go="stats"><svg viewBox="0 0 24 24"><path d="M4 20V13h5v7M9.5 20V8h5v12M15 20v-9h5v9" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>Stats</button>
     </nav>
   </div>
 
   <div class="scrim" id="scrim" hidden></div>
-  <aside class="drawer" id="drawer" aria-hidden="true" aria-label="Assistant settings"></aside>
+  <aside class="drawer" id="drawer" role="dialog" aria-modal="true" aria-hidden="true" aria-label="Assistant settings" inert></aside>
 
   <div class="cmdk-wrap" id="cmdkWrap" hidden>
-    <div class="cmdk" role="dialog" aria-modal="true" aria-label="Command palette">
+    <div class="cmdk" role="dialog" aria-modal="true" aria-label="Quick actions">
       <div class="cmdk-head">
         <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M16 16l4 4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
-        <input id="cmdkInput" type="text" placeholder="Jump to an assistant, switch models, run a command…" autocomplete="off" spellcheck="false" />
+        <input id="cmdkInput" type="text" placeholder="Jump to an assistant, switch views, or run an action…" autocomplete="off" spellcheck="false" />
         <kbd>ESC</kbd>
       </div>
       <div class="cmdk-list" id="cmdkList" role="listbox"></div>
       <div class="cmdk-foot">
         <span><kbd>↑↓</kbd> move</span>
         <span><kbd>↵</kbd> run</span>
-        <span><kbd>⌘K</kbd> toggle</span>
+        <span><kbd>⌘K</kbd> close</span>
       </div>
     </div>
   </div>
@@ -159,20 +220,14 @@
         <circle cx="5" cy="23" r="3.2" fill="var(--a1)" /><circle cx="16" cy="11.6" r="3.2" fill="var(--a2)" /><circle cx="27" cy="23" r="3.2" fill="var(--a3)" />
       </svg>
       <h1>Relay is locked</h1>
-      <p class="muted">Enter the HUB_TOKEN from your .env file.</p>
-      <input id="lockInput" type="password" placeholder="Hub token" autocomplete="current-password" />
+      <p class="muted">Enter your Relay access token to continue.</p>
+      <input class="input" id="lockInput" type="password" placeholder="Access token" autocomplete="current-password" required />
+      <div class="err-text small" id="lockErr" hidden></div>
       <button class="btn primary" type="submit">Unlock</button>
     </form>
   </div>
 
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
-  <svg class="svg-defs" width="0" height="0" aria-hidden="true" style="position:absolute;width:0;height:0;overflow:hidden">
-    <defs>
-      <clipPath id="mapAvatarClip" clipPathUnits="objectBoundingBox">
-        <circle cx="0.5" cy="0.5" r="0.5" />
-      </clipPath>
-    </defs>
-  </svg>
-  <script src="app.js?v=6" type="module"></script>
+  <script src="app.js?v=12" type="module"></script>
 </body>
 </html>

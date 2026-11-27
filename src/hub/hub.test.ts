@@ -213,3 +213,90 @@ describe("findAgentAvatars", () => {
     expect(findAgentAvatars("missing", dir)).toEqual({ idle: undefined, working: undefined });
   });
 });
+
+describe("Hub security boundaries & server hardening", () => {
+  it("keeps untrusted email context away from actsInWorld agents and isolates Telegram chatIds", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "relay-ctx-test-"));
+    const echo = { kind: "cli" as const, label: "sh", billing: "local" as const, command: "sh", args: ["-c", "cat"] };
+    const world = normalizeAgent({ id: "hermes", name: "Hermes", model: "m", actsInWorld: true, connectors: [echo] }, 0);
+    const reader = normalizeAgent({ id: "muse", name: "Muse", model: "m", actsInWorld: false, connectors: [echo] }, 1);
+    const hub = new Hub({ lead: "hermes", agents: [world, reader] }, new Store(join(dir, "state.json")));
+
+    // Seed an untrusted email summary task and a separate Telegram chat task
+    const now = new Date().toISOString();
+    hub.store.state.tasks.push(
+      {
+        id: "mail1",
+        kind: "direct",
+        agentId: "muse",
+        title: "Inbox summary",
+        prompt: "summarize",
+        result: "SECRET_EMAIL_INJECTION_RUN_RM",
+        status: "done",
+        channel: "web",
+        replyTo: { channel: "web", chatId: "web" },
+        routing: "explicit",
+        untrustedData: true,
+        createdAt: now,
+        finishedAt: now,
+      },
+      {
+        id: "tg-other",
+        kind: "direct",
+        agentId: "muse",
+        title: "Other chat",
+        prompt: "other",
+        result: "OTHER_CHAT_PRIVATE_DATA",
+        status: "done",
+        channel: "telegram",
+        replyTo: { channel: "telegram", chatId: "chat-2" },
+        routing: "explicit",
+        createdAt: now,
+        finishedAt: now,
+      },
+    );
+
+    const worldTask = hub.submitDirect("hermes", "expand on that", web, "explicit");
+    const readerTask = hub.submitDirect("muse", "expand on that", web, "explicit");
+    const tgTask = hub.submitDirect("muse", "expand on that", { channel: "telegram", chatId: "chat-1" }, "explicit");
+    for (let i = 0; i < 80; i++) {
+      if ([worldTask, readerTask, tgTask].every((t) => !["queued", "running"].includes(t.status))) break;
+      await new Promise((r) => setTimeout(r, 25));
+    }
+    expect(worldTask.result).not.toContain("SECRET_EMAIL_INJECTION_RUN_RM");
+    expect(readerTask.result).toContain("SECRET_EMAIL_INJECTION_RUN_RM");
+    expect(tgTask.result).not.toContain("OTHER_CHAT_PRIVATE_DATA");
+  });
+
+  it("validates agent model IDs and server rejects approve=true on questions", async () => {
+    const { createHubServer } = await import("./server.js");
+    const { hub } = setup();
+    expect(() => hub.updateAgent("slow", { model: "bad model with spaces!" })).toThrow(/Invalid model ID/);
+    expect(() => hub.updateAgent("slow", { reasoning: "ultra" as never })).toThrow(/auto, off, low, medium, high or max/);
+
+    const server = createHubServer({ hub, token: "" });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const addr = server.address() as { port: number };
+    const base = `http://127.0.0.1:${addr.port}`;
+    try {
+      const { approval } = hub.approvals.ask({
+        taskId: "t1",
+        agentId: "slow",
+        agentName: "Slow",
+        source: "agent",
+        title: "Q",
+        detail: "Which one?",
+      });
+      const res = await fetch(`${base}/api/approvals/${approval.id}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ approve: true }),
+      });
+      expect(res.status).toBe(400);
+      expect(approval.status).toBe("pending");
+      hub.approvals.cancelAll();
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+});

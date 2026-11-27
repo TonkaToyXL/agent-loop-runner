@@ -100,7 +100,7 @@ export function htmlToText(html: string): string {
     .replace(/&(#x[0-9a-f]+|#\d+|\w+);/gi, (m, e: string) => {
       if (e[0] === "#") {
         const code = e[1].toLowerCase() === "x" ? parseInt(e.slice(2), 16) : parseInt(e.slice(1), 10);
-        return Number.isFinite(code) ? String.fromCodePoint(code) : m;
+        return Number.isFinite(code) && code >= 0 && code <= 0x10ffff ? String.fromCodePoint(code) : m;
       }
       return ENTITIES[e.toLowerCase()] ?? m;
     })

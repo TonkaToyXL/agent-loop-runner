@@ -15,8 +15,10 @@ export function assertReadOnly(command: string): void {
   const cmd = command.trim();
   // Messages are fixed text on purpose: commands can contain the password, so never echo them.
   if (!ALLOWED.test(cmd)) throw new Error("Relay's mail reader refused a command that isn't read-only");
-  // A plain BODY[...] fetch would mark messages as read; only BODY.PEEK[...] is allowed.
-  if (/^UID FETCH/.test(cmd) && /\bBODY\[/i.test(cmd)) throw new Error("Relay's mail reader only fetches with BODY.PEEK");
+  // A plain BODY[...] or RFC822/RFC822.TEXT fetch would mark messages as read; only BODY.PEEK[...] is allowed.
+  if (/^UID FETCH/.test(cmd) && (/\bBODY\[/i.test(cmd) || /\bRFC822(?!\.HEADER\b|\.SIZE\b)/i.test(cmd))) {
+    throw new Error("Relay's mail reader only fetches with BODY.PEEK");
+  }
   if (/[\r\n]/.test(cmd)) throw new Error("Line breaks are not allowed in IMAP commands");
 }
 
@@ -99,24 +101,36 @@ export class ReadOnlyImap {
   async open(): Promise<void> {
     const timeoutMs = this.opts.timeoutMs ?? 20_000;
     await new Promise<void>((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error(`Mail server didn't answer within ${timeoutMs / 1000}s`)), timeoutMs);
+      let settled = false;
+      const done = (fn: () => void) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        this.greeting = null;
+        fn();
+      };
+      const timer = setTimeout(() => {
+        const err = new Error(`Mail server didn't answer within ${timeoutMs / 1000}s`);
+        this.socket?.destroy(err);
+        done(() => reject(err));
+      }, timeoutMs);
       const parser = new ResponseParser((r) => this.onResponse(r));
       this.greeting = (r) => {
-        clearTimeout(timer);
-        if (/^\* (OK|PREAUTH)/i.test(r.text)) resolve();
-        else reject(new Error(`Mail server refused the connection: ${r.text.slice(0, 120)}`));
+        if (/^\* (OK|PREAUTH)/i.test(r.text)) done(resolve);
+        else done(() => reject(new Error(`Mail server refused the connection: ${r.text.slice(0, 120)}`)));
       };
       this.socket = connect({ host: this.opts.host, port: this.opts.port ?? 993, servername: this.opts.host });
       this.socket.setTimeout(timeoutMs, () => this.socket?.destroy(new Error("Mail server timed out")));
       this.socket.on("data", (d: Buffer) => parser.push(d));
       this.socket.on("error", (err) => {
-        clearTimeout(timer);
-        reject(err);
+        done(() => reject(err));
         this.waiting?.reject(err);
         this.waiting = null;
       });
       this.socket.on("close", () => {
-        this.waiting?.reject(new Error("Mail server closed the connection"));
+        const err = new Error("Mail server closed the connection");
+        done(() => reject(err));
+        this.waiting?.reject(err);
         this.waiting = null;
       });
     });
@@ -168,8 +182,15 @@ export class ReadOnlyImap {
   async search(criteria: string): Promise<number[]> {
     const r = await this.run(`UID SEARCH ${criteria}`);
     if (r.status !== "OK") throw new Error(`Mail search failed: ${r.text.slice(0, 120)}`);
-    const line = r.untagged.find((u) => /^\* SEARCH\b/i.test(u.text));
-    return (line?.text.slice(8).trim().split(/\s+/) ?? []).map(Number).filter((n) => Number.isInteger(n) && n > 0);
+    const uids: number[] = [];
+    for (const u of r.untagged) {
+      if (!/^\* SEARCH\b/i.test(u.text)) continue;
+      for (const tok of u.text.slice(8).trim().split(/\s+/)) {
+        const n = Number(tok);
+        if (Number.isInteger(n) && n > 0) uids.push(n);
+      }
+    }
+    return uids;
   }
 
   /** Fetch flags, date, and the first `maxBytes` of each message, without marking anything read. */

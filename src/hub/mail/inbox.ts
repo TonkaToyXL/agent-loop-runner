@@ -33,22 +33,25 @@ export async function fetchRecent(cfg: ImapOptions, q: InboxQuery): Promise<Mail
   const hours = Math.min(Math.max(q.hours, 1), 24 * 14);
   const max = Math.min(q.max ?? 30, 60);
   const since = new Date(Date.now() - hours * 3_600_000);
+  // IMAP SINCE compares dates by day in server/mailbox timezone; subtract 1 day so evening local mail isn't missed, then filter accurately client-side.
+  const searchSince = new Date(since.getTime() - 86_400_000);
   const client = new ReadOnlyImap(cfg);
   try {
     await client.open();
     await client.examine("INBOX");
-    const criteria = [q.unreadOnly ? "UNSEEN" : "", `SINCE ${imapDate(since)}`, q.text ? `TEXT ${quote(q.text.slice(0, 100))}` : ""]
+    const criteria = [q.unreadOnly ? "UNSEEN" : "", `SINCE ${imapDate(searchSince)}`, q.text ? `TEXT ${quote(q.text.slice(0, 100))}` : ""]
       .filter(Boolean)
       .join(" ");
     const uids = (await client.search(criteria)).sort((a, b) => a - b).slice(-max);
     const fetched = await client.fetch(uids);
-    return fetched
-      .map((m) => {
+    const parsed: MailItem[] = [];
+    for (const m of fetched) {
+      try {
         const part = splitMessage(m.raw);
         const from = parseFrom(part.headers.get("from"));
         const dateHeader = part.headers.get("date");
         const when = m.internalDate ? Date.parse(m.internalDate) : dateHeader ? Date.parse(dateHeader) : NaN;
-        return {
+        parsed.push({
           uid: m.uid,
           from: from.name,
           fromAddress: from.address,
@@ -56,8 +59,12 @@ export async function fetchRecent(cfg: ImapOptions, q: InboxQuery): Promise<Mail
           date: Number.isFinite(when) ? new Date(when).toISOString() : new Date().toISOString(),
           unread: !m.flags.some((f) => f.toLowerCase() === "\\seen"),
           snippet: snippet(extractText(part)),
-        };
-      })
+        });
+      } catch (err) {
+        console.warn(`[mail] skipped malformed message uid=${m.uid}:`, err instanceof Error ? err.message : err);
+      }
+    }
+    return parsed
       .filter((m) => Date.parse(m.date) >= since.getTime())
       .sort((a, b) => Date.parse(b.date) - Date.parse(a.date));
   } finally {
@@ -82,6 +89,14 @@ export function formatList(items: MailItem[], q: InboxQuery): string {
   return `📥 ${items.length} ${scope(noun)}:\n\n${lines.join("\n")}${more}\n\nSend /inbox summary for what needs your attention.`;
 }
 
+/** Prevent email content from closing or forging <email> fence tags or attribute quotes. */
+function fenceEmailText(text: string): string {
+  return text.replace(/<(\/?)(email)\b/gi, "‹$1$2");
+}
+function fenceEmailAttr(text: string): string {
+  return fenceEmailText(text).replace(/["\r\n]/g, "'").replace(/[<>]/g, "");
+}
+
 /**
  * Prompt for the agent that summarizes mail. Emails are untrusted: anyone can send you one,
  * so they are fenced off and the agent is told never to act on them.
@@ -90,7 +105,7 @@ export function digestPrompt(items: MailItem[], hours: number, question?: string
   const body = items
     .map(
       (m, i) =>
-        `<email n="${i + 1}" from="${m.from.replace(/"/g, "'")} <${m.fromAddress}>" date="${m.date}" ${m.unread ? 'unread="yes"' : ""}>\nSubject: ${m.subject}\n${m.snippet}\n</email>`,
+        `<email n="${i + 1}" from="${fenceEmailAttr(m.from)} <${fenceEmailAttr(m.fromAddress)}>" date="${fenceEmailAttr(m.date)}"${m.unread ? ' unread="yes"' : ""}>\nSubject: ${fenceEmailText(m.subject)}\n${fenceEmailText(m.snippet)}\n</email>`,
     )
     .join("\n\n");
   return [

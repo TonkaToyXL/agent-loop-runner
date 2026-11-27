@@ -30,23 +30,26 @@ const config = loadConfig();
 const store = new Store();
 const hub = new Hub(config, store);
 
-if (process.env.TELEGRAM_BOT_TOKEN) {
-  const telegram = new TelegramChannel(hub, process.env.TELEGRAM_BOT_TOKEN, new Set(list(process.env.TELEGRAM_ALLOWED_CHAT_IDS)));
+const tgToken = process.env.TELEGRAM_BOT_TOKEN?.trim();
+if (tgToken) {
+  const telegram = new TelegramChannel(hub, tgToken, new Set(list(process.env.TELEGRAM_ALLOWED_CHAT_IDS)));
   hub.channels.set("telegram", telegram);
   telegram.start();
 }
 
 let imessage: IMessageChannel | undefined;
-if (process.env.BLUEBUBBLES_URL && process.env.BLUEBUBBLES_PASSWORD && !process.env.IMESSAGE_HOOK_TOKEN) {
+const bbUrl = process.env.BLUEBUBBLES_URL?.trim();
+const bbPass = process.env.BLUEBUBBLES_PASSWORD?.trim();
+const imsgHook = process.env.IMESSAGE_HOOK_TOKEN?.trim();
+if (bbUrl && bbPass && !imsgHook) {
   console.log(`[imessage] off: set IMESSAGE_HOOK_TOKEN (any long random string, e.g. ${randomBytes(16).toString("hex")}).`);
-} else if (process.env.BLUEBUBBLES_URL && process.env.BLUEBUBBLES_PASSWORD) {
-  const hookToken = process.env.IMESSAGE_HOOK_TOKEN!;
+} else if (bbUrl && bbPass && imsgHook) {
   imessage = new IMessageChannel(
     hub,
-    process.env.BLUEBUBBLES_URL,
-    process.env.BLUEBUBBLES_PASSWORD,
+    bbUrl,
+    bbPass,
     new Set(list(process.env.IMESSAGE_ALLOWED_HANDLES).map(normalizeHandle)),
-    hookToken,
+    imsgHook,
   );
   hub.channels.set("imessage", imessage);
   imessage.start();
@@ -68,7 +71,7 @@ server.listen(port, host, () => {
 });
 
 const shutdown = () => {
-  hub.stopHealthChecks();
+  hub.shutdown();
   for (const channel of hub.channels.values()) channel.stop();
   store.flush();
   server.close(() => process.exit(0));
