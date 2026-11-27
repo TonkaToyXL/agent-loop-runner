@@ -213,3 +213,12 @@ describe("delegation refinement and fast-tracking", () => {
     expect(refined.map((s) => s.agentId)).toEqual(["grok", "hermes", "muse", "zen"]);
   });
 });
+
+describe("planPrompt delegation rules", () => {
+  it("tells the planner agents can't reach each other and results return on their own", () => {
+    const p = planPrompt("make sure all bots work", [{ id: "grok", name: "Grok", skills: [], tagline: "x", enabled: true }]);
+    expect(p).toMatch(/cannot contact or message each other/);
+    expect(p).toMatch(/give each of them their own step/);
+    expect(p).toMatch(/do not\s+tell an agent to send, share, post/);
+  });
+});

@@ -208,3 +208,30 @@ describe("error text", () => {
     expect(message).not.toContain("hunter2");
   });
 });
+
+describe("riskyAction and results that come back to you", () => {
+  it("doesn't hold a step that only returns its answer to you", () => {
+    for (const t of [
+      "Summarize what's trending and send me the top 3",
+      "Find the latest news and post a summary here",
+      "Respond to this check-in with a hello",
+      "share it with me when you're done",
+      "research the topic and report back",
+    ]) {
+      expect(riskyAction(t), t).toBeNull();
+    }
+  });
+  it("still holds anything aimed at the outside world", () => {
+    for (const t of [
+      "send me an email with the list",
+      "send it to Bob",
+      "share the results on LinkedIn",
+      "post it on X",
+      "reply to the message from Sarah",
+      "send me $20 on venmo",
+      "share it with me and then post it on X",
+    ]) {
+      expect(riskyAction(t), t).not.toBeNull();
+    }
+  });
+});

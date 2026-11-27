@@ -32,7 +32,7 @@ import {
   type PlanStep,
   type StepResult,
 } from "./planner.js";
-import { HELP_TEXT, parseCommand, pickAgent } from "./router.js";
+import { HELP_TEXT, isRollCall, parseCommand, pickAgent } from "./router.js";
 import { fetchProviderQuota, formatProviderQuotaSummary, providerQuotaKey } from "./quota.js";
 import type { Store } from "./store.js";
 import type {
@@ -148,6 +148,10 @@ export function findAgentBrandLogo(agentId: string, webRoot = resolve(process.en
   logoCache.set(key, { at: Date.now(), value });
   return value;
 }
+
+/** Plain check-in: no tools, no outward actions, so it never needs an approval. */
+export const ROLL_CALL_PROMPT =
+  "Roll call from Relay (your team hub): answer in one short line. Say hi and name the one thing you're best at. No tools or actions needed.";
 
 /** Chat apps show markdown markers literally; keep the text, drop the markers. */
 export function toPlainText(md: string): string {
@@ -852,6 +856,7 @@ export class Hub {
         return { reply: `→ ${a.name} is on it (${modelLabel} · ${reasonLabel}).`, taskId: task.id };
       }
       case "auto": {
+        if (isRollCall(cmd.text)) return this.rollCall(origin);
         const pool = this.routableWithLoad();
         const underLimit = pool.filter((a) => this.limitFor(a).ok);
         const candidates = underLimit.length ? underLimit : pool;
@@ -867,6 +872,7 @@ export class Hub {
         return { reply: `→ Routed to ${a.name} (${modelLabel} · ${reasonLabel}).`, taskId: task.id };
       }
       case "team": {
+        if (isRollCall(cmd.text)) return this.rollCall(origin);
         const lead = this.agent(this.leadId);
         if (!lead) return { reply: "No agents are currently available. Enable an agent in Studio or run /doctor." };
         const task = this.submitGoal(cmd.text, origin);
@@ -961,6 +967,31 @@ export class Hub {
     this.store.state.tasks.push(task);
     this.touch(task);
     return task;
+  }
+
+  /**
+   * Ask every available assistant to check in, each as its own task. A planned goal can't do this:
+   * one agent can't message the others, so a "ping every bot" step silently reaches nobody.
+   */
+  rollCall(origin: ReplyTarget): { reply: string; taskId?: string } {
+    const asked: string[] = [];
+    const skipped: string[] = [];
+    let first: string | undefined;
+    const ready = new Set(this.routable().map((a) => a.id));
+    for (const a of this.agents()) {
+      if (!a.enabled) continue;
+      const limit = this.limitFor(a);
+      if (!ready.has(a.id) || !limit.ok) {
+        skipped.push(`${a.name} (${!limit.ok ? limit.reason : this.agentView(a).status})`);
+        continue;
+      }
+      const task = this.submitDirect(a.id, ROLL_CALL_PROMPT, origin, "explicit", { title: "Roll call" });
+      first ??= task.id;
+      asked.push(a.name);
+    }
+    if (!asked.length) return { reply: "No assistants are ready to check in. Run /doctor to see why." };
+    const more = skipped.length ? `\nNot asked: ${skipped.join(", ")}.` : "";
+    return { reply: `📣 Roll call: ${asked.join(", ")} will each answer below.${more}`, taskId: first };
   }
 
   submitDirect(

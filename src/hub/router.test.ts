@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseCommand, pickAgent, resolveAgent } from "./router.js";
+import { isRollCall, parseCommand, pickAgent, resolveAgent } from "./router.js";
 
 const agents = [
   { id: "grok", name: "Grok" },
@@ -119,5 +119,31 @@ describe("pickAgent", () => {
         "chatgpt",
       ),
     ).toBe("zen");
+  });
+});
+
+describe("isRollCall", () => {
+  it("recognizes asks for every assistant to check in", () => {
+    for (const t of [
+      "make sure all bots are responsive, say hello",
+      "everyone say hi",
+      "roll call",
+      "are all the agents online?",
+      "ping every assistant",
+      "each of the bots check in please",
+    ]) {
+      expect(isRollCall(t), t).toBe(true);
+    }
+  });
+  it("leaves real team goals and single asks alone", () => {
+    for (const t of [
+      "research AI news and write 3 hooks",
+      "say hello to my mom in Spanish",
+      "write a hello world in rust",
+      "everyone should review this architecture doc and list risks before Friday's launch meeting with the whole product and design org",
+      "what's trending on X",
+    ]) {
+      expect(isRollCall(t), t).toBe(false);
+    }
   });
 });

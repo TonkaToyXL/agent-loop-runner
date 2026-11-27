@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { normalizeAgent } from "./config.js";
-import { findAgentAvatars, Hub } from "./hub.js";
+import { findAgentAvatars, Hub, ROLL_CALL_PROMPT } from "./hub.js";
 import { Store } from "./store.js";
 import type { Task } from "./types.js";
 
@@ -298,5 +298,27 @@ describe("Hub security boundaries & server hardening", () => {
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
+  });
+});
+
+describe("Hub roll call", () => {
+  it("asks every ready assistant directly instead of planning a goal", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "relay-rollcall-test-"));
+    const mk = (id: string, i: number, extra = {}) =>
+      normalizeAgent(
+        { id, name: id[0].toUpperCase() + id.slice(1), model: "m", connectors: [{ kind: "cli", label: "sh", billing: "local", command: "sh", args: ["-c", `cat >/dev/null; echo hi-from-${id}`] }], ...extra },
+        i,
+      );
+    const agents = [mk("lead", 0, { actsInWorld: true }), mk("alpha", 1), mk("beta", 2), mk("off", 3, { enabled: false })];
+    const hub = new Hub({ lead: "lead", agents }, new Store(join(dir, "state.json")));
+    const res = await hub.handleText("make sure all bots are responsive, say hello", { channel: "web", chatId: "web" });
+    expect(res.reply).toMatch(/Roll call: Lead, Alpha, Beta/);
+    const tasks = hub.store.state.tasks;
+    expect(tasks.some((t) => t.kind === "goal" || t.kind === "plan")).toBe(false);
+    expect(tasks.map((t) => t.agentId).sort()).toEqual(["alpha", "beta", "lead"]);
+    for (let i = 0; i < 100 && tasks.some((t) => ["queued", "running"].includes(t.status)); i++) await new Promise((r) => setTimeout(r, 30));
+    expect(tasks.every((t) => t.status === "done" && t.prompt === ROLL_CALL_PROMPT)).toBe(true);
+    expect(hub.approvals.pending()).toHaveLength(0);
+    expect(tasks.find((t) => t.agentId === "alpha")?.result).toBe("hi-from-alpha");
   });
 });

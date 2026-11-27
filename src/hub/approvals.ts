@@ -189,7 +189,22 @@ const RISKY = new RegExp(
   "i",
 );
 
+/**
+ * Phrases that only hand the answer back to you or Relay ("send me the top 3", "share it with me",
+ * "post it here", "reply to this check-in"). They are blanked before the outward-action check so a
+ * planned research step doesn't wait 15 minutes for an approval. Anything aimed elsewhere still counts.
+ */
+const SELF_DIRECTED = new RegExp(
+  [
+    String.raw`\bsend (?:it |them |this |that |those |these )?(?:back )?(?:to )?(?:me|us)\b(?! (?:an? |the )?(?:e-?mails?|texts?|sms|dms?|messages?|invites?|invitations?|money|\$|payment))`,
+    String.raw`\b(?:send|share|post) (?:it |them |this |that |(?:the|your|a|an|my) [\w'-]+(?: [\w'-]+){0,3} )?(?:back (?:to (?:me|us) )?|with (?:me|us)|here)\b`,
+    String.raw`\b(?:reply|respond)(?:ing)?(?: to (?:this|my|the|our) (?:check-?in|ping|roll[- ]?call|question|prompt|test))\b`,
+    String.raw`\breport back\b`,
+  ].join("|"),
+  "gi",
+);
+
 export function riskyAction(text: string): string | null {
-  const m = RISKY.exec(text);
+  const m = RISKY.exec(text.replace(SELF_DIRECTED, " "));
   return m ? m[0].trim().toLowerCase() : null;
 }

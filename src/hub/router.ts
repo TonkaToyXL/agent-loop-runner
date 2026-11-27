@@ -157,6 +157,20 @@ export function parseCommand(input: string, agents: AgentRef[]): Command {
   return { type: "auto", text };
 }
 
+/**
+ * "Are all the bots up? say hello" / "everyone check in" / "roll call": a request for every
+ * assistant to answer, not a goal to plan. Assistants can't contact each other, so Relay asks
+ * each one directly. Kept short and greeting-shaped so real team goals never match.
+ */
+export function isRollCall(text: string): boolean {
+  const t = text.trim().toLowerCase();
+  if (!t || t.length > 140) return false;
+  if (/\broll[- ]?call\b|\bsound off\b/.test(t)) return true;
+  const everyone = /\b(?:all|every|each)(?:\s+(?:of\s+)?(?:the|my|our|your))?\s+(?:bots?|agents?|assistants?|ais?|crew|team(?:mates)?|one)\b|\beveryone\b|\beverybody\b/.test(t);
+  const greet = /\b(?:respon(?:sive|ding)|alive|online|awake|say\s+(?:hi|hello|hey)|hello|hi|hey|ping|check(?:ing)?[- ]?in)\b/.test(t);
+  return everyone && greet;
+}
+
 const MAIL_ASK =
   /\b(summari[sz]e|check|review|go through|what'?s|whats|anything|any|did i get|do i have)\b[^.?!]*\b(my\s+)?(inbox|e-?mails?|my mail)\b/i;
 
@@ -307,6 +321,7 @@ export const HELP_TEXT = [
   "",
   "@grok <ask>       talk to one agent",
   "@team <goal>      lead plans, crew splits the work",
+  "roll call         every assistant says hello (\"all bots, say hi\")",
   "<plain text>      auto-picks the best agent",
   "",
   "/agents           models, reasoning, usage",
