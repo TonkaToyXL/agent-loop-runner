@@ -1888,10 +1888,18 @@ function renderRanks() {
   const totalDone = rows.reduce((s, r) => s + r.done, 0);
   const totalTok = rows.reduce((s, r) => s + r.tokens, 0);
   const cost = S.kpis.costMonth ?? 0;
+  const totalFailed = rows.reduce((s, r) => s + (r.failed ?? 0), 0);
+  const timed = rows.filter((r) => r.avgMs > 0 && r.done > 0);
+  const timedDone = timed.reduce((s, r) => s + r.done, 0);
+  const avgMs = timedDone ? timed.reduce((s, r) => s + r.avgMs * r.done, 0) / timedDone : 0;
+  const success = totalDone + totalFailed ? Math.round((totalDone / (totalDone + totalFailed)) * 100) : null;
+  const tile = (value, label, tone = "") => `<div class="stat-box ${tone}"><span>${label}</span><b>${value}</b></div>`;
   $("#statsSummary").innerHTML = [
-    `<div class="stat-box"><b>${totalDone}</b><span>Completed</span></div>`,
-    `<div class="stat-box"><b>${fmtK(totalTok)}</b><span>Tokens used</span></div>`,
-    ...(cost > 0 ? [`<div class="stat-box"><b>${fmtUsd(cost)}</b><span>Month spend</span></div>`] : []),
+    tile(totalDone, "Completed", "t-a"),
+    tile(fmtK(totalTok), "Tokens used", "t-b"),
+    tile(avgMs ? fmtMs(avgMs) : "—", "Avg speed", "t-c"),
+    tile(success === null ? "—" : `${success}%`, "Success rate", "t-d"),
+    ...(cost > 0 ? [tile(fmtUsd(cost), "Month spend", "t-e")] : []),
   ].join("");
 
   const podiumEl = $("#podium");
@@ -1908,16 +1916,19 @@ function renderRanks() {
         if (!r) return `<div></div>`;
         const a = agentById(r.agentId);
         const place = i === 1 ? 1 : i === 0 ? 2 : 3;
-        const h = 22 + (Math.max(0, metricValue(r, S.statMetric)) / max) * 46;
-        return `<button type="button" class="step ${S.selectedStatAgent === r.agentId ? "selected" : ""}" style="--c:${safeColor(a?.color)}" data-stat-agent="${esc(r.agentId)}" title="Inspect ${esc(a?.name ?? r.agentId)}'s recent work">
-          <div class="who"><b>${esc(a?.name ?? r.agentId)}</b><span>${esc(metricLabel(r, S.statMetric))}</span></div>
-          <div class="col" style="height:${h.toFixed(1)}%">${place}</div></button>`;
+        // Podium steps always read 1st > 2nd > 3rd; the value nudges height within each step.
+        const base = place === 1 ? 62 : place === 2 ? 48 : 38;
+        const h = base * (0.82 + 0.18 * (Math.max(0, metricValue(r, S.statMetric)) / max));
+        const av = a ? `<span class="pod-av">${renderPortraitContent(a, false, true)}</span>` : "";
+        return `<button type="button" class="step place-${place} ${S.selectedStatAgent === r.agentId ? "selected" : ""}" style="--c:${safeColor(a?.color)}" data-stat-agent="${esc(r.agentId)}" title="Inspect ${esc(a?.name ?? r.agentId)}'s recent work">
+          <div class="who">${av}<b>${esc(a?.name ?? r.agentId)}</b></div>
+          <div class="col" style="height:${h.toFixed(1)}%"><span class="medal" aria-label="Place ${place}">${place}</span><span class="val">${esc(metricLabel(r, S.statMetric))}</span></div></button>`;
       })
       .join("");
   }
 
   $("#rankTable").innerHTML =
-    `<div class="rrow head"><span>#</span><span>Assistant</span><span class="num">${S.statMetric === "tokens" ? "Tokens" : "Completed"}</span><span class="num">Reliability</span><span class="num">Avg speed</span></div>` +
+    `<div class="rrow head"><span>#</span><span>Assistant</span><span class="num">${S.statMetric === "tokens" ? "Tokens" : '<span class="lbl-full">Completed</span><span class="lbl-short">Done</span>'}</span><span class="num"><span class="lbl-full">Reliability</span><span class="lbl-short">OK</span></span><span class="num"><span class="lbl-full">Avg speed</span><span class="lbl-short">Speed</span></span></div>` +
     rows
       .map((r, i) => {
         const a = agentById(r.agentId);
