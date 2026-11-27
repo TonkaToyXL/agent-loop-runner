@@ -1,10 +1,11 @@
 {
-  "name": "Relay",
-  "short_name": "Relay",
+  "name": "Causeway",
+  "short_name": "Causeway",
+  "description": "Direct your AI crew.",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#0b0c10",
-  "theme_color": "#0b0c10",
+  "background_color": "#070b16",
+  "theme_color": "#070b16",
   "icons": [
     {
       "src": "icon.svg",

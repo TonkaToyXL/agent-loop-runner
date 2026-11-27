@@ -1,2989 +1,1537 @@
-// Relay studio dashboard. Zero framework: clean state, action-first views, one resilient SSE stream.
-const $ = (sel, el = document) => el.querySelector(sel);
-const $$ = (sel, el = document) => [...el.querySelectorAll(sel)];
-const ESC = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
-const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ESC[c]);
-const safeColor = (c) => (typeof c === "string" && /^(#[0-9a-f]{3,8}|var\(--[\w-]+\))$/i.test(c.trim()) ? c.trim() : "var(--accent)");
-const safeJson = (raw) => { try { return JSON.parse(raw); } catch { return null; } };
+// Causeway: direct a crew of AI specialists. No framework: one state object, hash routes,
+// one resilient event stream, and views rendered from real hub data.
+import {
+  $, $$, esc, safeColor, safeJson, safeAsset, store, fmtK, fmtUsd, fmtDur, ago, clock, firstLine,
+  shortModel, DEPTH, LEVELS, md, ownAsk, planWaves, makeApi, makeSound,
+} from "./lib.js";
 
-const LEVELS = ["auto", "off", "low", "medium", "high", "max"];
-const DEPTH_LABEL = { auto: "Auto", off: "Off", low: "Light", medium: "Balanced", high: "Deep", max: "Max" };
+const main = $("#main");
 
-const DEFAULT_PERSONA = {
-  hermes: {
-    role: "Chief Operator",
-    vibe: "Calm, decisive coach. Leads with the next move and skips the lecture.",
-    traits: ["Decisive", "Systems-first", "Calm coach"],
-    motto: "Answer first, clear next move.",
-    thinking: "Mapping the move",
-    placeholder: "Ask Hermes to plan, build, or automate…",
-    quick: { label: "Plan a task", prompt: "Turn this into a crisp, step-by-step action plan: " },
-    quips: [
-      "Ready when you are. Give me the target and I'll map the clean path.",
-      "Systems over effort. What are we automating next?",
-      "Crew's standing by—drop a goal and I'll split the work.",
-    ],
-    traitPrompts: {
-      Decisive: "Give me your one clear recommendation and next move on: ",
-      "Systems-first": "Turn this into a repeatable checklist or lightweight system: ",
-      "Calm coach": "Help me untangle this and pick the top 2 priorities right now: ",
-    },
-  },
-  grok: {
-    role: "Live Scout",
-    vibe: "Sharp, plugged-in reporter. Brings receipts and cuts straight through hype.",
-    traits: ["Real-time X", "Receipts", "Dry wit"],
-    motto: "Signal over noise—always with receipts.",
-    thinking: "Scanning the wire",
-    placeholder: "Ask Grok what's moving on X or in the news…",
-    quick: { label: "What's trending", prompt: "What's actually moving on X and in AI news today? Top 3 takeaways with sources.", run: true },
-    quips: [
-      "Wire's humming. Want the real signal on X right now?",
-      "Skip the hype thread—I'll bring the actual receipts.",
-      "Name the topic and I'll check who's actually shipping today.",
-    ],
-    traitPrompts: {
-      "Real-time X": "What are people actually saying on X right now about: ",
-      Receipts: "Fact-check this with concrete sources and links: ",
-      "Dry wit": "Give me the blunt, no-hype hot take on: ",
-    },
-  },
-  muse: {
-    role: "Creative Director",
-    vibe: "Bold creative spark. Thinks in hooks, rhythm, and ready-to-use copy.",
-    traits: ["Bold hooks", "Story craft", "Zero fluff"],
-    motto: "Hooks that stop the scroll on frame one.",
-    thinking: "Sketching angles",
-    placeholder: "Ask Muse for hooks, scripts, names, or copy…",
-    quick: { label: "Pitch 3 hooks", prompt: "Give me 3 sharp, distinct hooks for: " },
-    quips: [
-      "Got a rough idea? I'll turn it into three scroll-stopping hooks.",
-      "Frame one decides everything—what are we pitching today?",
-      "Drop the topic and I'll bring copy with real rhythm.",
-    ],
-    traitPrompts: {
-      "Bold hooks": "Pitch 3 bold, scroll-stopping opening hooks for: ",
-      "Story craft": "Outline a tight 45-second story arc for: ",
-      "Zero fluff": "Tighten this copy so every word earns its spot: ",
-    },
-  },
-  cline: {
-    role: "Pragmatic Builder",
-    vibe: "No-nonsense senior engineer. Ships clean working code without the lecture.",
-    traits: ["Clean code", "Fast fixes", "Direct"],
-    motto: "Working code first, lecture never.",
-    thinking: "Writing clean code",
-    placeholder: "Ask Cline to write, debug, or clean up code…",
-    quick: { label: "Write a fix", prompt: "Write clean, working code to: " },
-    quips: [
-      "Show me the bug or spec—I'll ship the cleanest fix.",
-      "Less talk, tighter diffs. What are we building?",
-      "Paste the stack trace and let's squash it.",
-    ],
-    traitPrompts: {
-      "Clean code": "Write clean, production-ready code for: ",
-      "Fast fixes": "Find the root cause and fix this bug cleanly: ",
-      Direct: "Give me the shortest working script or command to: ",
-    },
-  },
-  zen: {
-    role: "Calm Critic",
-    vibe: "Quietly ruthless reviewer. Spots hidden flaws and simplifies hard tradeoffs.",
-    traits: ["Tradeoffs", "Blind spots", "Composed"],
-    motto: "Find the flaw before it costs you.",
-    thinking: "Weighing tradeoffs",
-    placeholder: "Ask Zen to review, compare, or pressure-test an idea…",
-    quick: { label: "Pressure-test", prompt: "Review this and tell me the biggest flaw and cleanest fix: " },
-    quips: [
-      "Bring me your plan—I'll find the hidden weak link before launch.",
-      "Every choice has a tradeoff. Let's put them side by side.",
-      "Ready to pressure-test whenever you want an honest audit.",
-    ],
-    traitPrompts: {
-      Tradeoffs: "Compare these options cleanly and rank the tradeoffs: ",
-      "Blind spots": "Audit this and name the top 3 blind spots I'm missing: ",
-      Composed: "Simplify this design down to the cleanest, lowest-risk move: ",
-    },
-  },
-  chatgpt: {
-    role: "Executive Advisor",
-    vibe: "Steady second opinion. Zooms out for high-stakes calls and blind spots.",
-    traits: ["Big picture", "Candid", "Steady"],
-    motto: "Zoom out before you commit.",
-    thinking: "Thinking it through",
-    placeholder: "Ask ChatGPT for a candid second opinion…",
-    quick: { label: "Second opinion", prompt: "Give me a candid second opinion and the biggest blind spot on: " },
-    quips: [
-      "High-stakes call? Let's zoom out before you commit.",
-      "I'll give you the candid second opinion—no sugarcoating.",
-      "Save me for the big decisions; I'm ready when you need perspective.",
-    ],
-    traitPrompts: {
-      "Big picture": "Zoom out and give me the strategic big picture on: ",
-      Candid: "Give me a candid, no-fluff second opinion on: ",
-      Steady: "Walk me through the risk vs. upside before I decide on: ",
-    },
-  },
-};
-
-const MOTION_SEED = [
-  { phase: "0s", dur: "5.4s" },
-  { phase: "-1.3s", dur: "6.1s" },
-  { phase: "-2.7s", dur: "5.7s" },
-  { phase: "-0.8s", dur: "6.4s" },
-  { phase: "-3.4s", dur: "5.5s" },
-  { phase: "-2.0s", dur: "6.0s" },
-];
-
-const store = {
-  get: (k) => { try { return localStorage.getItem(k); } catch { return null; } },
-  set: (k, v) => { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch {} },
-};
-
+// ------------------------------------------------------------------ state
 const S = {
   agents: [],
   tasks: new Map(),
-  lb: { today: [], week: [], all: [] },
-  kpis: {},
+  approvals: [],
+  lessons: [],
   channels: [],
   lead: "",
-  period: "week",
-  filter: "all",
-  view: store.get("relay-view") || "studio",
-  target: store.get("relay-target") || "auto",
-  notes: [],
-  handoffs: [],
-  approvals: [],
-  pos: {},
+  kpis: {},
+  connected: false,
+  booted: false,
   token: store.get("relay-token") || "",
-  editing: null,
-  previewWork: new Set(),
-  previewTimers: {},
-  openHandoffs: new Set(),
-  openSteps: new Set(),
-  expandedMsgs: new Set(),
-  detailMsgs: new Set(),
-  connected: true,
-  soundOn: store.get("relay-sound") === "1",
-  focusMode: store.get("relay-focus") === "1",
-  mapMode: "explore",
-  chain: [],
-  selectedMissionId: null,
-  activityAgent: "all",
-  activityQuery: "",
-  statMetric: "done",
-  selectedStatAgent: null,
-  openHandoffMsg: null,
-  activeQuips: {},
-  quipIdx: {},
+  sound: store.get("cw-sound") === "on",
+  reduceMotion: store.get("cw-reduce-motion") === "on",
+  draft: null,
+  sel: {},
+  runsFilter: "all",
+  runsQuery: "",
+  flash: new Map(),
+  landing: new Map(),
+  batons: [],
+  dismissed: new Set(safeJson(store.get("cw-dismissed")) ?? []),
 };
 
-// ------------------------------------------------------------------ subtle synth soundscape
-const SFX = (() => {
-  let ctx = null;
-  const ensure = () => {
-    if (!S.soundOn || typeof AudioContext === "undefined") return null;
-    try {
-      ctx ??= new AudioContext();
-      if (ctx.state === "suspended") void ctx.resume();
-      return ctx;
-    } catch {
-      return null;
-    }
-  };
-  const tone = (c, freq, start, dur, gain, type = "sine") => {
-    const osc = c.createOscillator();
-    const g = c.createGain();
-    osc.type = type;
-    osc.frequency.setValueAtTime(freq, start);
-    g.gain.setValueAtTime(0.0001, start);
-    g.gain.exponentialRampToValueAtTime(gain, start + 0.012);
-    g.gain.exponentialRampToValueAtTime(0.0001, start + dur);
-    osc.connect(g).connect(c.destination);
-    osc.start(start);
-    osc.stop(start + dur + 0.02);
-  };
-  return {
-    play(kind) {
-      const c = ensure();
-      if (!c) return;
-      const t = c.currentTime;
-      if (kind === "dispatch") {
-        tone(c, 340, t, 0.06, 0.032, "triangle");
-        tone(c, 460, t + 0.03, 0.065, 0.028, "sine");
-      } else if (kind === "baton") {
-        tone(c, 523.25, t, 0.08, 0.038, "sine");
-        tone(c, 659.25, t + 0.055, 0.11, 0.04, "sine");
-      } else if (kind === "done") {
-        tone(c, 523.25, t, 0.18, 0.035, "sine");
-        tone(c, 659.25, t + 0.05, 0.2, 0.035, "sine");
-        tone(c, 783.99, t + 0.1, 0.26, 0.038, "sine");
-      } else if (kind === "ask") {
-        tone(c, 698.46, t, 0.12, 0.05, "triangle");
-        tone(c, 880, t + 0.14, 0.18, 0.055, "triangle");
-      }
-    },
-  };
-})();
+const api = makeApi(() => S.token, (msg) => showLock(msg));
+const sound = makeSound(() => S.sound);
 
-function pingChannel(name) {
-  const el = $(`#channels [data-chan="${name}"]`);
-  if (!el) return;
-  el.classList.remove("ping");
-  void el.offsetWidth;
-  el.classList.add("ping");
-  setTimeout(() => el.classList.remove("ping"), 1800);
-}
-
-// ------------------------------------------------------------------ personas & avatars
-function personaOf(a) {
-  const def = DEFAULT_PERSONA[a?.id] || {};
-  return {
-    role: a?.role || def.role || "Assistant",
-    vibe: a?.personality || def.vibe || a?.tagline || "",
-    traits: (Array.isArray(a?.traits) && a.traits.length ? a.traits : def.traits) || [],
-    motto: a?.motto || def.motto || a?.personality || def.vibe || "",
-    thinking: a?.thinkingLabel || def.thinking || "Working on it",
-    placeholder: def.placeholder || `Message ${a?.name || "assistant"}…`,
-    quick: a?.quickAction || def.quick || null,
-    quips: def.quips || [`${a?.name || "Assistant"} is ready when you are.`],
-    traitPrompts: def.traitPrompts || {},
-  };
-}
-
-function brandBadgeMarkup(a, size = "") {
-  const url = a?.brandLogo;
-  if (!url) return "";
-  return `<span class="brand-badge ${size}" title="${esc(a.name)} official logo"><img src="${esc(url)}" alt="${esc(a.name)} logo" loading="lazy"/></span>`;
-}
-
-function fallbackAvatarSvg(name = "?", color = "var(--accent)", working = false) {
-  const col = safeColor(color);
-  return `<svg class="portrait ${working ? "is-working" : "is-idle"}" viewBox="0 0 80 80" aria-hidden="true">
-    <rect width="80" height="80" fill="#14141a"/>
-    <circle cx="40" cy="40" r="24" fill="${col}" fill-opacity="0.16" stroke="${col}" stroke-width="1.8"/>
-    <text x="40" y="42" text-anchor="middle" dominant-baseline="central" fill="${col}" style="font:800 28px var(--font-display)">${esc(name[0] || "?")}</text>
-  </svg>`;
-}
-
-/** single=true ensures compact thumbnails never stack dual idle/working <img> elements. */
-function renderPortraitContent(agent, working = false, single = false) {
-  const idleUrl = agent?.avatarIdle;
-  const workUrl = agent?.avatarWorking;
-  if (!single && idleUrl && workUrl && workUrl !== idleUrl) {
-    return `<img class="portrait-img portrait-idle" src="${esc(idleUrl)}" alt="" loading="lazy"/>
-      <img class="portrait-img portrait-work" src="${esc(workUrl)}" alt="" loading="lazy"/>`;
-  }
-  const chosen = working && workUrl ? workUrl : idleUrl;
-  if (chosen) {
-    return `<img class="portrait-img official-avatar" src="${esc(chosen)}" alt="" loading="lazy"/>`;
-  }
-  return fallbackAvatarSvg(agent?.name, agent?.color, working);
-}
-
-function mapPortraitMarkup(a, working) {
-  const url = working ? (a.avatarWorking || a.avatarIdle) : a.avatarIdle;
-  if (url) {
-    return `<circle r="24" fill="#0b0d12"/><image href="${esc(url)}" x="-24" y="-24" width="48" height="48" preserveAspectRatio="xMidYMid slice" clip-path="url(#mapAvatarClip)"/>`;
-  }
-  return `<g clip-path="url(#mapAvatarClip)"><svg x="-24" y="-24" width="48" height="48" viewBox="0 0 80 80">${fallbackAvatarSvg(a.name, a.color, working).replace(/^<svg[^>]*>|<\/svg>$/g, "")}</svg></g>`;
-}
-
-// ------------------------------------------------------------------ helpers
+// ------------------------------------------------------------------ small helpers
 const agentById = (id) => S.agents.find((a) => a.id === id);
 const nameOf = (id) => (id === "you" ? "You" : agentById(id)?.name ?? id);
-const colorOf = (id) => (id === "you" ? "var(--text)" : safeColor(agentById(id)?.color));
-const fmtK = (n = 0) => (n >= 1e6 ? `${(n / 1e6).toFixed(n >= 1e7 ? 0 : 1)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(n >= 1e4 ? 0 : 1)}k` : String(Math.round(n)));
-const fmtUsd = (n = 0) => (n > 0 && n < 0.01 ? "<$0.01" : `$${n.toFixed(2)}`);
-const fmtMs = (rawMs) => {
-  const ms = Math.max(0, Number(rawMs) || 0);
-  if (ms < 1000) return `${Math.round(ms)}ms`;
-  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
-  const totalSec = Math.round(ms / 1000);
-  return `${Math.floor(totalSec / 60)}m ${totalSec % 60}s`;
-};
-const ago = (t) => {
-  const s = Math.max(0, Math.round((Date.now() - t) / 1000));
-  return s < 5 ? "now" : s < 60 ? `${s}s` : s < 3600 ? `${Math.floor(s / 60)}m` : s < 86400 ? `${Math.floor(s / 3600)}h` : `${Math.floor(s / 86400)}d`;
-};
-const clock = (iso) => new Date(iso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-const think = (level) => {
-  if (level === "auto") return `<span class="think auto" aria-hidden="true"><s></s><s></s><s></s><s></s></span>`;
-  const n = Math.max(0, ["off", "low", "medium", "high", "max"].indexOf(level));
-  return `<span class="think" aria-hidden="true">${[1, 2, 3, 4].map((i) => `<s class="${i <= n ? "on" : ""}"></s>`).join("")}</span>`;
-};
-const levelLabel = (lvl) => DEPTH_LABEL[lvl] ?? lvl;
-
-function shortModel(id, a) {
-  if (!id) return "";
-  if (id === "auto") return "Auto";
-  if (id === "hermes-agent") {
-    const def = a?.discoveredDefaultModel;
-    return def ? `Default (${def.split("/").pop()})` : "Default";
-  }
-  return id.replace(/^cline-pass\//, "");
-}
-
-function modelOptionsMarkup(a) {
-  const opts = Array.from(new Set([a.model, ...(a.modelOptions ?? [])]));
-  if (a.discoveredProvider && opts.includes("hermes-agent")) {
-    const rest = opts.filter((m) => m !== "hermes-agent");
-    const defLabel = a.discoveredDefaultModel
-      ? `Default (${a.discoveredDefaultModel.split("/").pop()})`
-      : "Default";
-    const provLabel = `${a.discoveredProviderName || a.discoveredProvider}`;
-    return `<option value="hermes-agent" ${a.model === "hermes-agent" ? "selected" : ""}>${esc(defLabel)}</option>` +
-      (rest.length
-        ? `<optgroup label="${esc(provLabel)}">${rest
-            .map((m) => `<option value="${esc(m)}" ${a.model === m ? "selected" : ""}>${esc(m)}</option>`)
-            .join("")}</optgroup>`
-        : "");
-  }
-  return opts
-    .map((m) => `<option value="${esc(m)}" ${a.model === m ? "selected" : ""}>${esc(shortModel(m, a))}</option>`)
-    .join("");
-}
-
-function activeTaskFor(agentId) {
-  const list = [...S.tasks.values()].filter((t) => t.agentId === agentId && t.kind !== "goal" && (t.status === "running" || t.status === "queued"));
-  return list.find((t) => t.status === "running") ?? list[0] ?? null;
-}
+const roleOf = (a) => a?.role || a?.tagline || "";
+const tasksArr = () => [...S.tasks.values()];
+const childrenOf = (id) => tasksArr().filter((t) => t.parentId === id);
+const stepsOf = (goalId) => childrenOf(goalId).filter((t) => t.kind === "subtask").sort((a, b) => (a.step ?? 0) - (b.step ?? 0));
+const pendingApprovals = () => S.approvals.filter((a) => a.status === "pending");
+const approvalFor = (taskId) => S.approvals.find((a) => a.taskId === taskId && a.status === "pending");
+const isRisky = (t) => /\b(send|post|tweet|publish|share|buy|purchase|pay|order|delete|remove|upload|deploy|e-?mail|reply to|message|book|subscribe|transfer|install)\b/i.test(t);
+const isReview = (t) => /\b(review|critique|audit|verify|fact[- ]?check|pressure[- ]?test|evaluate)\b/i.test(t);
 
 function toast(text) {
   const el = $("#toast");
   el.textContent = text;
   el.classList.add("show");
   clearTimeout(toast.t);
-  toast.t = setTimeout(() => el.classList.remove("show"), 2500);
+  toast.t = setTimeout(() => el.classList.remove("show"), 2600);
 }
-
-async function copyText(str, okMsg = "Copied") {
+function announce(text) {
+  $("#announcer").textContent = "";
+  setTimeout(() => ($("#announcer").textContent = text), 30);
+}
+async function copyText(text, ok = "Copied") {
   try {
-    if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(str);
-      toast(okMsg);
-      return;
-    }
-  } catch {}
-  try {
-    const ta = document.createElement("textarea");
-    ta.value = str;
-    ta.setAttribute("readonly", "");
-    ta.style.cssText = "position:fixed;left:-9999px;top:-9999px;opacity:0";
-    document.body.appendChild(ta);
-    ta.select();
-    const ok = document.execCommand("copy");
-    ta.remove();
-    toast(ok ? okMsg : "Copy failed");
+    await navigator.clipboard.writeText(text);
+    toast(ok);
   } catch {
-    toast("Copy failed");
+    toast("Couldn't copy here");
   }
 }
 
-// Safe markdown: extracts code spans first, handles [label](https://...), strips trailing punctuation, CRLF-safe.
-function inline(s) {
-  const codes = [];
-  let text = String(s ?? "").replace(/`([^`\n]+)`/g, (_, code) => {
-    const idx = codes.push(`<code>${esc(code)}</code>`) - 1;
-    return `\u0000CODE${idx}\u0000`;
-  });
-  text = esc(text)
-    .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, (_, label, url) => `<a href="${url}" target="_blank" rel="noopener noreferrer">${label}</a>`)
-    .replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>")
-    .replace(/(^|[\s(])_([^_\n]+)_(?=[\s).,!?:]|$)/g, "$1<i>$2</i>")
-    .replace(/(^|[\s(])(https?:\/\/[^\s<)"]+)/g, (full, pre, rawUrl) => {
-      const m = /^(.*?)([.,!?;:]+)$/.exec(rawUrl);
-      const url = m ? m[1] : rawUrl;
-      const trail = m ? m[2] : "";
-      return `${pre}<a href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>${trail}`;
-    });
-  return text.replace(/\u0000CODE(\d+)\u0000/g, (_, idx) => codes[Number(idx)] ?? "");
+/** A task's state in the crew's vocabulary. */
+function stateOf(t) {
+  if (!t) return "queued";
+  if (approvalFor(t.id) || t.awaitingApproval) return "need";
+  return { queued: "queued", running: "run", done: "done", failed: "fail", blocked: "block", cancelled: "cancel" }[t.status] ?? "queued";
+}
+const STATE_LABEL = { queued: "Waiting", run: "On it", need: "Needs your call", block: "Blocked", fail: "Failed", done: "Done", cancel: "Stopped" };
+function stPill(state, extra = "") {
+  const cls = { run: "run", need: "need", block: "block", fail: "fail", done: "done" }[state] ?? "";
+  return `<span class="st ${cls}">${esc(extra || STATE_LABEL[state] || state)}</span>`;
+}
+function since(t) {
+  const start = t.startedAt ?? t.createdAt;
+  return t.finishedAt
+    ? `<span class="elapsed" data-since="${esc(start)}" data-until="${esc(t.finishedAt)}">${fmtDur(Date.parse(t.finishedAt) - Date.parse(start))}</span>`
+    : `<span class="elapsed" data-since="${esc(start)}">${fmtDur(Date.now() - Date.parse(start))}</span>`;
 }
 
-function md(src = "") {
-  const lines = String(src).replace(/\r\n?/g, "\n").split("\n");
-  const out = [];
-  let list = null;
-  let para = [];
-  let inCode = false;
-  let codeLines = [];
-  const flushPara = () => { if (para.length) out.push(`<p>${para.map(inline).join("<br>")}</p>`); para = []; };
-  const flushList = () => { if (list) out.push(`<${list.tag}>${list.items.map((x) => `<li>${inline(x)}</li>`).join("")}</${list.tag}>`); list = null; };
-  const flushCode = () => {
-    out.push(`<div class="code-block"><button type="button" class="code-copy" data-copy-code>Copy</button><pre><code>${esc(codeLines.join("\n"))}</code></pre></div>`);
-    codeLines = [];
-  };
-
-  for (const line of lines) {
-    if (/^\s*```/.test(line)) {
-      if (inCode) { flushCode(); inCode = false; }
-      else { flushPara(); flushList(); inCode = true; codeLines = []; }
-      continue;
-    }
-    if (inCode) { codeLines.push(line); continue; }
-    const ul = /^\s*[-*•]\s+(.*)$/.exec(line);
-    const ol = /^\s*\d+[.)]\s+(.*)$/.exec(line);
-    const h = /^#{1,4}\s+(.*)$/.exec(line);
-    const bq = /^>\s?(.*)$/.exec(line);
-    if (/^\s*---+\s*$/.test(line)) {
-      flushPara(); flushList(); out.push("<hr>");
-    } else if (ul || ol) {
-      flushPara();
-      const tag = ul ? "ul" : "ol";
-      if (list && list.tag !== tag) flushList();
-      list ??= { tag, items: [] };
-      list.items.push((ul || ol)[1]);
-    } else if (h) {
-      flushPara(); flushList(); out.push(`<h4>${inline(h[1])}</h4>`);
-    } else if (bq) {
-      flushPara(); flushList(); out.push(`<blockquote>${inline(bq[1])}</blockquote>`);
-    } else if (!line.trim()) {
-      flushPara(); flushList();
-    } else {
-      flushList(); para.push(line);
-    }
-  }
-  if (inCode) flushCode();
-  flushPara(); flushList();
-  return out.join("");
+/** What an agent is doing right now, for the roster and presence. */
+function agentState(a) {
+  if (!a) return "off";
+  if (pendingApprovals().some((p) => p.agentId === a.id)) return "need";
+  if (a.status === "working") return "run";
+  if (!a.enabled || a.status === "paused") return "off";
+  if (a.status === "offline") return "fail";
+  if (a.status === "limited") return "block";
+  if (!a.live) return "demo";
+  return "ready";
+}
+const AGENT_STATE_LABEL = { run: "On it", need: "Needs your call", off: "Paused", fail: "Offline", block: "At its limit", demo: "Demo mode", ready: "Ready" };
+function activeTasksOf(id) {
+  return tasksArr().filter((t) => t.agentId === id && (t.status === "running" || t.status === "queued") && t.kind !== "goal");
 }
 
-function isLongReply(text = "") {
-  const s = String(text);
-  return s.length > 680 || s.split("\n").length > 9;
+function avatar(a, size = "", label = true) {
+  const src = safeAsset(a?.avatarIdle) || safeAsset(a?.brandLogo);
+  const alt = label ? esc(a?.name ?? "") : "";
+  if (src) return `<img class="av ${size}" src="${src}" alt="${alt}" loading="lazy" />`;
+  const ch = esc((a?.name ?? "?")[0]);
+  return `<span class="av ${size} av-fallback" style="--c:${safeColor(a?.color)}" ${label ? `role="img" aria-label="${alt}"` : 'aria-hidden="true"'}>${ch}</span>`;
 }
-
-// ------------------------------------------------------------------ focus trapping for dialogs
-function trapFocus(container, e) {
-  if (e.key !== "Tab") return;
-  const focusables = $$('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], summary, [tabindex]:not([tabindex="-1"])', container)
-    .filter((el) => el.offsetParent !== null);
-  if (!focusables.length) return;
-  const first = focusables[0];
-  const last = focusables[focusables.length - 1];
-  if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
-  else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
-}
-
-// ------------------------------------------------------------------ api
-async function api(path, opts = {}) {
-  const headers = { "content-type": "application/json" };
-  if (S.token) headers.authorization = `Bearer ${S.token}`;
-  const res = await fetch(path, { ...opts, headers });
-  if (res.status === 401) {
-    showLock(opts._unlockAttempt ? "Invalid token. Check HUB_TOKEN in your .env file." : "");
-    throw new Error("locked");
-  }
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
-  return data;
-}
-
-async function quickUpdateAgent(id, patch, selectEl) {
+function whoChip(id, { role = false, size = "sm" } = {}) {
+  if (id === "you") return `<span class="who"><span class="av ${size} av-fallback" aria-hidden="true">Y</span><b>You</b></span>`;
   const a = agentById(id);
-  if (!a) return;
-  if (selectEl) selectEl.disabled = true;
+  return `<span class="who">${avatar(a, size, false)}<span class="grow"><b>${esc(a?.name ?? id)}</b>${role && a ? ` <span class="role">${esc(roleOf(a))}</span>` : ""}</span></span>`;
+}
+function agentOptions(selected, { includeOff = false } = {}) {
+  return S.agents
+    .filter((a) => includeOff || a.enabled)
+    .map((a) => {
+      const st = agentState(a);
+      const note = st === "demo" ? " · demo" : st === "off" ? " · paused" : st === "block" ? " · at limit" : st === "fail" ? " · offline" : "";
+      return `<option value="${esc(a.id)}" ${a.id === selected ? "selected" : ""}>${esc(a.name)} · ${esc(roleOf(a))}${note}</option>`;
+    })
+    .join("");
+}
+
+// ------------------------------------------------------------------ "needs you"
+/** Everything that needs the owner: pending approvals and questions, plus stuck work that's still recoverable. */
+function needsItems() {
+  const items = pendingApprovals().map((a) => ({ type: a.kind === "question" ? "question" : "approval", id: a.id, approval: a, task: S.tasks.get(a.taskId) }));
+  const recent = Date.now() - 6 * 3_600_000;
+  for (const t of tasksArr()) {
+    if (S.dismissed.has(t.id) || t.redirectedTo) continue;
+    if (t.status !== "blocked" && t.status !== "failed") continue;
+    if (Date.parse(t.finishedAt ?? t.createdAt) < recent) continue;
+    if (t.kind === "subtask") {
+      const goal = S.tasks.get(t.parentId);
+      if (goal?.status === "running") items.push({ type: "stuck", id: t.id, task: t, goal });
+    } else if (t.kind === "direct") {
+      items.push({ type: "stuck", id: t.id, task: t });
+    }
+  }
+  return items;
+}
+function goalOf(t) {
+  if (!t) return null;
+  return t.kind === "goal" ? t : t.parentId ? S.tasks.get(t.parentId) : null;
+}
+function needCard(item) {
+  if (item.type === "approval" || item.type === "question") {
+    const a = item.approval;
+    const goal = goalOf(item.task);
+    const where = goal ? `<a class="link" href="#/run/${esc(goal.id)}">${esc(firstLine(goal.prompt, 60))}</a>` : item.task ? `<a class="link" href="#/task/${esc(item.task.id)}">Open task</a>` : "";
+    const left = Math.max(0, Date.parse(a.expiresAt) - Date.now());
+    const body = `${avatar(agentById(a.agentId), "", false)}
+      <div class="grow"><div class="need-title">${esc(a.title)}</div>
+        <div class="need-detail">${esc(firstLine(a.detail, 140))}${where ? ` · ${where}` : ""} · auto-denies in ${Math.ceil(left / 60_000)} min</div></div>`;
+    if (a.kind === "question") {
+      return `<div class="need-card" data-need="${esc(a.id)}">${body}
+        <div class="need-actions"><button type="button" class="btn sm ghost" data-decide="${esc(a.id)}" data-approve="false">Skip</button></div>
+        <form class="need-answer" data-answer-form="${esc(a.id)}"><label class="sr" for="ans-${esc(a.id)}">Your answer</label>
+          <input class="input" id="ans-${esc(a.id)}" placeholder="Your answer…" autocomplete="off" required /><button class="btn sm primary" type="submit">Send</button></form></div>`;
+    }
+    return `<div class="need-card" data-need="${esc(a.id)}">${body}
+      <div class="need-actions">
+        <button type="button" class="btn sm ghost" data-decide="${esc(a.id)}" data-approve="false">Deny</button>
+        <button type="button" class="btn sm pink" data-decide="${esc(a.id)}" data-approve="true">Approve</button>
+      </div></div>`;
+  }
+  const t = item.task;
+  const goal = item.goal;
+  return `<div class="need-card block" data-need="${esc(t.id)}">${avatar(agentById(t.agentId), "", false)}
+    <div class="grow"><div class="need-title">${esc(nameOf(t.agentId))}: ${t.status === "blocked" ? "blocked" : "failed"} on “${esc(firstLine(t.title, 60))}”</div>
+      <div class="need-detail">${esc(firstLine(t.error, 160))}</div></div>
+    <div class="need-actions">
+      <button type="button" class="btn sm ghost" data-dismiss="${esc(t.id)}">Dismiss</button>
+      <a class="btn sm" href="${goal ? `#/run/${esc(goal.id)}?step=${esc(t.id)}` : `#/task/${esc(t.id)}`}">Redirect…</a>
+    </div></div>`;
+}
+
+// ------------------------------------------------------------------ routing
+function route() {
+  const h = location.hash.replace(/^#/, "") || "/";
+  const [path, q] = h.split("?");
+  const parts = path.split("/").filter(Boolean);
+  return { name: parts[0] || "overview", id: parts[1] ? decodeURIComponent(parts[1]) : "", params: new URLSearchParams(q || "") };
+}
+const go = (hash) => { if (location.hash !== hash) location.hash = hash; else render(true); };
+
+let lastKey = "";
+let renderQueued = false;
+function schedule() {
+  if (renderQueued) return;
+  renderQueued = true;
+  requestAnimationFrame(() => { renderQueued = false; render(false); });
+}
+
+/** Keep what the owner is typing when live data re-renders the view. */
+function capture() {
+  const vals = {};
+  for (const el of $$("input[id], textarea[id], select[id]", main)) vals[el.id] = el.type === "checkbox" ? el.checked : el.value;
+  const a = document.activeElement;
+  return {
+    vals,
+    focus: a && main.contains(a) && a.id ? { id: a.id, s: a.selectionStart, e: a.selectionEnd } : null,
+    open: $$("details[id]", main).filter((d) => d.open).map((d) => d.id),
+    insp: $(".inspector", main)?.scrollTop ?? 0,
+  };
+}
+function restore(c) {
+  for (const [id, v] of Object.entries(c.vals)) {
+    const el = document.getElementById(id);
+    if (!el || !main.contains(el) || el.hasAttribute("data-no-restore")) continue;
+    if (el.type === "checkbox") el.checked = v;
+    else el.value = v;
+  }
+  for (const id of c.open) { const d = document.getElementById(id); if (d) d.open = true; }
+  if (c.focus) {
+    const el = document.getElementById(c.focus.id);
+    if (el) {
+      el.focus({ preventScroll: true });
+      try { if (c.focus.s != null) el.setSelectionRange(c.focus.s, c.focus.e); } catch {}
+    }
+  }
+  const insp = $(".inspector", main);
+  if (insp) insp.scrollTop = c.insp;
+}
+
+function render(force = false) {
+  const r = route();
+  const key = `${r.name}/${r.id}`;
+  updateChrome(r);
+  if (!S.booted) return;
+  // Don't yank the plan editor out from under the owner on live updates.
+  if (!force && r.name === "new" && key === lastKey) return;
+  const same = key === lastKey;
+  const kept = same ? capture() : null;
+  main.innerHTML = view(r);
+  if (kept) restore(kept);
+  lastKey = key;
+  afterRender(r, same);
+}
+function view(r) {
+  switch (r.name) {
+    case "overview": return viewOverview();
+    case "new": return viewNew(r);
+    case "run": return viewRun(r);
+    case "runs": return viewRuns();
+    case "task": return viewTask(r);
+    case "crew": return r.id ? viewAgent(r.id) : viewCrew();
+    case "playbooks": return viewPlaybooks();
+    case "settings": return viewSettings();
+    default: return `<div class="view"><div class="empty">That page doesn't exist. <a class="link" href="#/">Back to overview</a></div></div>`;
+  }
+}
+function afterRender(r, same) {
+  if (r.name === "run") {
+    drawEdges();
+    if (!same) $(".node.sel", main)?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }
+  if (!same) {
+    main.scrollTop = 0;
+    window.scrollTo(0, 0);
+    const autofocus = $("[data-autofocus]", main);
+    if (autofocus && matchMedia("(min-width: 761px)").matches) autofocus.focus();
+  }
+  autosizeAll();
+}
+
+// ------------------------------------------------------------------ chrome
+function updateChrome(r) {
+  const navName = r.name === "run" || r.name === "task" ? "runs" : r.name;
+  for (const a of $$("[data-nav]")) a.classList.toggle("on", a.dataset.nav === navName);
+  for (const a of $$("[data-nav]")) a.toggleAttribute("aria-current", a.dataset.nav === navName);
+  const n = needsItems().length;
+  for (const [btnSel, countSel] of [["#needsBtn", "#needsCount"], ["#needsBtnTop", "#needsCountTop"]]) {
+    $(btnSel).hidden = !n;
+    $(countSel).textContent = String(n);
+  }
+  $("#needsLabel").textContent = n === 1 ? "Needs you" : "Need you";
+  const proposed = S.lessons.filter((l) => l.status === "proposed").length;
+  $("#lessonBadge").hidden = !proposed;
+  $("#lessonBadge").textContent = String(proposed);
+  $("#presence").innerHTML = S.agents
+    .filter((a) => a.enabled)
+    .map((a) => { const st = agentState(a); return `<a href="#/crew/${esc(a.id)}" title="${esc(a.name)}: ${esc(AGENT_STATE_LABEL[st])}">${avatar(a, "", false)}<i class="pip ${st === "ready" ? "ready" : st === "demo" ? "off" : st}"></i><span class="sr">${esc(a.name)}: ${esc(AGENT_STATE_LABEL[st])}</span></a>`; })
+    .join("");
+  const conn = $("#connState");
+  conn.className = `conn ${S.connected ? "ok" : "bad"}`;
+  conn.textContent = S.connected ? "Live" : "Reconnecting…";
+  const sb = $("#soundBtn");
+  sb.setAttribute("aria-pressed", String(S.sound));
+  sb.title = `Sound cues (${S.sound ? "on" : "off"})`;
+  document.documentElement.classList.toggle("reduce-motion", S.reduceMotion);
+  document.title = n ? `(${n}) Causeway` : "Causeway";
+  if (!$("#needsPanel").hidden) renderNeedsPanel();
+}
+
+// ------------------------------------------------------------------ overview
+function pulseLine(needs, live, working) {
+  const parts = [];
+  if (needs) parts.push(`<span class="hot">${needs} ${needs === 1 ? "thing needs" : "things need"} your call.</span>`);
+  if (live) parts.push(`<em>${live} run${live === 1 ? "" : "s"} live</em>, ${working} specialist${working === 1 ? "" : "s"} on it.`);
+  if (!parts.length) return working ? `<em>${working} specialist${working === 1 ? "" : "s"} on it.</em> Nothing needs you.` : "Crew's ready. What's the goal?";
+  return parts.join(" ");
+}
+const EXAMPLES = [
+  "Research what's new in AI today and pitch 3 short video hooks",
+  "Draft a launch post for the new product and have it reviewed",
+  "Compare two options for our newsletter tool and recommend one",
+];
+function composer({ autofocus = true } = {}) {
+  const books = S.lessons.filter((l) => l.kind === "playbook" && l.status === "approved").slice(-3).reverse();
+  return `<form class="composer" id="goalForm" aria-label="Start a goal">
+    <label class="sr" for="goal-input">Describe the goal</label>
+    <textarea id="goal-input" rows="2" ${autofocus ? "data-autofocus" : ""} placeholder="What needs doing? Describe the outcome. Causeway recommends who does what, and you approve the plan."></textarea>
+    <div class="composer-bar">
+      <div class="starters">
+        ${books.map((b) => `<button type="button" class="starter book" data-use-playbook="${esc(b.id)}" title="${esc(b.text)}">▸ ${esc(b.title.replace(/^Playbook: /, ""))}</button>`).join("")}
+        ${EXAMPLES.slice(0, books.length ? 1 : 3).map((x) => `<button type="button" class="starter" data-example="${esc(x)}">${esc(x)}</button>`).join("")}
+      </div>
+      <button class="btn primary" type="submit">Plan it <kbd>⌘↵</kbd></button>
+    </div>
+  </form>`;
+}
+function runStrip(goal) {
+  const steps = stepsOf(goal.id);
+  if (!steps.length) {
+    const plan = childrenOf(goal.id).find((t) => t.kind === "plan");
+    return `<div class="strip"><span class="seg run" title="Planning">${plan ? avatar(agentById(plan.agentId), "", false) : ""}</span><span class="small muted" style="margin-left:6px">Planning…</span></div>`;
+  }
+  const waves = planWaves(steps.map((s) => ({ after: (s.after ?? []).map((n) => n - 1) })));
+  let html = "";
+  let prev = -1;
+  steps.forEach((s, i) => {
+    if (prev >= 0 && waves[i] !== prev) html += `<span class="gap" aria-hidden="true"></span>`;
+    prev = waves[i];
+    const st = stateOf(s);
+    html += `<span class="seg ${st}" title="${esc(nameOf(s.agentId))}: ${esc(STATE_LABEL[st])} · ${esc(firstLine(s.title, 60))}">${avatar(agentById(s.agentId), "", false)}</span>`;
+  });
+  const done = steps.filter((s) => s.status === "done").length;
+  return `<div class="strip" aria-label="${done} of ${steps.length} steps done">${html}</div>`;
+}
+function viewOverview() {
+  const goals = tasksArr().filter((t) => t.kind === "goal");
+  const liveRuns = goals.filter((g) => g.status === "running" || g.status === "queued").reverse();
+  const needs = needsItems();
+  const working = S.agents.filter((a) => a.status === "working").length;
+  const recent = tasksArr()
+    .filter((t) => (t.kind === "goal" || t.kind === "direct") && t.status === "done" && t.result)
+    .sort((a, b) => Date.parse(b.finishedAt ?? b.createdAt) - Date.parse(a.finishedAt ?? a.createdAt))
+    .slice(0, 6);
+  return `<div class="view">
+    <div class="page-head"><div><div class="eyebrow">Tonight's board</div><p class="pulse-line">${pulseLine(needs.length, liveRuns.length, working)}</p></div></div>
+    ${composer()}
+    <div class="two-col sec">
+      <div>
+        <section aria-labelledby="h-needs">
+          <div class="sec-head"><h2 id="h-needs">Needs you</h2></div>
+          ${needs.length ? `<div class="need-list">${needs.slice(0, 5).map(needCard).join("")}</div>${needs.length > 5 ? `<button type="button" class="link btn ghost sm" data-open-needs>See all ${needs.length}</button>` : ""}` : `<div class="all-clear"><i class="pip"></i>All clear. Nothing is waiting on you.</div>`}
+        </section>
+        <section class="sec" aria-labelledby="h-live">
+          <div class="sec-head"><h2 id="h-live">Live runs</h2><a href="#/runs">All runs →</a></div>
+          ${liveRuns.length ? `<div class="runs-live">${liveRuns.map((g) => {
+            const steps = stepsOf(g.id);
+            const done = steps.filter((s) => s.status === "done").length;
+            return `<a class="runline" href="#/run/${esc(g.id)}"><div class="grow"><div class="title ellipsis">${esc(firstLine(g.prompt, 90))}</div>
+              <div class="meta">${steps.length ? `${done}/${steps.length} steps` : "Planning"} · started ${esc(ago(g.createdAt))}</div></div>
+              ${runStrip(g)}${since(g)}</a>`;
+          }).join("")}</div>` : `<div class="empty">No runs live. Describe a goal above and the crew gets a plan in seconds.</div>`}
+        </section>
+        <section class="sec" aria-labelledby="h-out">
+          <div class="sec-head"><h2 id="h-out">Latest outputs</h2></div>
+          ${recent.length ? `<div class="outputs">${recent.map((t) => {
+            const crew = t.kind === "goal" ? [...new Set(stepsOf(t.id).map((s) => s.agentId))] : [t.agentId];
+            return `<a class="output-item" href="${t.kind === "goal" ? `#/run/${esc(t.id)}` : `#/task/${esc(t.id)}`}">
+              <span class="av-stack">${crew.slice(0, 4).map((id) => avatar(agentById(id), "sm", false)).join("")}</span>
+              <div class="grow"><div class="ellipsis"><b>${esc(firstLine(t.display ?? t.prompt, 90))}</b></div><div class="excerpt">${esc(firstLine(t.result, 220))}</div></div>
+              <span class="small faint">${esc(ago(t.finishedAt ?? t.createdAt))}</span></a>`;
+          }).join("")}</div>` : `<div class="empty">Finished work shows up here.</div>`}
+        </section>
+      </div>
+      <section aria-labelledby="h-crew">
+        <div class="sec-head"><h2 id="h-crew">Crew right now</h2><a href="#/crew">Roster →</a></div>
+        <div class="roster">${S.agents.filter((a) => a.enabled || a.status === "paused").map((a) => {
+          const st = agentState(a);
+          const now = activeTasksOf(a.id)[0];
+          return `<a class="roster-row" href="#/crew/${esc(a.id)}" style="--c:${safeColor(a.color)}">
+            <span class="who">${avatar(a, "", false)}<span class="grow"><b>${esc(a.name)}</b>${a.isLead ? ' <span class="tag">Lead</span>' : ""}<br><span class="role">${esc(roleOf(a))}</span></span></span>
+            <span class="now">${now ? `<span class="ellipsis">${esc(firstLine(now.title, 70))}</span>` : `<span class="faint">${st === "demo" ? "Demo mode: add its key to go live" : "Free for work"}</span>`}</span>
+            <span class="model ellipsis">${esc(shortModel(a.model, a))}</span>
+            ${stPill(st === "ready" ? "idle" : st === "demo" ? "queued" : st, AGENT_STATE_LABEL[st])}</a>`;
+        }).join("")}</div>
+      </section>
+    </div>
+  </div>`;
+}
+
+// ------------------------------------------------------------------ plan review
+function viewNew(r) {
+  const d = S.draft;
+  const playbookId = r.params.get("playbook") ?? "";
+  const books = S.lessons.filter((l) => l.kind === "playbook" && l.status === "approved");
+  if (!d || (!d.steps && !d.loading && !d.error)) {
+    return `<div class="view">
+      <div class="page-head"><div><div class="eyebrow">New goal</div><h1>Describe the outcome.</h1>
+        <p class="sub">Causeway recommends a plan: which specialist takes each step, why, and what runs in parallel. You review and edit it before anything starts.</p></div></div>
+      <form class="composer" id="goalForm">
+        <label class="sr" for="goal-input">Describe the goal</label>
+        <textarea id="goal-input" rows="3" data-autofocus placeholder="e.g. Find what people on X are saying about our launch, draft three replies, and have them reviewed before I post.">${esc(d?.goal ?? "")}</textarea>
+        <div class="composer-bar">
+          <div class="starters">
+            ${books.length ? `<label class="small muted" for="playbook-pick">Start from</label><select class="input" id="playbook-pick" style="width:auto;min-height:30px;padding:3px 8px">
+              <option value="">A fresh plan</option>${books.map((b) => `<option value="${esc(b.id)}" ${b.id === playbookId ? "selected" : ""}>${esc(b.title.replace(/^Playbook: /, "Playbook: "))}</option>`).join("")}</select>` : ""}
+            ${EXAMPLES.map((x) => `<button type="button" class="starter" data-example="${esc(x)}">${esc(x)}</button>`).join("")}
+          </div>
+          <button class="btn primary" type="submit">Recommend a plan <kbd>⌘↵</kbd></button>
+        </div>
+      </form>
+      <div class="note-honest sec" style="margin-top:16px"><span>ⓘ</span><span>Planning uses one quick call to your planner (free on ClinePass). Nothing else runs until you press <b>Launch crew</b>.</span></div>
+    </div>`;
+  }
+  if (d.loading) {
+    return `<div class="view"><div class="page-head"><div><div class="eyebrow">Plan review</div><h1>${esc(firstLine(d.goal, 120))}</h1></div></div>
+      <div class="drafting" role="status"><div class="bar-progress" aria-hidden="true"><i></i></div><span>${d.playbookId ? "Loading your playbook…" : "Drafting a plan with your planner…"}</span></div></div>`;
+  }
+  if (d.error) {
+    return `<div class="view"><div class="page-head"><div><div class="eyebrow">Plan review</div><h1>${esc(firstLine(d.goal, 120))}</h1></div></div>
+      <div class="need-card block"><span></span><div class="grow"><div class="need-title">Couldn't draft a plan</div><div class="need-detail">${esc(d.error)}</div></div>
+      <div class="need-actions"><button type="button" class="btn sm" data-draft-edit>Edit goal</button><button type="button" class="btn sm primary" data-replan>Try again</button></div></div></div>`;
+  }
+  const steps = d.steps;
+  const waves = planWaves(steps);
+  const nWaves = steps.length ? Math.max(...waves) + 1 : 0;
+  const SOURCE = {
+    planner: `Recommended by ${esc(d.planner?.name ?? "your planner")}`,
+    fast: "Quick ask: one specialist is enough",
+    fallback: "Planner unavailable: matched by skills (review closely)",
+    playbook: "From your approved playbook",
+    rerun: "Same crew as the earlier run",
+  };
+  const cols = [];
+  for (let w = 0; w < nWaves; w++) {
+    const idx = steps.map((_, i) => i).filter((i) => waves[i] === w);
+    cols.push(`<div class="wave-col" role="group" aria-label="${w === 0 ? "Starts now" : `Wave ${w + 1}`}">
+      <div class="wave-head"><b>${w === 0 ? "Starts now" : `Then · wave ${w + 1}`}</b>${idx.length > 1 ? `<span class="par">${idx.length} in parallel</span>` : ""}</div>
+      ${idx.map((i) => stepCard(steps[i], i, steps)).join("")}
+    </div>`);
+  }
+  return `<div class="view">
+    <div class="page-head"><div class="grow"><div class="eyebrow">Plan review</div>
+      <label class="sr" for="draft-goal">Goal</label>
+      <textarea class="input" id="draft-goal" rows="2" style="font:650 18px/1.35 var(--font-display);background:transparent;border-color:transparent;padding:4px 0;resize:none" data-no-restore>${esc(d.goal)}</textarea></div></div>
+    <div class="plan-meta">
+      <span class="tag">${SOURCE[d.source] ?? esc(d.source)}</span>
+      ${d.notes?.length ? `<details id="notes-applied"><summary class="tag" style="cursor:pointer">${d.notes.length} approved note${d.notes.length === 1 ? "" : "s"} applied</summary><ul class="small muted">${d.notes.map((n) => `<li>${esc(n)}</li>`).join("")}</ul></details>` : ""}
+    </div>
+    <div class="why-setup"><div class="eyebrow">Why this setup</div><p>${esc(whySetup(steps, waves))}</p></div>
+    <div class="board" id="board">${cols.join("")}</div>
+    <div class="plan-actions">
+      <button type="button" class="btn sm" data-add-step>+ Add step</button>
+      <button type="button" class="btn sm ghost" data-replan>Re-plan</button>
+      <button type="button" class="btn sm ghost" data-draft-cancel>Discard</button>
+      <span class="spacer"></span>
+      <p class="err" id="plan-err" role="alert" hidden></p>
+      <button type="button" class="btn sunset lg" data-launch>Launch crew <kbd style="border-color:rgba(20,8,20,.25);color:rgba(20,8,20,.7)">⌘↵</kbd></button>
+    </div>
+  </div>`;
+}
+function whySetup(steps, waves) {
+  if (!steps.length) return "Add at least one step.";
+  const names = (ids) => [...new Set(ids.map((i) => nameOf(steps[i].agentId)))].join(" and ");
+  const first = steps.map((_, i) => i).filter((i) => waves[i] === 0);
+  const nW = Math.max(...waves) + 1;
+  const parts = [`${steps.length} step${steps.length === 1 ? "" : "s"} in ${nW} wave${nW === 1 ? "" : "s"}.`];
+  parts.push(first.length > 1 ? `${names(first)} start at the same time.` : `${names(first)} starts right away.`);
+  const later = steps.map((s, i) => ({ s, i })).filter(({ s }) => s.after.length);
+  for (const { s, i } of later.slice(0, 3)) {
+    const ups = names(s.after);
+    parts.push(isReview(s.task) ? `${nameOf(s.agentId)} reviews ${ups}'s work once it lands.` : `${nameOf(s.agentId)} builds on ${ups}'s results (step ${i + 1}).`);
+  }
+  const gated = steps.filter((s) => agentById(s.agentId)?.actsInWorld && isRisky(s.task));
+  if (gated.length) parts.push(`${names(steps.map((s, i) => (gated.includes(s) ? i : -1)).filter((i) => i >= 0))} will ask for your OK before acting.`);
+  if (steps.length > 1) parts.push("A wrap-up combines everything into one answer.");
+  return parts.join(" ");
+}
+function stepCard(s, i, steps) {
+  const a = agentById(s.agentId);
+  const st = agentState(a);
+  const why = s.agentId !== s.origAgent ? `You picked ${a?.name ?? s.agentId}: ${a?.tagline ?? ""}` : s.why;
+  const review = s.after.length > 0 && isReview(s.task);
+  const gated = a?.actsInWorld && isRisky(s.task);
+  return `<div class="step-card" style="--c:${safeColor(a?.color)}" data-step-card="${i}">
+    <div class="step-top">
+      <span class="step-num">#${i + 1}</span>
+      ${avatar(a, "sm", false)}
+      <label class="sr" for="step-agent-${i}">Specialist for step ${i + 1}</label>
+      <select class="input grow" id="step-agent-${i}" data-step-agent="${i}" data-no-restore>${agentOptions(s.agentId)}</select>
+      <span class="step-tools">
+        <button type="button" class="icon-btn" data-step-move="${i}" data-dir="-1" title="Move up" aria-label="Move step ${i + 1} earlier" ${i === 0 ? "disabled" : ""}><svg viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6"/></svg></button>
+        <button type="button" class="icon-btn" data-step-remove="${i}" title="Remove step" aria-label="Remove step ${i + 1}"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+      </span>
+    </div>
+    <label class="sr" for="step-task-${i}">What step ${i + 1} should produce</label>
+    <textarea class="input" id="step-task-${i}" data-step-task="${i}" rows="3" data-no-restore placeholder="What should this step produce?">${esc(s.task)}</textarea>
+    ${why ? `<div class="step-why"><b>Why ${esc(a?.name ?? "")}:</b> ${esc(why)}</div>` : ""}
+    ${i > 0 ? `<div class="deps" role="group" aria-label="Step ${i + 1} builds on"><span>Builds on</span>${steps.slice(0, i).map((u, j) => `<label class="dep"><input type="checkbox" data-step-dep="${i}" data-dep="${j}" ${s.after.includes(j) ? "checked" : ""} data-no-restore />#${j + 1} ${esc(nameOf(u.agentId))}</label>`).join("")}</div>` : ""}
+    <div class="row wrap" style="gap:6px">
+      ${review ? `<span class="tag review">Peer review</span>` : ""}
+      ${gated ? `<span class="tag ok-needed">Asks for your OK first</span>` : ""}
+      ${a?.actsInWorld && !gated ? `<span class="tag">Can use live tools</span>` : ""}
+    </div>
+    ${st === "demo" ? `<div class="step-warn">${esc(a?.name)} is in demo mode: answers will be placeholders.</div>` : st === "block" || st === "fail" || st === "off" ? `<div class="step-warn">${esc(a?.name)} is ${esc(AGENT_STATE_LABEL[st].toLowerCase())}; it may be rerouted.</div>` : ""}
+  </div>`;
+}
+function readDraftInputs() {
+  const d = S.draft;
+  if (!d?.steps) return;
+  const g = $("#draft-goal");
+  if (g) d.goal = g.value;
+  d.steps.forEach((s, i) => {
+    const t = $(`#step-task-${i}`);
+    if (t) s.task = t.value;
+  });
+}
+function editDraft(fn) {
+  readDraftInputs();
+  fn(S.draft);
+  render(true);
+}
+async function startDraft(goal, { playbookId = "" } = {}) {
+  const text = goal.trim();
+  if (!text) { toast("Describe the goal first"); return; }
+  S.draft = { goal: text, loading: true, playbookId };
+  go("#/new");
+  render(true);
   try {
-    const updated = await api(`/api/agents/${id}`, { method: "PATCH", body: JSON.stringify(patch) });
-    const idx = S.agents.findIndex((x) => x.id === id);
-    if (idx >= 0) S.agents[idx] = updated;
-    dirty.add("agents");
-    flush();
-    if (patch.model) toast(`${updated.name} → ${shortModel(updated.model, updated)}`);
-    else if (patch.reasoning) toast(`${updated.name} depth → ${levelLabel(updated.reasoning)}`);
-    else if (patch.enabled !== undefined) toast(`${updated.name} ${updated.enabled ? "active" : "paused"}`);
-    requestAnimationFrame(() => {
-      $$(`[data-model-for="${id}"], [data-reasoning-for="${id}"]`).forEach((el) => {
-        el.classList.add("saved");
-        setTimeout(() => el.classList.remove("saved"), 850);
-      });
-    });
+    const d = await api("/api/plan", { method: "POST", body: { goal: text, ...(playbookId ? { playbookId } : {}) } });
+    if (S.draft?.goal !== text) return;
+    S.draft = { ...d, playbookId, steps: d.steps.map((s) => ({ ...s, origAgent: s.agentId })) };
+    announce(`Plan ready: ${d.steps.length} steps. Review it, then launch.`);
   } catch (err) {
-    if (selectEl) selectEl.value = patch.model !== undefined ? a.model : a.reasoning;
-    toast(err.message);
-    dirty.add("agents");
-    flush();
-  } finally {
-    if (selectEl) selectEl.disabled = false;
+    if (err.message === "locked") return;
+    S.draft = { goal: text, error: err.message, playbookId };
+  }
+  if (route().name === "new") render(true);
+}
+async function launchDraft() {
+  readDraftInputs();
+  const d = S.draft;
+  if (!d?.steps) return;
+  const errEl = $("#plan-err");
+  const steps = d.steps.map((s) => ({ agentId: s.agentId, task: s.task.trim(), after: s.after, why: s.agentId === s.origAgent ? s.why : `You picked ${nameOf(s.agentId)}.` }));
+  const bad = steps.findIndex((s) => !s.task);
+  if (!d.goal.trim() || bad >= 0) {
+    errEl.hidden = false;
+    errEl.textContent = !d.goal.trim() ? "Describe the goal." : `Step ${bad + 1} needs a task.`;
+    return;
+  }
+  const btn = $("[data-launch]");
+  if (btn) btn.disabled = true;
+  try {
+    const res = await api("/api/goals", { method: "POST", body: { goal: d.goal.trim(), steps } });
+    S.draft = null;
+    announce("Crew launched.");
+    go(`#/run/${res.taskId}`);
+  } catch (err) {
+    if (btn) btn.disabled = false;
+    if (err.message === "locked") return;
+    errEl.hidden = false;
+    errEl.textContent = err.message;
   }
 }
 
-function modelPatchFor(agent, nextModel) {
-  const patch = { model: nextModel };
-  if (agent.supportsProvider && agent.discoveredProvider) {
-    patch.provider = nextModel === "hermes-agent" ? "" : agent.discoveredProvider;
+// ------------------------------------------------------------------ run view
+function runEdges(goal, plan, steps, synth) {
+  const edges = [];
+  const cls = (up, down) => {
+    const su = up ? stateOf(up) : "done";
+    const sd = stateOf(down);
+    if (su === "fail" || su === "block") return "fail";
+    if (su !== "done") return "";
+    return sd === "run" || sd === "need" ? "live" : sd === "done" ? "landed" : "";
+  };
+  const planNode = plan ? plan.id : "plan";
+  for (const s of steps) {
+    const ups = (s.after ?? []).map((n) => steps.find((x) => x.step === n)).filter(Boolean);
+    if (!ups.length) edges.push({ from: planNode, to: s.id, cls: cls(plan, s) });
+    for (const u of ups) edges.push({ from: u.id, to: s.id, cls: cls(u, s) });
   }
-  return patch;
+  if (synth) {
+    const used = new Set(steps.flatMap((s) => s.after ?? []));
+    for (const s of steps) if (!used.has(s.step)) edges.push({ from: s.id, to: synth.id, cls: cls(s, synth) });
+  }
+  const now = Date.now();
+  for (const e of edges) if (now - (S.landing.get(`${e.from}>${e.to}`) ?? 0) < 900) e.cls += " landing";
+  return edges;
+}
+let currentEdges = [];
+function drawEdges() {
+  const g = $(".graph", main);
+  const svg = $(".edges", main);
+  if (!g || !svg) return;
+  const wrap = g.parentElement;
+  const scrolls = wrap.scrollWidth > wrap.clientWidth + 4;
+  wrap.classList.toggle("scrolls", scrolls && wrap.scrollLeft + wrap.clientWidth < wrap.scrollWidth - 4);
+  const hint = $(".scroll-hint", main);
+  if (hint) hint.hidden = !scrolls;
+  if (!wrap.dataset.bound) { wrap.dataset.bound = "1"; wrap.addEventListener("scroll", () => wrap.classList.toggle("scrolls", wrap.scrollLeft + wrap.clientWidth < wrap.scrollWidth - 4), { passive: true }); }
+  const gr = g.getBoundingClientRect();
+  const W = g.offsetWidth;
+  const H = g.offsetHeight;
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  svg.style.width = `${W}px`;
+  svg.style.height = `${H}px`;
+  svg.innerHTML = currentEdges
+    .map((e) => {
+      const a = g.querySelector(`[data-node="${CSS.escape(e.from)}"]`);
+      const b = g.querySelector(`[data-node="${CSS.escape(e.to)}"]`);
+      if (!a || !b) return "";
+      const ra = a.getBoundingClientRect();
+      const rb = b.getBoundingClientRect();
+      const x1 = ra.right - gr.left;
+      const y1 = ra.top + ra.height / 2 - gr.top;
+      const x2 = rb.left - gr.left;
+      const y2 = rb.top + rb.height / 2 - gr.top;
+      const dx = Math.max(14, (x2 - x1) / 2);
+      return `<path class="${e.cls}" d="M${x1.toFixed(1)} ${y1.toFixed(1)} C${(x1 + dx).toFixed(1)} ${y1.toFixed(1)}, ${(x2 - dx).toFixed(1)} ${y2.toFixed(1)}, ${x2.toFixed(1)} ${y2.toFixed(1)}" />`;
+    })
+    .join("");
+}
+function flashCls(t) {
+  const at = S.flash.get(t.id);
+  return at && Date.now() - at < 140 ? ` flash ${stateOf(t) === "need" ? "need" : ""}` : "";
+}
+function node(t, { minor = false, label = "" } = {}, selId, steps = []) {
+  const a = agentById(t.agentId);
+  const st = stateOf(t);
+  const built = (t.after ?? []).map((n) => steps.find((x) => x.step === n)).filter(Boolean);
+  const reviewedBy = steps.filter((x) => (x.after ?? []).includes(t.step) && isReview(x.prompt));
+  return `<button type="button" class="node ${st === "queued" ? "queued" : st}${minor ? " minor" : ""}${t.id === selId ? " sel" : ""}${flashCls(t)}" data-node="${esc(t.id)}" data-select="${esc(t.id)}" style="--c:${safeColor(a?.color)}" aria-pressed="${t.id === selId}">
+    <span class="n-top">${avatar(a, "sm", false)}<span class="grow"><span class="n-who">${esc(a?.name ?? t.agentId)}</span> <span class="n-role">${esc(label || roleOf(a))}</span></span>${stPill(st)}</span>
+    <span class="n-task">${esc(firstLine(t.kind === "subtask" ? ownAsk(t.prompt) : t.title, 180))}</span>
+    <span class="n-foot">
+      ${t.step ? `<span class="tag">#${t.step}</span>` : ""}
+      ${built.length ? `<span class="n-built">↳ builds on ${built.map((b) => `#${b.step} ${esc(nameOf(b.agentId))}`).join(", ")}</span>` : ""}
+      ${t.kind === "subtask" && built.length && isReview(t.prompt) ? `<span class="tag review">Peer review</span>` : ""}
+      ${reviewedBy.length ? `<span class="tag review">Reviewed by ${esc(reviewedBy.map((r) => nameOf(r.agentId)).join(", "))}</span>` : ""}
+      ${t.reroutedFrom ? `<span class="tag reroute">from ${esc(nameOf(t.reroutedFrom))}</span>` : ""}
+      ${t.status !== "queued" ? since(t) : ""}
+    </span>
+  </button>`;
+}
+function viewRun(r) {
+  const goal = S.tasks.get(r.id);
+  if (!goal) return `<div class="view"><div class="empty">This run isn't in recent history. <a class="link" href="#/runs">See all runs</a></div></div>`;
+  if (goal.kind !== "goal") { setTimeout(() => go(`#/task/${goal.id}`)); return ""; }
+  const kids = childrenOf(goal.id);
+  const plan = kids.find((t) => t.kind === "plan");
+  const steps = stepsOf(goal.id);
+  const synth = kids.find((t) => t.kind === "synthesis");
+  const waves = planWaves(steps.map((s) => ({ after: (s.after ?? []).map((n) => steps.findIndex((x) => x.step === n)).filter((i) => i >= 0) })));
+  const nW = steps.length ? Math.max(...waves) + 1 : 0;
+  const pick = r.params.get("step");
+  if (pick && S.tasks.has(pick)) S.sel[goal.id] = pick;
+  const needing = steps.find((s) => stateOf(s) === "need") ?? steps.find((s) => s.status === "blocked" || s.status === "failed");
+  let selId = S.sel[goal.id];
+  if (!selId || !S.tasks.has(selId)) selId = (needing ?? steps.find((s) => s.status === "running") ?? synth ?? steps[steps.length - 1] ?? plan)?.id;
+  currentEdges = runEdges(goal, plan, steps, synth);
+  const gst = stateOf(goal);
+  const live = goal.status === "running" || goal.status === "queued";
+  const crew = [...new Set(steps.map((s) => s.agentId))];
+  const cols = [];
+  cols.push(`<div class="col"><div class="col-head">Plan</div>${plan ? node(plan, { minor: true, label: "planner" }, selId) : `<div class="node minor" data-node="plan"><span class="n-top"><span class="av sm av-fallback" aria-hidden="true">Y</span><span class="grow"><span class="n-who">${goal.planSource === "owner" ? "Your plan" : "Quick route"}</span></span>${stPill("done", goal.planSource === "owner" ? "Approved" : "Direct")}</span><span class="n-task">${goal.planSource === "owner" ? "You reviewed and launched this plan." : "One specialist, no plan needed."}</span></div>`}</div>`);
+  for (let w = 0; w < nW; w++) {
+    const idx = steps.map((_, i) => i).filter((i) => waves[i] === w);
+    cols.push(`<div class="col"><div class="col-head">${w === 0 ? "Wave 1" : `Wave ${w + 1}`}${idx.length > 1 ? ` · ${idx.length} parallel` : ""}</div>${idx.map((i) => node(steps[i], {}, selId, steps)).join("")}</div>`);
+  }
+  if (synth) cols.push(`<div class="col"><div class="col-head">Wrap-up</div>${node(synth, { minor: true, label: "combines it all" }, selId)}</div>`);
+  if (!steps.length && live) cols.push(`<div class="col"><div class="col-head">Wave 1</div><div class="empty small">Planning the steps…</div></div>`);
+  const lessons = S.lessons.filter((l) => l.goalId === goal.id && l.status !== "dismissed");
+  const waveCols = Math.max(1, nW || 1);
+  const gridCols = `minmax(128px, 0.7fr) repeat(${waveCols}, minmax(176px, 1fr))${synth ? " minmax(140px, 0.75fr)" : ""}`;
+  return `<div class="view">
+    <div class="run-head">
+      <div class="grow"><div class="eyebrow"><a class="link" href="#/runs" style="color:var(--faint)">Runs</a> / Team run</div>
+        <h1 class="run-title">${esc(goal.prompt.length > 220 ? `${goal.prompt.slice(0, 219)}…` : goal.prompt)}</h1>
+        <div class="run-facts">${stPill(gst, gst === "done" ? "Finished" : gst === "run" ? "Running" : undefined)} ${since(goal)}
+          <span>${steps.length} step${steps.length === 1 ? "" : "s"} · ${nW} wave${nW === 1 ? "" : "s"}</span>
+          <span class="av-stack">${crew.map((id) => avatar(agentById(id), "sm", false)).join("")}</span>
+          ${goal.costUsd ? `<span>${fmtUsd(goal.costUsd)}</span>` : ""}
+          ${goal.usage ? `<span>${fmtK(goal.usage.input + goal.usage.output)} tokens</span>` : ""}</div></div>
+      <div class="run-controls">
+        ${live ? `<button type="button" class="btn danger" data-stop="${esc(goal.id)}">Stop run</button>` : ""}
+        <button type="button" class="btn" data-rerun="${esc(goal.id)}" ${steps.length ? "" : "disabled"}>Run again…</button>
+        ${goal.result ? `<button type="button" class="btn" data-copy-result="${esc(goal.id)}">Copy result</button>` : ""}
+      </div>
+    </div>
+    ${gst === "done" ? `<div class="done-stripe" aria-hidden="true"></div>` : ""}
+    ${steps.filter((s) => stateOf(s) === "need").map((s) => needCard({ type: approvalFor(s.id)?.kind === "question" ? "question" : "approval", approval: approvalFor(s.id), task: s })).join("")}
+    <div class="run-grid">
+      <div class="grow">
+        <div class="graph-wrap" aria-label="Run graph: steps, dependencies and handoffs"><div class="graph" style="--cols:${gridCols}"><svg class="edges" aria-hidden="true"></svg>${cols.join("")}</div></div>
+        <div class="scroll-hint" hidden>Scroll sideways for later waves →</div>
+        ${goal.result || goal.error ? `<section class="final ${goal.status === "done" ? "done" : ""}" aria-labelledby="h-final">
+          <div class="final-head"><h2 id="h-final">${goal.status === "done" ? "Final output" : "What happened"}</h2>
+            ${goal.result ? `<button type="button" class="btn sm" data-copy-result="${esc(goal.id)}">Copy</button>` : ""}</div>
+          ${goal.result ? `<div class="prose">${md(goal.result)}</div>` : `<p class="err">${esc(goal.error)}</p>`}
+        </section>` : ""}
+        ${lessons.length ? `<section class="sec" aria-labelledby="h-lessons"><div class="sec-head"><h2 id="h-lessons">Lessons from this run</h2><a href="#/playbooks">Playbooks →</a></div>
+          <div class="lessons">${lessons.map(lessonCard).join("")}</div></section>` : ""}
+        <section class="sec" aria-labelledby="h-time"><div class="sec-head"><h2 id="h-time">What happened, in order</h2></div>${timeline(goal, plan, steps, synth)}</section>
+      </div>
+      ${inspector(S.tasks.get(selId), goal, steps)}
+    </div>
+  </div>`;
+}
+function timeline(goal, plan, steps, synth) {
+  const ev = [];
+  const push = (at, state, html) => at && ev.push({ at, state, html });
+  push(goal.createdAt, "done", `<b>You</b> launched the run${goal.planSource === "owner" ? " with your reviewed plan" : ""}.`);
+  if (plan) {
+    push(plan.startedAt, "run", `<b>${esc(nameOf(plan.agentId))}</b> started planning.`);
+    push(plan.finishedAt, stateOf(plan), `<b>${esc(nameOf(plan.agentId))}</b> ${plan.status === "done" ? "handed out the plan" : "couldn't plan; keyword fallback used"}.`);
+  }
+  for (const s of steps) {
+    const ups = (s.after ?? []).map((n) => steps.find((x) => x.step === n)).filter(Boolean);
+    if (s.reroutedFrom) push(s.startedAt ?? s.createdAt, "block", `Step #${s.step} moved from <b>${esc(nameOf(s.reroutedFrom))}</b> to <b>${esc(nameOf(s.agentId))}</b>.`);
+    push(s.startedAt, "run", ups.length ? `Handoff landed: <b>${esc(ups.map((u) => nameOf(u.agentId)).join(" + "))}</b> → <b>${esc(nameOf(s.agentId))}</b> (#${s.step}).` : `<b>${esc(nameOf(s.agentId))}</b> started #${s.step}.`);
+    for (const ap of S.approvals.filter((x) => x.taskId === s.id)) {
+      push(ap.createdAt, "need", `<b>${esc(nameOf(ap.agentId))}</b> asked for your call: ${esc(firstLine(ap.title, 80))}.`);
+      if (ap.decidedAt) push(ap.decidedAt, ap.status === "approved" ? "done" : "block", `You ${ap.status === "approved" ? "approved" : ap.status === "expired" ? "didn't answer; it expired" : "denied"}${ap.decidedVia && ap.decidedVia !== "web" ? ` (via ${esc(ap.decidedVia)})` : ""}.`);
+    }
+    if (s.finishedAt) push(s.finishedAt, stateOf(s), `<b>${esc(nameOf(s.agentId))}</b> ${s.status === "done" ? `finished #${s.step}` : `${STATE_LABEL[stateOf(s)].toLowerCase()} on #${s.step}: ${esc(firstLine(s.error, 90))}`}.`);
+  }
+  if (synth) {
+    push(synth.startedAt, "run", `<b>${esc(nameOf(synth.agentId))}</b> started the wrap-up.`);
+    push(synth.finishedAt, stateOf(synth), `<b>${esc(nameOf(synth.agentId))}</b> ${synth.status === "done" ? "delivered the final output" : "couldn't wrap up"}.`);
+  }
+  if (goal.finishedAt) push(goal.finishedAt, stateOf(goal), `Run ${goal.status === "done" ? "finished" : goal.status === "cancelled" ? "stopped" : "ended"}.`);
+  ev.sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
+  return `<ol class="timeline">${ev.map((e) => `<li><span class="t">${esc(clock(e.at))}</span><i class="pip ${e.state === "queued" ? "" : e.state}"></i><span class="e">${e.html}</span></li>`).join("")}</ol>`;
+}
+function redirectBox(t, goal) {
+  const live = t.status === "queued" || t.status === "running";
+  const inRun = t.kind === "subtask" && goal?.status === "running" && live;
+  const title = inRun ? "Redirect this step" : live ? "Redirect" : "Follow up or hand to someone else";
+  const help = inRun
+    ? "Restarts this step on who you pick, with your note. Its inputs come along; nothing else in the run restarts."
+    : "Starts new work with the original ask, your note, and this attempt as context.";
+  return `<form class="redirect-box" data-redirect-form="${esc(t.id)}">
+    <div class="lbl">${title}</div>
+    <label class="sr" for="redir-agent-${esc(t.id)}">Specialist</label>
+    <select class="input" id="redir-agent-${esc(t.id)}">${agentOptions(t.agentId)}</select>
+    <label class="sr" for="redir-note-${esc(t.id)}">Your direction</label>
+    <textarea class="input" id="redir-note-${esc(t.id)}" rows="2" placeholder="Your direction (optional if you change who)…"></textarea>
+    <div class="row"><span class="small faint grow">${esc(help)}</span><button class="btn sm primary" type="submit">${inRun ? "Redirect step" : "Send"}</button></div>
+  </form>`;
+}
+function inspector(t, goal, steps) {
+  if (!t) return `<aside class="inspector" aria-label="Step details"><div class="empty">Select a step to see its handoffs and output.</div></aside>`;
+  const a = agentById(t.agentId);
+  const st = stateOf(t);
+  const ups = (t.after ?? []).map((n) => steps.find((x) => x.step === n)).filter(Boolean);
+  const downs = t.kind === "subtask" ? steps.filter((x) => (x.after ?? []).includes(t.step)) : [];
+  const ap = approvalFor(t.id);
+  const live = t.status === "queued" || t.status === "running";
+  const kindLabel = t.kind === "plan" ? "Planner" : t.kind === "synthesis" ? "Wrap-up" : `Step #${t.step}`;
+  return `<aside class="inspector" aria-label="Step details" style="--c:${safeColor(a?.color)}">
+    <div class="insp-head">${avatar(a, "lg", false)}<div class="grow"><div class="eyebrow">${esc(kindLabel)}</div><h3>${esc(a?.name ?? t.agentId)}</h3><div class="role">${esc(roleOf(a))}</div></div>${stPill(st)}</div>
+    ${t.why ? `<div class="insp-sec"><span class="lbl">Why ${esc(a?.name ?? "")}</span><div class="small">${esc(t.why)}</div></div>` : ""}
+    ${ap ? needCard({ type: ap.kind === "question" ? "question" : "approval", approval: ap, task: t }) : ""}
+    ${t.kind === "plan" ? `<div class="insp-sec"><span class="lbl">The plan</span>${steps.map((s) => `<div class="small">#${s.step} <b>${esc(nameOf(s.agentId))}</b>: ${esc(firstLine(ownAsk(s.prompt), 110))}</div>`).join("") || '<div class="small muted">Waiting for the planner…</div>'}</div>` : `<div class="insp-sec"><span class="lbl">The ask</span><div class="small" style="white-space:pre-wrap">${esc(t.kind === "synthesis" ? "Combine every step into one finished answer." : ownAsk(t.display ?? t.prompt).slice(0, 1200))}</div></div>`}
+    ${ups.length ? `<div class="insp-sec"><span class="lbl">Handoffs in</span>${ups.map((u) => `<div class="handoff" style="--c:${safeColor(agentById(u.agentId)?.color)}">
+      <div class="h-head">${avatar(agentById(u.agentId), "sm", false)}${esc(nameOf(u.agentId))}'s ${isReview(t.prompt) ? "draft, under review" : "findings"} <span class="faint">#${u.step}</span>${stPill(stateOf(u))}</div>
+      <div class="h-body">${u.result ? esc(firstLine(u.result, 280)) : u.status === "done" ? "(empty)" : "Not ready yet: this step waits for it."}</div>
+      ${u.result ? `<button type="button" class="link btn ghost sm" data-select="${esc(u.id)}">Open #${u.step}</button>` : ""}</div>`).join("")}</div>` : ""}
+    ${downs.length ? `<div class="insp-sec"><span class="lbl">Hands off to</span><div class="row wrap">${downs.map((d) => `<button type="button" class="btn sm ghost" data-select="${esc(d.id)}">${whoChip(d.agentId)} <span class="faint">#${d.step}${isReview(d.prompt) ? " · review" : ""}</span></button>`).join("")}</div></div>` : ""}
+    ${t.result ? `<div class="insp-sec"><span class="lbl">Output</span><div class="prose small">${md(t.result.length > 6000 ? `${t.result.slice(0, 6000)}\n\n…` : t.result)}</div><div class="row"><button type="button" class="btn sm" data-copy-task="${esc(t.id)}">Copy</button><a class="btn sm ghost" href="#/task/${esc(t.id)}">Open full output</a></div></div>` : ""}
+    ${t.error ? `<div class="insp-sec"><span class="lbl">What went wrong</span><p class="err">${esc(t.error)}</p></div>` : ""}
+    ${t.kind !== "plan" && t.kind !== "synthesis" ? redirectBox(t, goal) : ""}
+    ${live && t.kind === "subtask" ? `<button type="button" class="btn sm danger" data-stop="${esc(t.id)}">Stop this step</button>` : ""}
+    <div class="small faint">${esc(shortModel(t.servedModel ?? t.model ?? "", a))}${t.reasoning ? ` · ${esc(DEPTH[t.reasoning] ?? t.reasoning)}` : ""}${t.usage ? ` · ${fmtK(t.usage.input + t.usage.output)} tok` : ""}${t.costUsd ? ` · ${fmtUsd(t.costUsd)}` : ""}</div>
+  </aside>`;
 }
 
-function focusAgent(id, { switchTab = false, prompt = "", run = false } = {}) {
-  S.target = id;
-  store.set("relay-target", id);
-  renderTargets();
-  renderCrewStrip();
-  renderActiveBar();
-  renderCrew();
-  renderMap();
-  if (switchTab && matchMedia("(max-width: 960px)").matches) setTab("thread");
-  const inp = $("#input");
-  if (prompt && inp) {
-    inp.value = prompt;
-    autosize();
-    if (run) { $("#composer").requestSubmit(); return; }
-  }
-  inp?.focus();
-  if (prompt && inp) inp.setSelectionRange(inp.value.length, inp.value.length);
+// ------------------------------------------------------------------ single output
+function viewTask(r) {
+  const t = S.tasks.get(r.id);
+  if (!t) return `<div class="view"><div class="empty">That output isn't in recent history. <a class="link" href="#/runs">See runs</a></div></div>`;
+  if (t.kind === "goal") { setTimeout(() => go(`#/run/${t.id}`)); return ""; }
+  const a = agentById(t.agentId);
+  const goal = goalOf(t);
+  const steps = goal ? stepsOf(goal.id) : [];
+  const ups = (t.after ?? []).map((n) => steps.find((x) => x.step === n)).filter(Boolean);
+  const ap = approvalFor(t.id);
+  const prev = t.continues ? S.tasks.get(t.continues) : null;
+  const next = t.redirectedTo ? S.tasks.get(t.redirectedTo) : null;
+  const kind = t.kind === "direct" ? `Direct ask · ${t.channel}` : t.kind === "subtask" ? `Step #${t.step}` : t.kind === "synthesis" ? "Wrap-up" : "Plan";
+  return `<div class="view">
+    <div class="page-head"><div class="grow"><div class="eyebrow">${goal ? `<a class="link" href="#/run/${esc(goal.id)}" style="color:var(--faint)">Run</a> / ` : `<a class="link" href="#/runs" style="color:var(--faint)">Runs</a> / `}${esc(kind)}</div>
+      <h1 style="font-size:24px">${esc(firstLine(t.display ?? ownAsk(t.prompt), 160))}</h1>
+      <div class="run-facts">${whoChip(t.agentId, { role: true })} ${stPill(stateOf(t))} ${t.status !== "queued" ? since(t) : ""} <span>${esc(shortModel(t.servedModel ?? t.model ?? "", a))}</span></div></div>
+      <div class="run-controls">${t.result ? `<button type="button" class="btn" data-copy-task="${esc(t.id)}">Copy</button>` : ""}${t.status === "running" || t.status === "queued" ? `<button type="button" class="btn danger" data-stop="${esc(t.id)}">Stop</button>` : ""}</div></div>
+    ${prev ? `<div class="note-honest"><span>↩</span><span>Continues <a class="link" href="#/task/${esc(prev.id)}">${esc(nameOf(prev.agentId))}'s earlier attempt</a>.</span></div>` : ""}
+    ${next ? `<div class="note-honest"><span>↪</span><span>You redirected this. <a class="link" href="#/task/${esc(next.id)}">See ${esc(nameOf(next.agentId))}'s follow-up</a>.</span></div>` : ""}
+    ${ap ? needCard({ type: ap.kind === "question" ? "question" : "approval", approval: ap, task: t }) : ""}
+    <div class="two-col sec" style="margin-top:16px">
+      <div>
+        ${t.result ? `<section class="final done"><div class="final-head"><h2>Output</h2></div><div class="prose">${md(t.result)}</div></section>` : t.error ? `<section class="final"><h2>What went wrong</h2><p class="err">${esc(t.error)}</p></section>` : `<div class="empty">${esc(nameOf(t.agentId))} is ${t.status === "running" ? "on it" : "waiting to start"}.</div>`}
+      </div>
+      <div>
+        <div class="card"><div class="lbl">The ask</div><div class="small" style="white-space:pre-wrap">${esc(ownAsk(t.display ?? t.prompt).slice(0, 3000))}</div></div>
+        ${ups.length ? `<div class="card"><div class="lbl">Built on</div>${ups.map((u) => `<a class="handoff" style="--c:${safeColor(agentById(u.agentId)?.color)};display:block;text-decoration:none" href="#/task/${esc(u.id)}"><div class="h-head">${avatar(agentById(u.agentId), "sm", false)}${esc(nameOf(u.agentId))} · #${u.step}</div><div class="h-body">${esc(firstLine(u.result, 240))}</div></a>`).join("")}</div>` : ""}
+        ${t.kind !== "plan" && t.kind !== "synthesis" ? `<div class="card">${redirectBox(t, goal)}</div>` : ""}
+      </div>
+    </div>
+  </div>`;
 }
 
-function setView(view, { keepFocus = false, syncMobile = true } = {}) {
-  const valid = ["studio", "map", "activity", "stats"];
-  S.view = valid.includes(view) ? view : "studio";
-  store.set("relay-view", S.view);
-  document.body.dataset.view = S.view;
-  if (!keepFocus && S.focusMode) applyFocus(false, { persist: true });
-  $$("#viewNav button").forEach((b) => b.classList.toggle("on", b.dataset.view === S.view));
-  if (syncMobile && matchMedia("(max-width: 960px)").matches) {
-    document.body.dataset.tab = S.view;
-    $$("#tabbar button").forEach((b) => b.classList.toggle("on", b.dataset.go === S.view));
-  }
+// ------------------------------------------------------------------ runs
+function viewRuns() {
+  const q = S.runsQuery.trim().toLowerCase();
+  const needIds = new Set(needsItems().map((n) => n.task?.id).filter(Boolean));
+  const rows = tasksArr()
+    .filter((t) => t.kind === "goal" || t.kind === "direct")
+    .filter((t) => {
+      const kids = t.kind === "goal" ? childrenOf(t.id) : [];
+      const needs = needIds.has(t.id) || kids.some((k) => needIds.has(k.id));
+      if (S.runsFilter === "live" && !(t.status === "running" || t.status === "queued")) return false;
+      if (S.runsFilter === "needs" && !needs) return false;
+      if (S.runsFilter === "done" && t.status !== "done") return false;
+      if (S.runsFilter === "failed" && !["failed", "blocked", "cancelled"].includes(t.status)) return false;
+      return !q || `${t.prompt} ${t.display ?? ""} ${nameOf(t.agentId)}`.toLowerCase().includes(q);
+    })
+    .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
+    .slice(0, 150);
+  const F = [["all", "All"], ["live", "Live"], ["needs", "Needs you"], ["done", "Done"], ["failed", "Stopped or failed"]];
+  return `<div class="view">
+    <div class="page-head"><div><div class="eyebrow">History</div><h1>Runs</h1><p class="sub">Every team goal and direct ask, newest first. Open one to see who did what and how it fit together.</p></div>
+      <a class="btn sunset" href="#/new">New goal</a></div>
+    <div class="toolbar">
+      <div class="seg" role="group" aria-label="Filter runs">${F.map(([k, l]) => `<button type="button" data-runs-filter="${k}" aria-pressed="${S.runsFilter === k}">${l}</button>`).join("")}</div>
+      <label class="sr" for="runs-q">Search runs</label>
+      <input class="input" id="runs-q" style="max-width:280px" placeholder="Search runs…" value="${esc(S.runsQuery)}" autocomplete="off" />
+    </div>
+    ${rows.length ? `<div class="tbl" role="table" aria-label="Runs">
+      <div class="tbl-row head" role="row"><span role="columnheader">Status</span><span role="columnheader">Goal</span><span role="columnheader">Crew</span><span role="columnheader">Started</span><span role="columnheader" class="num">Time</span></div>
+      ${rows.map((t) => {
+        const steps = t.kind === "goal" ? stepsOf(t.id) : [];
+        const crew = t.kind === "goal" ? [...new Set(steps.map((s) => s.agentId))] : [t.agentId];
+        const st = needIds.has(t.id) || steps.some((s) => needIds.has(s.id)) ? "need" : stateOf(t);
+        const dur = t.startedAt && t.finishedAt ? fmtDur(Date.parse(t.finishedAt) - Date.parse(t.startedAt)) : t.status === "running" ? "…" : "—";
+        return `<a class="tbl-row" role="row" href="${t.kind === "goal" ? `#/run/${esc(t.id)}` : `#/task/${esc(t.id)}`}">
+          <span role="cell">${stPill(st)}</span>
+          <span role="cell" class="grow"><span class="ellipsis" style="display:block;font-weight:600">${esc(firstLine(t.display ?? t.prompt, 120))}</span><span class="kind">${t.kind === "goal" ? `Team run · ${steps.length} step${steps.length === 1 ? "" : "s"}` : `Direct ask · ${esc(t.channel)}`}</span></span>
+          <span role="cell" class="av-stack">${crew.slice(0, 5).map((id) => avatar(agentById(id), "sm", false)).join("")}</span>
+          <span role="cell" class="small muted">${esc(ago(t.createdAt))}</span>
+          <span role="cell" class="num">${dur}</span></a>`;
+      }).join("")}</div>` : `<div class="empty">Nothing here yet.</div>`}
+  </div>`;
 }
 
-$("#viewNav")?.addEventListener("click", (e) => {
-  const b = e.target.closest("[data-view]");
-  if (b) setView(b.dataset.view);
-});
-$("#brandLink")?.addEventListener("click", (e) => {
-  e.preventDefault();
-  setView("studio");
-});
+// ------------------------------------------------------------------ crew
+function toolsList(a) {
+  const tools = Array.isArray(a.tools) ? a.tools : [];
+  return `<div class="tools">${tools.map((t) => `<span class="tool">${esc(t)}</span>`).join("")}${a.actsInWorld ? `<span class="tool act" title="Causeway asks before it sends, posts, spends, or changes things">Asks before acting</span>` : ""}</div>`;
+}
+function viewCrew() {
+  return `<div class="view">
+    <div class="page-head"><div><div class="eyebrow">Crew</div><h1>Your specialists</h1><p class="sub">Each one has a lane. Plans run them in parallel and pass work between them; you can hand anything to anyone.</p></div></div>
+    <div class="crew-list">${S.agents.map((a) => {
+      const st = agentState(a);
+      const doing = activeTasksOf(a.id);
+      const lim = a.limit ?? {};
+      const used = a.limits?.dailyRequests ? Math.min(100, Math.round(((a.usage?.requestsToday ?? 0) / a.limits.dailyRequests) * 100)) : 0;
+      return `<div class="crew-row" style="--c:${safeColor(a.color)}">
+        <a href="#/crew/${esc(a.id)}" aria-label="${esc(a.name)} profile">${avatar(a, "lg", false)}</a>
+        <div><div class="row"><a class="name" href="#/crew/${esc(a.id)}" style="text-decoration:none">${esc(a.name)}</a>${a.isLead ? '<span class="tag">Lead</span>' : ""}<span class="role">${esc(roleOf(a))}</span></div>
+          <div class="best">${esc(a.tagline)}</div>${toolsList(a)}</div>
+        <div class="doing">${stPill(st === "ready" ? "idle" : st === "demo" ? "queued" : st, AGENT_STATE_LABEL[st])}
+          ${doing.length ? doing.slice(0, 2).map((t) => `<div class="ellipsis small" style="margin-top:6px"><a class="link" href="${goalOf(t) ? `#/run/${esc(goalOf(t).id)}?step=${esc(t.id)}` : `#/task/${esc(t.id)}`}">${esc(firstLine(t.title, 70))}</a></div>`).join("") : `<div class="small faint" style="margin-top:6px">${st === "demo" ? esc(a.connectorLabel) : "Free for work"}</div>`}
+          ${a.limits?.dailyRequests ? `<div class="meter ${used > 80 ? "warn" : ""}" title="${a.usage?.requestsToday ?? 0} of ${a.limits.dailyRequests} asks today"><i style="width:${used}%"></i></div>` : ""}
+          ${lim.ok === false ? `<div class="small" style="color:var(--amber)">${esc(lim.reason)}</div>` : ""}</div>
+        <div class="acts"><a class="btn sm" href="#/crew/${esc(a.id)}#direct">Ask ${esc(a.name)}</a><a class="btn sm ghost" href="#/crew/${esc(a.id)}">Profile</a></div>
+      </div>`;
+    }).join("")}</div>
+  </div>`;
+}
+function viewAgent(id) {
+  const a = agentById(id);
+  if (!a) return `<div class="view"><div class="empty">No specialist called “${esc(id)}”. <a class="link" href="#/crew">Crew</a></div></div>`;
+  const st = agentState(a);
+  const mine = tasksArr().filter((t) => t.agentId === id && t.kind !== "goal").sort((x, y) => Date.parse(y.createdAt) - Date.parse(x.createdAt));
+  const now = mine.filter((t) => t.status === "running" || t.status === "queued");
+  const recent = mine.filter((t) => !now.includes(t)).slice(0, 8);
+  const opts = Array.from(new Set([a.model, ...(a.modelOptions ?? [])]));
+  const q = a.providerQuota;
+  return `<div class="view">
+    <div class="profile-head" style="--c:${safeColor(a.color)}">${avatar(a, "xl")}
+      <div class="grow"><div class="eyebrow"><a class="link" href="#/crew" style="color:var(--faint)">Crew</a> / ${esc(roleOf(a))}</div>
+        <div class="name">${esc(a.name)}</div>
+        <div class="row wrap" style="margin-top:6px">${stPill(st === "ready" ? "idle" : st === "demo" ? "queued" : st, AGENT_STATE_LABEL[st])}${a.isLead ? '<span class="tag">Crew lead</span>' : ""}<span class="small muted">${esc(a.connectorLabel)}</span></div></div></div>
+    <div class="profile">
+      <div>
+        <div class="card"><div class="lbl">Best at</div><div>${esc(a.tagline)}</div>${a.personality ? `<div class="small muted">${esc(a.personality)}</div>` : ""}
+          <div class="lbl">Tools it can use</div>${toolsList(a)}
+          ${a.actsInWorld ? `<div class="note-honest"><span>🛡</span><span>${esc(a.name)} can act outside Causeway, so it <b>asks for your OK before sending, posting, spending, or changing things</b>.</span></div>` : `<div class="small faint">Text only: it can't act on your accounts or computer.</div>`}</div>
+        <div class="card" id="direct"><div class="lbl">Direct line</div>
+          <form class="direct-line" data-direct="${esc(a.id)}"><label class="sr" for="direct-${esc(a.id)}">Message ${esc(a.name)}</label>
+            <textarea class="input" id="direct-${esc(a.id)}" rows="3" placeholder="Ask ${esc(a.name)} directly. Recent chat comes along as context."></textarea>
+            <div class="row"><span class="small faint grow">For multi-step work, a <a class="link" href="#/new">goal</a> gets you a plan and reviews.</span><button class="btn primary sm" type="submit">Send to ${esc(a.name)}</button></div></form></div>
+        <div class="card"><div class="lbl">Now</div>${now.length ? now.map((t) => `<a class="output-item" href="${goalOf(t) ? `#/run/${esc(goalOf(t).id)}?step=${esc(t.id)}` : `#/task/${esc(t.id)}`}"><span>${stPill(stateOf(t))}</span><div class="grow ellipsis">${esc(firstLine(t.title, 90))}</div>${since(t)}</a>`).join("") : `<div class="small faint">Nothing in progress.</div>`}
+          <div class="lbl">Recent work</div>${recent.length ? recent.map((t) => `<a class="output-item" href="${goalOf(t) ? `#/run/${esc(goalOf(t).id)}?step=${esc(t.id)}` : `#/task/${esc(t.id)}`}"><span>${stPill(stateOf(t))}</span><div class="grow"><div class="ellipsis">${esc(firstLine(t.display ?? ownAsk(t.prompt), 90))}</div><div class="excerpt">${esc(firstLine(t.result ?? t.error, 160))}</div></div><span class="small faint">${esc(ago(t.createdAt))}</span></a>`).join("") : `<div class="small faint">No work yet.</div>`}</div>
+      </div>
+      <div>
+        <form class="card" data-agent-form="${esc(a.id)}"><div class="lbl">Settings</div>
+          <div class="field"><label for="ag-model">Model</label><select class="input" id="ag-model">${opts.map((m) => `<option value="${esc(m)}" ${m === a.model ? "selected" : ""}>${esc(shortModel(m, a))}</option>`).join("")}</select></div>
+          <div class="field"><label for="ag-depth">Thinking depth</label><select class="input" id="ag-depth" ${a.sendsReasoning ? "" : "disabled"}>${LEVELS.map((l) => `<option value="${l}" ${l === a.reasoning ? "selected" : ""}>${DEPTH[l]}</option>`).join("")}</select>${a.sendsReasoning ? "" : `<span class="small faint">This connection doesn't take a thinking setting.</span>`}</div>
+          <div class="switch-row"><label for="ag-on"><b>Active</b><br><span class="small muted">Paused specialists sit out of plans.</span></label><input type="checkbox" class="toggle" id="ag-on" ${a.enabled ? "checked" : ""} /></div>
+          <div class="grid3"><div class="field"><label for="ag-req">Asks / day</label><input class="input mono" id="ag-req" type="number" min="0" value="${a.limits.dailyRequests}" /></div>
+            <div class="field"><label for="ag-tok">Tokens / day</label><input class="input mono" id="ag-tok" type="number" min="0" step="1000" value="${a.limits.dailyTokens}" /></div>
+            <div class="field"><label for="ag-bud">$ / month</label><input class="input mono" id="ag-bud" type="number" min="0" value="${a.limits.monthlyBudgetUsd}" /></div></div>
+          <div class="small faint">0 means no limit.</div>
+          <details id="ag-adv"><summary class="small muted" style="cursor:pointer">Voice and instructions</summary>
+            <div class="field" style="margin-top:8px"><label for="ag-system">Instructions</label><textarea class="input" id="ag-system" rows="6">${esc(a.system)}</textarea></div>
+            <div class="field"><label for="ag-tag">Best at (one line)</label><input class="input" id="ag-tag" value="${esc(a.tagline)}" maxlength="120" /></div></details>
+          <div class="row"><button type="button" class="btn sm ghost" data-make-lead="${esc(a.id)}" ${a.isLead ? "disabled" : ""}>${a.isLead ? "Crew lead" : "Make crew lead"}</button><span class="grow"></span><button class="btn sm primary" type="submit">Save</button></div>
+        </form>
+        <div class="card"><div class="lbl">Connection</div><dl class="kv">
+          <dt>Runs on</dt><dd>${esc(a.connectorLabel)}${a.live ? "" : " (demo)"}</dd>
+          <dt>Billing</dt><dd>${esc({ subscription: "A plan you already pay for", local: "Runs on your Mac", metered: "Pay per use (blocked unless allowed)", prepaid: "Prepaid credit, capped monthly" }[a.billing] ?? (a.live ? "—" : "Not connected yet (demo answers)"))}</dd>
+          ${a.healthDetail ? `<dt>Health</dt><dd>${esc(a.healthDetail)}</dd>` : ""}
+          ${q ? `<dt>Plan usage</dt><dd>${q.live ? esc([q.plan, ...(q.windows ?? []).map((w) => `${w.label} ${Math.round(w.usedPercent)}%`), q.creditsRemainingUsd != null ? `${fmtUsd(q.creditsRemainingUsd)} left` : ""].filter(Boolean).join(" · ")) : esc(q.note ?? "")}</dd>` : ""}
+          <dt>Today</dt><dd>${a.usage?.requestsToday ?? 0} asks · ${fmtK(a.usage?.tokensToday ?? 0)} tokens${a.usage?.costMonth ? ` · ${fmtUsd(a.usage.costMonth)} this month` : ""}</dd>
+        </dl><div class="small faint">Tools are set in relay.config.json; editing them here isn't supported yet.</div></div>
+      </div>
+    </div>
+  </div>`;
+}
 
-function showLock(errMsg = "") {
+// ------------------------------------------------------------------ playbooks & lessons
+function lessonCard(l) {
+  const from = S.tasks.get(l.goalId);
+  return `<div class="lesson ${l.status}" data-lesson="${esc(l.id)}">
+    <div class="l-head"><span class="tag ${l.kind === "playbook" ? "review" : ""}">${l.kind === "playbook" ? "Playbook" : "Planning note"}</span><b>${esc(l.title)}</b>
+      ${from ? `<a class="link small" href="#/run/${esc(from.id)}">from “${esc(firstLine(from.prompt, 50))}”</a>` : ""}<span class="grow"></span>${l.status === "approved" ? '<span class="st done">Approved</span>' : l.status === "dismissed" ? '<span class="st">Dismissed</span>' : '<span class="st need">Needs review</span>'}</div>
+    ${l.kind === "playbook" && l.steps?.length ? `<div class="l-steps">${l.steps.map((s, i) => `${i ? "<span aria-hidden=\"true\">→</span>" : ""}${whoChip(s.agentId)}<span class="faint">${esc(firstLine(s.task, 40))}</span>`).join(" ")}</div><div class="small muted">${esc(l.text)}</div>`
+      : `<label class="sr" for="lesson-text-${esc(l.id)}">Note text</label><textarea class="input" id="lesson-text-${esc(l.id)}" rows="2">${esc(l.text)}</textarea>`}
+    <div class="l-actions">
+      ${l.status !== "approved" ? `<button type="button" class="btn sm primary" data-lesson-set="approved">Approve</button>` : ""}
+      ${l.kind === "note" ? `<button type="button" class="btn sm" data-lesson-save>Save edit</button>` : ""}
+      ${l.kind === "playbook" && l.status === "approved" ? `<a class="btn sm" href="#/new?playbook=${esc(l.id)}">Use for a new goal</a>` : ""}
+      ${l.status === "approved" ? `<button type="button" class="btn sm ghost" data-lesson-set="proposed">Un-approve</button>` : ""}
+      ${l.status !== "dismissed" ? `<button type="button" class="btn sm ghost" data-lesson-set="dismissed">Dismiss</button>` : `<button type="button" class="btn sm ghost" data-lesson-set="proposed">Restore</button>`}
+    </div></div>`;
+}
+function viewPlaybooks() {
+  const by = (s) => S.lessons.filter((l) => l.status === s).slice().reverse();
+  const proposed = by("proposed");
+  const approved = by("approved");
+  const dismissed = by("dismissed");
+  return `<div class="view">
+    <div class="page-head"><div><div class="eyebrow">Learning loop</div><h1>Playbooks and lessons</h1>
+      <p class="sub">After each run, Causeway proposes what it noticed: a plan worth reusing, a backup that worked, an approval that timed out. You decide what sticks.</p></div></div>
+    <div class="note-honest"><span>ⓘ</span><span>Approved notes are added to the planner's brief for future plans, and approved playbooks can start a new goal. <b>No agent is retrained</b>: this is your team's playbook, not model training.</span></div>
+    <section class="sec"><div class="sec-head"><h2>Waiting for your review</h2></div>${proposed.length ? `<div class="lessons">${proposed.map(lessonCard).join("")}</div>` : `<div class="empty">Nothing new. Finished runs add proposals here.</div>`}</section>
+    <section class="sec"><div class="sec-head"><h2>Approved</h2></div>${approved.length ? `<div class="lessons">${approved.map(lessonCard).join("")}</div>` : `<div class="empty">Approve a proposal to start your playbook.</div>`}</section>
+    ${dismissed.length ? `<details class="sec" id="dismissed-lessons"><summary class="small muted" style="cursor:pointer">Dismissed (${dismissed.length})</summary><div class="lessons" style="margin-top:10px">${dismissed.map(lessonCard).join("")}</div></details>` : ""}
+  </div>`;
+}
+
+// ------------------------------------------------------------------ settings
+function viewSettings() {
+  const lead = agentById(S.lead);
+  return `<div class="view">
+    <div class="page-head"><div><div class="eyebrow">Settings</div><h1>How the crew runs</h1></div></div>
+    <div class="two-col">
+      <div>
+        <div class="card"><h2>Crew lead</h2><p class="small muted" style="margin:0">The lead owns team goals. When the lead can act on your Mac (Hermes), planning and wrap-up move to a free text-only teammate, so untrusted content never reaches local tools.</p>
+          <div class="field"><label for="set-lead">Lead</label><select class="input" id="set-lead">${agentOptions(S.lead)}</select></div>
+          <div class="small faint">Current: ${esc(lead?.name ?? S.lead)}.</div></div>
+        <div class="card"><h2>Connections</h2>
+          ${S.agents.map((a) => `<div class="switch-row"><span class="who">${avatar(a, "sm", false)}<span><b>${esc(a.name)}</b> <span class="small muted">${esc(a.connectorLabel)}</span>${a.healthDetail ? `<br><span class="small faint">${esc(a.healthDetail)}</span>` : ""}</span></span>${stPill(a.live ? (a.online === false ? "fail" : "done") : "queued", a.live ? (a.online === false ? "Offline" : "Connected") : "Demo")}</div>`).join("")}
+          ${S.channels.map((c) => `<div class="switch-row"><span><b>${esc(c.name[0].toUpperCase() + c.name.slice(1))}</b> <span class="small muted">${esc(c.detail)}</span></span>${stPill(c.connected ? "done" : c.enabled ? "fail" : "queued", c.connected ? "Connected" : c.enabled ? "Not connected" : "Off")}</div>`).join("")}
+          <div class="small faint">Keys and channels are set up from the Terminal (npm run setup:mac and friends), never in this page.</div></div>
+      </div>
+      <div>
+        <div class="card"><h2>Feel</h2>
+          <div class="switch-row"><label for="set-sound"><b>Sound cues</b><br><span class="small muted">A short chord when a run finishes, two taps when something needs your call.</span></label><input type="checkbox" class="toggle" id="set-sound" ${S.sound ? "checked" : ""} /></div>
+          <div class="row"><button type="button" class="btn sm ghost" data-test-sound="done">Hear “finished”</button><button type="button" class="btn sm ghost" data-test-sound="ask">Hear “needs you”</button></div>
+          <div class="switch-row"><label for="set-motion"><b>Reduce motion</b><br><span class="small muted">Your system setting is always respected; this turns motion off here too.</span></label><input type="checkbox" class="toggle" id="set-motion" ${S.reduceMotion ? "checked" : ""} /></div>
+          <div class="switch-row"><span><b>Desktop alerts</b><br><span class="small muted">A notification when an approval arrives while this tab is in the background.</span></span><button type="button" class="btn sm" data-notify ${typeof Notification === "undefined" ? "disabled" : ""}>${typeof Notification !== "undefined" && Notification.permission === "granted" ? "On" : "Turn on"}</button></div></div>
+        <div class="card"><h2>Keyboard</h2><dl class="kv small">
+          <dt><kbd>N</kbd></dt><dd>New goal</dd><dt><kbd>⌘K</kbd></dt><dd>Command palette</dd><dt><kbd>!</kbd></dt><dd>What needs you</dd>
+          <dt><kbd>G</kbd> then <kbd>O R C P S</kbd></dt><dd>Overview, Runs, Crew, Playbooks, Settings</dd><dt><kbd>⌘↵</kbd></dt><dd>Plan it / Launch crew</dd><dt><kbd>Esc</kbd></dt><dd>Close panels</dd></dl></div>
+        <div class="card"><h2>This device</h2>
+          <div class="row wrap"><button type="button" class="btn sm" data-replay-intro>Show the intro again</button>${S.token ? `<button type="button" class="btn sm danger" data-forget-token>Forget access token</button>` : ""}</div></div>
+        <div class="card"><h2>Not supported yet</h2><ul class="small muted" style="margin:0;padding-left:18px">
+          <li>Scheduling goals to run later or on repeat.</li><li>Editing a specialist's tools from here (they're set in relay.config.json).</li>
+          <li>Changing a step's direction mid-answer without restarting that step: redirect restarts it with your note.</li></ul></div>
+      </div>
+    </div>
+  </div>`;
+}
+
+// ------------------------------------------------------------------ overlays: needs panel, palette, onboarding, lock
+let panelTrigger = null;
+function renderNeedsPanel() {
+  const items = needsItems();
+  $("#needsBody").innerHTML = items.length ? items.map(needCard).join("") : `<div class="all-clear"><i class="pip"></i>All clear.</div>`;
+}
+function openNeeds() {
+  panelTrigger = document.activeElement;
+  renderNeedsPanel();
+  $("#scrim").hidden = false;
+  const p = $("#needsPanel");
+  p.hidden = false;
+  p.classList.remove("open-anim");
+  void p.offsetWidth;
+  p.classList.add("open-anim");
+  ($("button, input", $("#needsBody")) ?? $("[data-close-panel]", p)).focus();
+}
+function closeNeeds() {
+  $("#needsPanel").hidden = true;
+  $("#scrim").hidden = true;
+  if (panelTrigger instanceof HTMLElement && panelTrigger.isConnected) panelTrigger.focus();
+}
+
+const palette = { items: [], idx: 0, trigger: null };
+function paletteCatalog() {
+  const items = [
+    { label: "New goal", hint: "N", run: () => go("#/new") },
+    { label: "Overview", group: "Go", run: () => go("#/") },
+    { label: "Runs", group: "Go", run: () => go("#/runs") },
+    { label: "Crew", group: "Go", run: () => go("#/crew") },
+    { label: "Playbooks and lessons", group: "Go", run: () => go("#/playbooks") },
+    { label: "Settings", group: "Go", run: () => go("#/settings") },
+  ];
+  if (needsItems().length) items.unshift({ label: `What needs you (${needsItems().length})`, hint: "!", run: () => openNeeds() });
+  for (const a of S.agents) items.push({ label: `Ask ${a.name}`, group: roleOf(a), run: () => { go(`#/crew/${a.id}`); setTimeout(() => $(`#direct-${a.id}`)?.focus(), 60); } });
+  for (const g of tasksArr().filter((t) => t.kind === "goal").slice(-8).reverse()) items.push({ label: firstLine(g.prompt, 70), group: `Run · ${STATE_LABEL[stateOf(g)]}`, run: () => go(`#/run/${g.id}`) });
+  items.push({ label: S.sound ? "Turn sound cues off" : "Turn sound cues on", group: "Feel", run: () => setSound(!S.sound) });
+  return items;
+}
+function renderPalette() {
+  const q = $("#paletteInput").value.trim().toLowerCase();
+  palette.items = paletteCatalog().filter((i) => !q || `${i.label} ${i.group ?? ""}`.toLowerCase().includes(q)).slice(0, 14);
+  palette.idx = Math.min(palette.idx, Math.max(0, palette.items.length - 1));
+  $("#paletteList").innerHTML = palette.items.length
+    ? palette.items.map((i, n) => `<li role="option" id="pal-${n}" aria-selected="${n === palette.idx}" data-pal="${n}"><span>${esc(i.label)}</span>${i.hint ? `<kbd>${esc(i.hint)}</kbd>` : ""}<span class="grp">${esc(i.group ?? "")}</span></li>`).join("")
+    : `<li aria-disabled="true" class="faint">No matches</li>`;
+  $("#paletteInput").setAttribute("aria-activedescendant", palette.items.length ? `pal-${palette.idx}` : "");
+}
+function openPalette() {
+  palette.trigger = document.activeElement;
+  palette.idx = 0;
+  $("#palette").hidden = false;
+  $("#paletteInput").value = "";
+  renderPalette();
+  $("#paletteInput").focus();
+}
+function closePalette() {
+  $("#palette").hidden = true;
+  if (palette.trigger instanceof HTMLElement && palette.trigger.isConnected) palette.trigger.focus();
+}
+function runPalette(n) {
+  const item = palette.items[n];
+  if (!item) return;
+  closePalette();
+  item.run();
+}
+
+const INTRO = [
+  () => `<div class="eyebrow">Welcome to Causeway</div><h2 id="onboardTitle" style="font-size:24px">Meet your crew.</h2>
+    <p class="muted" style="margin:0">Specialists, each with a lane. Causeway plans who does what and hands work between them.</p>
+    <div class="roster">${S.agents.filter((a) => a.enabled).map((a) => { const st = agentState(a); return `<div class="roster-row" style="grid-template-columns:minmax(0,1fr) auto"><span class="who">${avatar(a, "", false)}<span><b>${esc(a.name)}</b> <span class="role">${esc(roleOf(a))}</span><br><span class="small muted">${esc(a.tagline)}</span></span></span>${stPill(st === "demo" ? "queued" : st === "ready" ? "done" : st, st === "demo" ? "Demo" : st === "ready" ? "Live" : AGENT_STATE_LABEL[st])}</div>`; }).join("")}</div>`,
+  () => `<div class="eyebrow">How it works</div><h2 id="onboardTitle" style="font-size:24px">Start with a goal, not a chatbot.</h2>
+    <ol class="muted" style="margin:0;padding-left:20px;display:grid;gap:8px">
+      <li><b style="color:var(--text)">Describe the outcome.</b> Causeway recommends a plan: who takes each step, why, and what runs in parallel.</li>
+      <li><b style="color:var(--text)">Edit, then launch.</b> Swap specialists, rewrite steps, change what builds on what.</li>
+      <li><b style="color:var(--text)">Watch it come together.</b> The run view shows parallel work, handoffs, reviews, and blockers live, then the final output.</li>
+      <li><b style="color:var(--text)">Keep what worked.</b> Approve lessons and playbooks for the next plan. Nobody gets retrained.</li></ol>`,
+  () => `<div class="eyebrow">You're in control</div><h2 id="onboardTitle" style="font-size:24px">Nothing irreversible without you.</h2>
+    <ul class="muted" style="margin:0;padding-left:20px;display:grid;gap:8px">
+      <li>Specialists that can act (Hermes on your Mac, Grok on X) <b style="color:var(--text)">ask before sending, posting, spending, or changing things</b>. No answer in 15 minutes means no.</li>
+      <li><span style="color:var(--pink);font-weight:600">Pink</span> means something needs your call. It shows on every screen.</li>
+      <li>Stop a run or a step anytime, or redirect a step to someone else with a note.</li>
+      <li>Shortcuts: <kbd>N</kbd> new goal, <kbd>⌘K</kbd> palette, <kbd>!</kbd> needs you.</li></ul>`,
+];
+let introStep = 0;
+function showIntro(step = 0) {
+  introStep = step;
+  const box = $("#onboardBox");
+  box.innerHTML = `<div class="onboard-hero" aria-hidden="true"></div><div class="onboard-inner">
+      <div class="onboard-dots" aria-hidden="true">${INTRO.map((_, i) => `<i class="${i === step ? "on" : ""}"></i>`).join("")}</div>${INTRO[step]()}</div>
+    <div class="onboard-foot"><button type="button" class="btn ghost" data-intro-skip>${step === INTRO.length - 1 ? "Close" : "Skip"}</button>
+      <div class="row">${step ? `<button type="button" class="btn" data-intro-go="${step - 1}">Back</button>` : ""}${step < INTRO.length - 1 ? `<button type="button" class="btn primary" data-intro-go="${step + 1}">Next</button>` : `<button type="button" class="btn sunset" data-intro-done>Plan my first goal</button>`}</div></div>`;
+  $("#onboard").hidden = false;
+  $("button.primary, button.sunset", box)?.focus();
+}
+function closeIntro(goNew = false) {
+  $("#onboard").hidden = true;
+  store.set("cw-onboarded", "1");
+  if (goNew) go("#/new");
+}
+
+function showLock(msg = "") {
   source?.close();
   source = null;
-  if (cmdk.open) closeCmdk();
-  if (S.editing) closeEditor();
   $("#lock").hidden = false;
-  const errEl = $("#lockErr");
-  if (errEl) {
-    errEl.textContent = errMsg;
-    errEl.hidden = !errMsg;
-  }
-  setTimeout(() => $("#lockInput")?.focus(), 50);
+  const err = $("#lockErr");
+  err.textContent = msg;
+  err.hidden = !msg;
+  setTimeout(() => $("#lockInput").focus(), 30);
 }
 
-$("#lockForm").addEventListener("submit", async (e) => {
-  e.preventDefault();
-  S.token = $("#lockInput").value.trim();
-  store.set("relay-token", S.token);
-  const errEl = $("#lockErr");
-  if (errEl) errEl.hidden = true;
+// ------------------------------------------------------------------ actions
+function setSound(on) {
+  S.sound = on;
+  store.set("cw-sound", on ? "on" : null);
+  if (on) sound.play("done");
+  toast(on ? "Sound cues on" : "Sound cues off");
+  render(true);
+}
+async function decide(id, approve) {
   try {
-    applySnapshot(await api("/api/state", { _unlockAttempt: true }));
-    $("#lock").hidden = true;
-    connect();
+    await api(`/api/approvals/${id}`, { method: "POST", body: { approve } });
+    toast(approve ? "Approved. It's running." : "Denied. It won't run.");
   } catch (err) {
-    if (err.message !== "locked" && errEl) {
-      errEl.textContent = err.message;
-      errEl.hidden = false;
+    if (err.message !== "locked") toast(err.message);
+  }
+}
+async function answer(id, text) {
+  try {
+    await api(`/api/approvals/${id}`, { method: "POST", body: { answer: text } });
+    toast("Answer sent");
+  } catch (err) {
+    if (err.message !== "locked") toast(err.message);
+  }
+}
+async function stopTask(id) {
+  const t = S.tasks.get(id);
+  if (t?.kind === "goal" && !confirm("Stop this run? Steps that are running stop, and the rest won't start.")) return;
+  try {
+    await api(`/api/tasks/${id}/cancel`, { method: "POST", body: {} });
+    toast(t?.kind === "goal" ? "Stopping the run" : "Stopping");
+  } catch (err) {
+    if (err.message !== "locked") toast(err.message);
+  }
+}
+async function redirect(taskId, form) {
+  const agentId = $(`#redir-agent-${CSS.escape(taskId)}`, form).value;
+  const noteEl = $(`#redir-note-${CSS.escape(taskId)}`, form);
+  try {
+    const res = await api(`/api/tasks/${taskId}/redirect`, { method: "POST", body: { agentId, note: noteEl.value } });
+    noteEl.value = "";
+    if (res.mode === "step") {
+      toast(`Step redirected to ${nameOf(agentId)}`);
+      render(true);
+    } else {
+      toast(`Sent to ${nameOf(agentId)}`);
+      go(`#/task/${res.taskId}`);
     }
+  } catch (err) {
+    if (err.message !== "locked") toast(err.message);
+  }
+}
+async function sendDirect(agentId, textarea) {
+  const text = textarea.value.trim();
+  if (!text) return;
+  try {
+    const res = await api("/api/command", { method: "POST", body: { text: `@${agentId} ${text}` } });
+    textarea.value = "";
+    toast(firstLine(res.reply, 90) || `Sent to ${nameOf(agentId)}`);
+    if (res.taskId) go(`#/task/${res.taskId}`);
+  } catch (err) {
+    if (err.message !== "locked") toast(err.message);
+  }
+}
+async function saveAgent(id, form) {
+  const a = agentById(id);
+  if (!a) return;
+  const n = (sel) => Math.max(0, Number($(sel, form).value || 0));
+  const model = $("#ag-model", form).value;
+  const patch = {
+    model,
+    enabled: $("#ag-on", form).checked,
+    limits: { dailyRequests: n("#ag-req"), dailyTokens: n("#ag-tok"), monthlyBudgetUsd: n("#ag-bud") },
+  };
+  if (a.sendsReasoning) patch.reasoning = $("#ag-depth", form).value;
+  if (a.supportsProvider && a.discoveredProvider && model !== a.model) patch.provider = model === "hermes-agent" ? "" : a.discoveredProvider;
+  const sys = $("#ag-system", form)?.value.trim();
+  if (sys && sys !== a.system) patch.system = sys;
+  const tag = $("#ag-tag", form)?.value.trim();
+  if (tag && tag !== a.tagline) patch.tagline = tag;
+  try {
+    const next = await api(`/api/agents/${id}`, { method: "PATCH", body: patch });
+    const i = S.agents.findIndex((x) => x.id === id);
+    if (i >= 0) S.agents[i] = next;
+    toast(`${a.name} saved`);
+    render(true);
+  } catch (err) {
+    if (err.message !== "locked") toast(err.message);
+  }
+}
+async function setLead(id) {
+  try {
+    await api("/api/lead", { method: "POST", body: { agentId: id } });
+    S.lead = id;
+    S.agents = S.agents.map((a) => ({ ...a, isLead: a.id === id }));
+    toast(`${nameOf(id)} leads team goals now`);
+    render(true);
+  } catch (err) {
+    if (err.message !== "locked") toast(err.message);
+  }
+}
+async function setLesson(id, patch) {
+  try {
+    const l = await api(`/api/lessons/${id}`, { method: "PATCH", body: patch });
+    const i = S.lessons.findIndex((x) => x.id === id);
+    if (i >= 0) S.lessons[i] = l;
+    toast(patch.status === "approved" ? "Approved. The planner will use it." : patch.status === "dismissed" ? "Dismissed" : "Saved");
+    render(true);
+  } catch (err) {
+    if (err.message !== "locked") toast(err.message);
+  }
+}
+function rerunFrom(goalId) {
+  const goal = S.tasks.get(goalId);
+  const steps = stepsOf(goalId);
+  if (!goal || !steps.length) return;
+  S.draft = {
+    goal: goal.prompt,
+    source: "rerun",
+    notes: [],
+    steps: steps.map((s) => ({ agentId: s.agentId, origAgent: s.agentId, task: ownAsk(s.prompt).replace(/\n\nOwner's direction:[\s\S]*$/, ""), after: (s.after ?? []).map((n) => steps.findIndex((x) => x.step === n)).filter((i) => i >= 0), why: s.why ?? "" })),
+  };
+  go("#/new");
+  render(true);
+}
+
+// ------------------------------------------------------------------ events
+document.addEventListener("click", (e) => {
+  const el = e.target.closest("button, a, li[data-pal]");
+  if (!el) return;
+  const d = el.dataset;
+  if (d.decide) return void decide(d.decide, d.approve === "true");
+  if (d.dismiss) { S.dismissed.add(d.dismiss); store.set("cw-dismissed", JSON.stringify([...S.dismissed].slice(-200))); render(true); return; }
+  if (d.select) {
+    const r = route();
+    if (r.name === "run") { S.sel[r.id] = d.select; render(true); if (matchMedia("(max-width: 1180px)").matches) $(".inspector", main)?.scrollIntoView({ behavior: S.reduceMotion ? "auto" : "smooth", block: "start" }); }
+    return;
+  }
+  if (d.stop) return void stopTask(d.stop);
+  if (d.rerun) return rerunFrom(d.rerun);
+  if (d.copyResult) return void copyText(S.tasks.get(d.copyResult)?.result ?? "", "Final output copied");
+  if (d.copyTask) return void copyText(S.tasks.get(d.copyTask)?.result ?? "", "Output copied");
+  if (el.hasAttribute("data-copy-code")) return void copyText(el.parentElement.querySelector("code")?.textContent ?? "", "Code copied");
+  if (d.example) { const ta = $("#goal-input"); if (ta) { ta.value = d.example; ta.focus(); autosize(ta); } return; }
+  if (d.usePlaybook) { const ta = $("#goal-input"); const goal = ta?.value.trim(); if (!goal) { go(`#/new?playbook=${d.usePlaybook}`); return; } return void startDraft(goal, { playbookId: d.usePlaybook }); }
+  if (el.hasAttribute("data-open-needs")) return openNeeds();
+  if (el.hasAttribute("data-close-panel")) return closeNeeds();
+  // plan editor
+  if (el.hasAttribute("data-launch")) return void launchDraft();
+  if (el.hasAttribute("data-replan")) { readDraftInputs(); return void startDraft(S.draft?.goal ?? "", { playbookId: S.draft?.playbookId ?? "" }); }
+  if (el.hasAttribute("data-draft-cancel")) { S.draft = null; return go("#/"); }
+  if (el.hasAttribute("data-draft-edit")) { S.draft = { goal: S.draft?.goal ?? "" }; return render(true); }
+  if (el.hasAttribute("data-add-step")) {
+    return editDraft((dr) => { dr.steps.push({ agentId: S.agents.find((a) => a.enabled)?.id ?? "", origAgent: "", task: "", after: [], why: "" }); setTimeout(() => $(`#step-task-${dr.steps.length - 1}`)?.focus(), 30); });
+  }
+  if (d.stepRemove != null) {
+    const k = Number(d.stepRemove);
+    return editDraft((dr) => {
+      dr.steps.splice(k, 1);
+      for (const s of dr.steps) s.after = s.after.filter((x) => x !== k).map((x) => (x > k ? x - 1 : x));
+      if (!dr.steps.length) toast("Add at least one step");
+    });
+  }
+  if (d.stepMove != null) {
+    const i = Number(d.stepMove);
+    if (i < 1) return;
+    return editDraft((dr) => {
+      const map = (x) => (x === i ? i - 1 : x === i - 1 ? i : x);
+      [dr.steps[i - 1], dr.steps[i]] = [dr.steps[i], dr.steps[i - 1]];
+      let dropped = false;
+      dr.steps.forEach((s, j) => {
+        const next = s.after.map(map);
+        s.after = next.filter((x) => x < j);
+        if (s.after.length !== next.length) dropped = true;
+      });
+      if (dropped) toast("A step can only build on earlier steps, so one link was removed");
+    });
+  }
+  // lessons
+  if (d.lessonSet) { const id = el.closest("[data-lesson]").dataset.lesson; const ta = $(`#lesson-text-${CSS.escape(id)}`); return void setLesson(id, { status: d.lessonSet, ...(ta ? { text: ta.value } : {}) }); }
+  if (el.hasAttribute("data-lesson-save")) { const id = el.closest("[data-lesson]").dataset.lesson; return void setLesson(id, { text: $(`#lesson-text-${CSS.escape(id)}`).value }); }
+  // agents & settings
+  if (d.makeLead) return void setLead(d.makeLead);
+  if (d.testSound) { const was = S.sound; S.sound = true; sound.play(d.testSound); S.sound = was; return; }
+  if (el.hasAttribute("data-notify")) { if (typeof Notification !== "undefined") Notification.requestPermission().then(() => render(true)); return; }
+  if (el.hasAttribute("data-replay-intro")) return showIntro(0);
+  if (el.hasAttribute("data-forget-token")) { S.token = ""; store.set("relay-token", null); return showLock("Token forgotten on this device."); }
+  // palette & intro
+  if (d.pal != null) return runPalette(Number(d.pal));
+  if (d.introGo != null) return showIntro(Number(d.introGo));
+  if (el.hasAttribute("data-intro-skip")) return closeIntro(false);
+  if (el.hasAttribute("data-intro-done")) return closeIntro(true);
+  if (d.runsFilter) { S.runsFilter = d.runsFilter; return render(true); }
+});
+
+document.addEventListener("submit", (e) => {
+  const f = e.target;
+  if (f.id === "goalForm") {
+    e.preventDefault();
+    const pb = $("#playbook-pick")?.value ?? "";
+    return void startDraft($("#goal-input").value, { playbookId: pb });
+  }
+  if (f.dataset.answerForm) { e.preventDefault(); const inp = $("input", f); if (inp.value.trim()) void answer(f.dataset.answerForm, inp.value.trim()); return; }
+  if (f.dataset.redirectForm) { e.preventDefault(); return void redirect(f.dataset.redirectForm, f); }
+  if (f.dataset.direct) { e.preventDefault(); return void sendDirect(f.dataset.direct, $("textarea", f)); }
+  if (f.dataset.agentForm) { e.preventDefault(); return void saveAgent(f.dataset.agentForm, f); }
+  if (f.id === "lockForm") {
+    e.preventDefault();
+    S.token = $("#lockInput").value.trim();
+    store.set("relay-token", S.token);
+    void api("/api/state", { unlockAttempt: true }).then((snap) => { $("#lock").hidden = true; applySnapshot(snap); connect(); }).catch(() => {});
   }
 });
 
-// ------------------------------------------------------------------ live state & resilient SSE
+document.addEventListener("change", (e) => {
+  const el = e.target;
+  if (el.dataset.stepAgent != null) { const i = Number(el.dataset.stepAgent); return editDraft((dr) => { dr.steps[i].agentId = el.value; }); }
+  if (el.dataset.stepDep != null) {
+    const i = Number(el.dataset.stepDep);
+    const j = Number(el.dataset.dep);
+    return editDraft((dr) => { const s = dr.steps[i]; s.after = el.checked ? [...new Set([...s.after, j])].sort((a, b) => a - b) : s.after.filter((x) => x !== j); });
+  }
+  if (el.id === "playbook-pick" && el.value && $("#goal-input")?.value.trim()) return void startDraft($("#goal-input").value, { playbookId: el.value });
+  if (el.id === "set-lead") return void setLead(el.value);
+  if (el.id === "set-sound") return setSound(el.checked);
+  if (el.id === "set-motion") { S.reduceMotion = el.checked; store.set("cw-reduce-motion", el.checked ? "on" : null); return render(true); }
+});
+
+document.addEventListener("input", (e) => {
+  const el = e.target;
+  if (el.matches("textarea")) autosize(el);
+  if (el.id === "runs-q") { S.runsQuery = el.value; clearTimeout(document.rq); document.rq = setTimeout(() => render(true), 160); }
+  if (el.dataset.stepTask != null && S.draft?.steps) S.draft.steps[Number(el.dataset.stepTask)].task = el.value;
+  if (el.id === "paletteInput") { palette.idx = 0; renderPalette(); }
+});
+
+function autosize(el) {
+  if (!el || el.tagName !== "TEXTAREA" || !el.closest(".composer, .step-card")) return;
+  el.style.height = "auto";
+  el.style.height = `${Math.min(el.closest(".step-card") ? 340 : 260, el.scrollHeight + 2)}px`;
+}
+function autosizeAll() { for (const t of $$(".composer textarea, .step-card textarea", main)) autosize(t); }
+
+$("#needsBtn").addEventListener("click", openNeeds);
+$("#needsBtnTop").addEventListener("click", openNeeds);
+$("#scrim").addEventListener("click", closeNeeds);
+$("#soundBtn").addEventListener("click", () => setSound(!S.sound));
+$("#paletteBtn").addEventListener("click", openPalette);
+$("#palette").addEventListener("click", (e) => { if (e.target.id === "palette") closePalette(); });
+
+let gPending = 0;
+document.addEventListener("keydown", (e) => {
+  const typing = e.target.closest?.("input, textarea, select, [contenteditable]");
+  const mod = e.metaKey || e.ctrlKey;
+  if (mod && e.key.toLowerCase() === "k") { e.preventDefault(); return $("#palette").hidden ? openPalette() : closePalette(); }
+  if (!$("#palette").hidden) {
+    if (e.key === "Escape") { e.preventDefault(); return closePalette(); }
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); palette.idx = (palette.idx + (e.key === "ArrowDown" ? 1 : -1) + palette.items.length) % Math.max(1, palette.items.length); return renderPalette(); }
+    if (e.key === "Enter") { e.preventDefault(); return runPalette(palette.idx); }
+    return;
+  }
+  if (e.key === "Escape") {
+    if (!$("#needsPanel").hidden) return closeNeeds();
+    if (!$("#onboard").hidden) return closeIntro(false);
+  }
+  if (mod && e.key === "Enter") {
+    const r = route();
+    if (r.name === "new" && S.draft?.steps) { e.preventDefault(); return void launchDraft(); }
+    if ($("#goalForm") && (e.target.id === "goal-input" || r.name === "new")) { e.preventDefault(); return $("#goalForm").requestSubmit(); }
+    const form = e.target.closest?.("form");
+    if (form) { e.preventDefault(); return form.requestSubmit(); }
+  }
+  if (typing || mod || e.altKey) return;
+  if (!$("#onboard").hidden || !$("#lock").hidden) return;
+  const k = e.key.toLowerCase();
+  if (gPending && Date.now() - gPending < 1200) {
+    gPending = 0;
+    const to = { o: "#/", r: "#/runs", c: "#/crew", p: "#/playbooks", s: "#/settings" }[k];
+    if (to) { e.preventDefault(); return go(to); }
+  }
+  if (k === "g") { gPending = Date.now(); return; }
+  if (k === "n") { e.preventDefault(); return go("#/new"); }
+  if (e.key === "!") { e.preventDefault(); return openNeeds(); }
+  if (e.key === "/") { const g = $("#goal-input"); if (g) { e.preventDefault(); g.focus(); } }
+});
+$("#needsPanel").addEventListener("keydown", (e) => {
+  if (e.key !== "Tab") return;
+  const f = $$("button, input, a[href], select, textarea", $("#needsPanel")).filter((x) => x.offsetParent !== null);
+  if (!f.length) return;
+  if (e.shiftKey && document.activeElement === f[0]) { e.preventDefault(); f[f.length - 1].focus(); }
+  else if (!e.shiftKey && document.activeElement === f[f.length - 1]) { e.preventDefault(); f[0].focus(); }
+});
+
+window.addEventListener("hashchange", () => {
+  const r = route();
+  if (r.name === "new" && r.params.get("playbook") && S.draft?.steps) S.draft = null;
+  render(true);
+  // Move focus to the new page for screen readers, but never steal it from an open overlay or a field.
+  const overlay = !$("#palette").hidden || !$("#needsPanel").hidden || !$("#onboard").hidden || !$("#lock").hidden;
+  const a = document.activeElement;
+  if (!overlay && (!a || a === document.body || main.contains(a) || a.closest("nav"))) main.focus({ preventScroll: true });
+});
+window.addEventListener("resize", () => { if (route().name === "run") drawEdges(); });
+
+// Elapsed time is real: running items tick once a second, nothing else moves on its own.
+setInterval(() => {
+  for (const el of $$("[data-since]", main)) {
+    if (el.dataset.until) continue;
+    el.textContent = fmtDur(Date.now() - Date.parse(el.dataset.since));
+  }
+}, 1000);
+
+// ------------------------------------------------------------------ live data
 function applySnapshot(snap) {
   S.connected = true;
-  S.agents = snap.agents;
+  S.agents = snap.agents ?? [];
   S.lead = snap.lead;
-  S.lb = snap.leaderboard;
-  S.kpis = snap.kpis;
-  S.channels = snap.channels;
+  S.kpis = snap.kpis ?? {};
+  S.channels = snap.channels ?? [];
   S.approvals = snap.approvals ?? [];
-  S.tasks = new Map(snap.tasks.map((t) => [t.id, t]));
-  S.handoffs = seedHandoffs(snap.tasks);
-  dirty.add("all");
-  flush();
-}
-
-function seedHandoffs(tasks) {
-  const byId = new Map(tasks.map((t) => [t.id, t]));
-  return tasks
-    .filter((t) => t.kind === "direct" || t.kind === "subtask" || t.kind === "goal")
-    .slice(-16)
-    .reverse()
-    .map((t) => {
-      const parent = t.parentId ? byId.get(t.parentId) : null;
-      const from = t.kind === "subtask" ? parent?.agentId ?? S.lead : "you";
-      return { from: t.reroutedFrom ?? from, to: t.agentId, taskId: t.id, kind: t.reroutedFrom ? "reroute" : "delegate", at: Date.parse(t.createdAt) };
-    })
-    .filter((h) => h.from !== h.to);
+  S.lessons = snap.lessons ?? [];
+  S.tasks = new Map((snap.tasks ?? []).map((t) => [t.id, t]));
+  const first = !S.booted;
+  S.booted = true;
+  render(true);
+  if (first && !store.get("cw-onboarded") && $("#lock").hidden) showIntro(0);
 }
 
 let source = null;
 let uiVersion = null;
-let reconnectTimer = null;
-
+let retry = null;
 function connect() {
   source?.close();
-  clearTimeout(reconnectTimer);
+  clearTimeout(retry);
   const qs = S.token ? `?token=${encodeURIComponent(S.token)}` : "";
   source = new EventSource(`/api/events${qs}`);
   let first = true;
-
   source.addEventListener("hello", (e) => {
     const data = safeJson(e.data) || {};
     if (data.uiVersion) {
-      if (uiVersion && uiVersion !== data.uiVersion) return location.reload();
+      if (uiVersion && uiVersion !== data.uiVersion && route().name !== "new") return location.reload();
       uiVersion = data.uiVersion;
     }
-    if (!S.connected) { S.connected = true; renderKpis(); }
+    if (!S.connected) { S.connected = true; schedule(); }
     if (!first) api("/api/state").then(applySnapshot).catch(() => {});
     first = false;
   });
-
   source.onerror = () => {
-    if (S.connected) { S.connected = false; renderKpis(); }
-    // Probe /api/state to distinguish 401 token lock from transient disconnect.
-    clearTimeout(reconnectTimer);
-    reconnectTimer = setTimeout(async () => {
+    if (S.connected) { S.connected = false; schedule(); }
+    clearTimeout(retry);
+    retry = setTimeout(async () => {
       try {
         applySnapshot(await api("/api/state"));
         if (!source || source.readyState === EventSource.CLOSED) connect();
       } catch {}
     }, 3000);
   };
-
   source.addEventListener("task", (e) => {
     const t = safeJson(e.data);
     if (!t?.id) return;
     const prev = S.tasks.get(t.id);
     S.tasks.set(t.id, t);
-    if (booted) {
-      if (!prev && (t.channel === "telegram" || t.channel === "imessage")) {
-        pingChannel(t.channel);
-        SFX.play("dispatch");
-      } else if (prev && prev.status !== "done" && t.status === "done" && (t.kind === "direct" || t.kind === "goal")) {
-        SFX.play("done");
+    if (!prev || prev.status !== t.status) {
+      S.flash.set(t.id, Date.now());
+      if (prev && t.kind === "goal" && t.status === "done") { sound.play("done"); announce(`Run finished: ${firstLine(t.prompt, 80)}`); }
+      if (prev && (t.kind === "subtask" || t.kind === "direct") && (t.status === "blocked" || t.status === "failed")) { sound.play("block"); announce(`${nameOf(t.agentId)} is ${t.status}: ${firstLine(t.error, 80)}`); }
+      if (prev && t.kind === "subtask" && prev.status === "queued" && t.status === "running") {
+        for (const n of t.after ?? []) {
+          const up = tasksArr().find((x) => x.parentId === t.parentId && x.step === n);
+          if (up) S.landing.set(`${up.id}>${t.id}`, Date.now());
+        }
       }
     }
-    dirty.add("tasks");
-    flush();
+    schedule();
   });
-
   source.addEventListener("agents", (e) => {
     const d = safeJson(e.data);
     if (!d?.agents) return;
     S.agents = d.agents;
-    S.lb = d.leaderboard;
-    S.kpis = d.kpis;
-    S.lead = d.lead;
-    dirty.add("agents");
-    flush();
+    S.kpis = d.kpis ?? S.kpis;
+    S.lead = d.lead ?? S.lead;
+    schedule();
   });
-
-  source.addEventListener("channels", (e) => {
-    const c = safeJson(e.data);
-    if (!Array.isArray(c)) return;
-    S.channels = c;
-    dirty.add("channels");
-    flush();
+  source.addEventListener("channels", (e) => { const c = safeJson(e.data); if (Array.isArray(c)) { S.channels = c; schedule(); } });
+  source.addEventListener("lessons", (e) => { const l = safeJson(e.data); if (Array.isArray(l)) { S.lessons = l; schedule(); } });
+  source.addEventListener("baton", (e) => {
+    const b = safeJson(e.data);
+    if (!b?.taskId) return;
+    S.batons.unshift({ ...b, at: Date.now() });
+    S.batons.length = Math.min(S.batons.length, 60);
   });
-
   source.addEventListener("approval", (e) => {
     const a = safeJson(e.data);
     if (!a?.id) return;
     const i = S.approvals.findIndex((x) => x.id === a.id);
-    const isNew = i < 0;
     if (i >= 0) S.approvals[i] = a;
     else S.approvals.push(a);
-    if (isNew && a.status === "pending" && booted) SFX.play("ask");
-    if (a.status === "pending" && typeof Notification !== "undefined" && Notification.permission === "granted" && document.hidden) {
-      try { new Notification("Relay needs your OK", { body: a.title }); } catch {}
-    }
-    dirty.add("approvals");
-    flush();
-  });
-
-  source.addEventListener("baton", (e) => {
-    const b = safeJson(e.data);
-    if (!b || b.from === b.to) return;
-    S.handoffs.unshift({ ...b, at: Date.now() });
-    S.handoffs.length = Math.min(S.handoffs.length, 30);
-    animateBaton(b);
-    if (booted) SFX.play(b.from === "you" ? "dispatch" : "baton");
-    dirty.add("handoffs");
-    flush();
-  });
-}
-
-const seen = { thread: new Set(), lanes: new Set(), handoffs: new Set() };
-let booted = false;
-function enter(list, key) {
-  if (seen[list].has(key)) return "";
-  seen[list].add(key);
-  return booted ? " enter" : "";
-}
-
-const dirty = new Set();
-let frame = 0;
-function flush() {
-  if (frame) return;
-  frame = requestAnimationFrame(() => {
-    frame = 0;
-    const all = dirty.has("all");
-    const agents = all || dirty.has("agents");
-    const tasks = all || dirty.has("tasks");
-    if (agents) {
-      renderKpis();
-      renderQuickActions();
-      renderCrew();
-      renderActivityFilters();
-      renderRanks();
-      renderTargets();
-      renderCrewStrip();
-      renderActiveBar();
-      renderMap();
-    }
-    if (all || dirty.has("channels")) { renderChannels(); renderThreadFilter(); }
-    if (tasks) {
-      renderStudioLive();
-      renderLanes();
-      renderThread();
-      if (!agents) { renderCrew(); renderMap(); renderCrewStrip(); renderActiveBar(); }
-    }
-    if (agents || tasks || dirty.has("handoffs")) renderHandoffs();
-    if (all || dirty.has("approvals")) { renderApprovals(); renderKpis(); renderStudioLive(); if (!agents && !tasks) renderCrew(); }
-    if (dirty.has("approvals") && !tasks) renderThread();
-    dirty.clear();
-    booted = true;
-  });
-}
-
-// ------------------------------------------------------------------ top bar
-function renderKpis() {
-  if (!S.connected) {
-    $("#kpis").innerHTML = `<div class="kpi offline"><i class="kpi-dot" aria-hidden="true"></i><b>Reconnecting…</b></div>`;
-    $("#topPulse")?.classList.remove("active");
-    return;
-  }
-  const running = S.kpis.running ?? 0;
-  const readyCount = S.agents.filter((a) => a.live && a.enabled && a.status !== "offline").length;
-  const openAsks = pendingApprovals().length;
-  $("#kpis").innerHTML = [
-    ...(openAsks ? [`<button type="button" class="kpi ask" data-go-approvals><b>${openAsks}</b> needs OK</button>`] : []),
-    `<div class="kpi live ${running > 0 ? "hot" : ""}"><i class="kpi-dot" aria-hidden="true"></i><b>${running > 0 ? running : readyCount}</b>${running > 0 ? "working" : "ready"}</div>`,
-  ].join("");
-  $("#topPulse")?.classList.toggle("active", running > 0);
-}
-
-function renderChannels() {
-  const active = S.channels.filter((c) => c.enabled || c.connected);
-  const label = { telegram: "Telegram", imessage: "iMessage" };
-  $("#channels").innerHTML = active
-    .map((c) => `<span class="chan ${c.connected ? "on" : "err"}" data-chan="${esc(c.name)}" title="${esc(label[c.name] || c.name)}: ${esc(c.detail)}"><i></i><span class="lbl">${esc(label[c.name] || c.name)}</span></span>`)
-    .join("");
-}
-
-function renderThreadFilter() {
-  const el = $("#threadFilter");
-  if (!el) return;
-  const chans = S.channels.filter((c) => c.enabled || c.connected).map((c) => c.name);
-  const valid = new Set(["all", "web", ...chans]);
-  if (!valid.has(S.filter)) {
-    S.filter = "all";
-    renderThread();
-  }
-  if (!chans.length) { el.hidden = true; return; }
-  el.hidden = false;
-  const opts = [["all", "All"], ["web", "App"], ...chans.map((c) => [c, c === "telegram" ? "Telegram" : "iMessage"])];
-  el.innerHTML = opts.map(([f, lbl]) => `<button type="button" data-f="${esc(f)}" class="${S.filter === f ? "on" : ""}">${esc(lbl)}</button>`).join("");
-}
-
-// ------------------------------------------------------------------ quick launch & studio live
-function renderQuickActions() {
-  const ids = new Set(S.agents.map((a) => a.id));
-  const actions = [
-    { label: "Team mission", sub: "Split across crew", cls: "team", color: "var(--accent)", target: "team", prompt: "", run: false },
-    ...(ids.has("grok") ? [{ label: "Live pulse", sub: "Grok", color: colorOf("grok"), target: "grok", prompt: "What's actually moving on X and in AI news today? Top 3 takeaways with sources.", run: true }] : []),
-    ...(ids.has("muse") ? [{ label: "Draft hooks", sub: "Muse", color: colorOf("muse"), target: "muse", prompt: "Give me 3 sharp, distinct hooks for: ", run: false }] : []),
-    ...(ids.has("hermes") ? [{ label: "Plan & execute", sub: "Hermes", color: colorOf("hermes"), target: "hermes", prompt: "Turn this into a clear step-by-step plan: ", run: false }] : []),
-    ...(ids.has("zen") || ids.has("chatgpt")
-      ? [{ label: "Second opinion", sub: ids.has("zen") ? "Zen" : "ChatGPT", color: colorOf(ids.has("zen") ? "zen" : "chatgpt"), target: ids.has("zen") ? "zen" : "chatgpt", prompt: "Pressure-test this and call out the biggest blind spot: ", run: false }]
-      : []),
-    { label: "Health check", sub: "/doctor", color: "var(--ok)", target: "auto", prompt: "/doctor", run: true },
-  ];
-  $("#quickActions").innerHTML = actions
-    .map((a) => `<button type="button" class="qa-btn ${a.cls || ""}" style="--c:${safeColor(a.color)}" data-qa-target="${esc(a.target)}" data-qa-prompt="${esc(a.prompt)}" data-qa-run="${a.run ? "1" : "0"}">
-      <span class="qa-dot" aria-hidden="true"></span>
-      <span>${esc(a.label)}</span>
-      <span class="qa-sub">${esc(a.sub)}</span>
-    </button>`)
-    .join("");
-
-  const todayCount = S.kpis.tasksToday ?? 0;
-  $("#studioSub").textContent = todayCount ? `${todayCount} today` : "One click to start";
-}
-
-$("#quickActions")?.addEventListener("click", (e) => {
-  const b = e.target.closest("[data-qa-target]");
-  if (!b) return;
-  const target = b.dataset.qaTarget;
-  const prompt = b.dataset.qaPrompt || "";
-  const run = b.dataset.qaRun === "1";
-  if (prompt.startsWith("/")) {
-    $("#input").value = prompt;
-    $("#composer").requestSubmit();
-    if (matchMedia("(max-width: 960px)").matches) setTab("thread");
-    return;
-  }
-  focusAgent(target, { switchTab: true, prompt, run });
-});
-
-function renderStudioLive() {
-  const el = $("#studioLive");
-  if (!el) return;
-  const running = [...S.tasks.values()].filter((t) => t.status === "running" && t.kind !== "goal");
-  const mission = latestTeamMission();
-  const activeMission = mission && (mission.goal.status === "running" || mission.goal.status === "queued");
-  if (!running.length && !activeMission) { el.hidden = true; return; }
-  el.hidden = false;
-  if (activeMission) {
-    const done = mission.subtasks.filter((s) => s.status === "done").length;
-    el.innerHTML = `<div class="studio-live-left">
-        <span class="eq" style="--c:var(--accent)" aria-hidden="true"><i></i><i></i><i></i></span>
-        <span class="studio-live-title"><b>Team mission:</b> ${esc(mission.goal.title)} · ${done}/${mission.subtasks.length} steps</span>
-      </div>
-      <button type="button" class="studio-live-btn" data-open-map>Watch map →</button>`;
-  } else {
-    const first = running[0];
-    const p = personaOf(agentById(first.agentId));
-    el.innerHTML = `<div class="studio-live-left">
-        <span class="eq" style="--c:${colorOf(first.agentId)}" aria-hidden="true"><i></i><i></i><i></i></span>
-        <span class="studio-live-title"><b>${esc(nameOf(first.agentId))}</b> · ${esc(p.thinking.toLowerCase())} — ${esc(first.title)}</span>
-      </div>
-      <button type="button" class="studio-live-btn" data-jump-task="${esc(first.id)}">View →</button>`;
-  }
-}
-
-$("#studioLive")?.addEventListener("click", (e) => {
-  if (e.target.closest("[data-open-map]")) return setView("map");
-  const j = e.target.closest("[data-jump-task]");
-  if (j) jumpToTask(j.dataset.jumpTask);
-});
-
-// ------------------------------------------------------------------ crew map & mission graph
-const MAP = { cx: 170, cy: 166, r: 102 };
-
-function arcPathData(fromId, toId) {
-  const a = S.pos[fromId];
-  const z = S.pos[toId];
-  if (!a || !z) return null;
-  const mx = (a.x + z.x) / 2, my = (a.y + z.y) / 2;
-  const dx = mx - MAP.cx, dy = my - MAP.cy;
-  const d = Math.hypot(dx, dy) || 1;
-  const bend = fromId === "you" || toId === "you" ? 18 : 34;
-  const cx = mx + (dx / d) * bend + (d < 2 ? 20 : 0), cy = my + (dy / d) * bend;
-  return { d: `M ${a.x.toFixed(1)} ${a.y.toFixed(1)} Q ${cx.toFixed(1)} ${cy.toFixed(1)} ${z.x.toFixed(1)} ${z.y.toFixed(1)}`, a, z, cx, cy };
-}
-
-function buildMissionData(goal) {
-  const kids = [...S.tasks.values()]
-    .filter((c) => c.parentId === goal.id)
-    .sort((a, b) => (a.step ?? (a.kind === "plan" ? 0 : 999)) - (b.step ?? (b.kind === "plan" ? 0 : 999)) || Date.parse(a.createdAt) - Date.parse(b.createdAt));
-  const subtasks = kids.filter((c) => c.kind === "subtask");
-  const byStep = new Map(subtasks.map((s) => [s.step, s]));
-  const edges = [];
-  const leadId = goal.agentId;
-
-  for (const sub of subtasks) {
-    const state = sub.status === "running" ? "active" : sub.status === "done" ? "done" : "queued";
-    if (sub.reroutedFrom && sub.reroutedFrom !== sub.agentId) {
-      edges.push({ from: sub.reroutedFrom, to: sub.agentId, kind: "reroute", state, taskId: sub.id });
-    }
-    const deps = (sub.after ?? []).map((n) => byStep.get(n)).filter(Boolean);
-    if (deps.length) {
-      for (const dep of deps) {
-        if (dep.agentId !== sub.agentId) edges.push({ from: dep.agentId, to: sub.agentId, kind: "handoff", state, taskId: sub.id });
+    if (i < 0 && a.status === "pending") {
+      sound.play("ask");
+      announce(`${a.agentName} needs your call: ${a.title}`);
+      S.flash.set(a.taskId, Date.now());
+      if (document.hidden && typeof Notification !== "undefined" && Notification.permission === "granted") {
+        try { new Notification("Causeway needs your call", { body: a.title }); } catch {}
       }
-    } else if (leadId !== sub.agentId) {
-      edges.push({ from: leadId, to: sub.agentId, kind: "delegate", state, taskId: sub.id });
     }
-  }
-  const synth = kids.find((c) => c.kind === "synthesis");
-  if (synth) {
-    const usedLater = new Set(subtasks.flatMap((s) => s.after ?? []));
-    const leafSubs = subtasks.filter((s) => !usedLater.has(s.step));
-    const sState = synth.status === "running" ? "active" : synth.status === "done" ? "done" : "queued";
-    for (const leaf of leafSubs) {
-      if (leaf.agentId !== synth.agentId) edges.push({ from: leaf.agentId, to: synth.agentId, kind: "return", state: sState, taskId: synth.id });
-    }
-  }
-  return { goal, kids, subtasks, edges };
-}
-
-function recentTeamMissions() {
-  return [...S.tasks.values()]
-    .filter((t) => t.kind === "goal")
-    .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
-    .slice(0, 12)
-    .map(buildMissionData);
-}
-
-function latestTeamMission() {
-  const list = recentTeamMissions();
-  if (!list.length) return null;
-  if (S.selectedMissionId) {
-    const picked = list.find((m) => m.goal.id === S.selectedMissionId);
-    if (picked) return picked;
-  }
-  const active = list.find((m) => m.goal.status === "running" || m.goal.status === "queued");
-  if (active) return active;
-  return list.find((m) => m.edges.length > 0) ?? list[0];
-}
-
-function renderChainBar() {
-  const bar = $("#mapChainBar");
-  if (!bar) return;
-  if (S.mapMode !== "chain") { bar.hidden = true; return; }
-  bar.hidden = false;
-  const prevGoal = $("#chainGoal")?.value ?? "";
-  const stepsHtml = S.chain.length
-    ? S.chain
-        .map((id, i) => `${i > 0 ? '<span class="chain-arrow">→</span>' : ""}<span class="chain-pill" style="--c:${colorOf(id)}"><span>${i + 1}. ${esc(nameOf(id))}</span><button type="button" data-chain-rm="${i}" aria-label="Remove ${esc(nameOf(id))}">×</button></span>`)
-        .join("")
-    : `<span class="muted small">Click 2+ assistants on the map in handoff order (e.g. Grok → Muse → Zen)</span>`;
-  bar.innerHTML = `
-    <div class="chain-steps">${stepsHtml}</div>
-    <form class="chain-form" id="chainForm">
-      <input type="text" id="chainGoal" placeholder="What should this relay build or answer?" value="${esc(prevGoal)}" autocomplete="off" />
-      <button type="button" class="btn ghost" id="chainClear" ${S.chain.length ? "" : "disabled"}>Clear</button>
-      <button type="submit" class="btn primary" ${S.chain.length ? "" : "disabled"}>Launch</button>
-    </form>`;
-}
-
-function setMapMode(mode) {
-  S.mapMode = mode === "chain" ? "chain" : "explore";
-  $$("#mapModeSeg button").forEach((b) => {
-    const on = b.dataset.mapMode === S.mapMode;
-    b.classList.toggle("on", on);
-    b.setAttribute("aria-selected", String(on));
-  });
-  renderMap();
-  renderChainBar();
-}
-
-function setHoverAgent(id) {
-  $$("#map .map-node").forEach((n) => n.classList.toggle("hi", Boolean(id) && n.dataset.mapTarget === id));
-  $$("#map .arc-path").forEach((p) => {
-    const match = Boolean(id) && (p.dataset.from === id || p.dataset.to === id);
-    p.classList.toggle("hi", match);
-    p.classList.toggle("dim", Boolean(id) && !match);
-  });
-  $$("#crew .agent").forEach((c) => c.classList.toggle("is-hovered", Boolean(id) && c.dataset.agentCard === id));
-}
-
-function renderMap() {
-  const svg = $("#map");
-  const n = S.agents.length;
-  S.pos = { you: { x: MAP.cx, y: MAP.cy } };
-  S.agents.forEach((a, i) => {
-    const ang = -Math.PI / 2 + (i * 2 * Math.PI) / n;
-    S.pos[a.id] = { x: MAP.cx + MAP.r * Math.cos(ang), y: MAP.cy + MAP.r * Math.sin(ang), ang };
-  });
-  let lines = `<circle class="ring-orbit" cx="${MAP.cx}" cy="${MAP.cy}" r="${MAP.r}"/>`;
-  for (const a of S.agents) {
-    const p = S.pos[a.id];
-    const col = safeColor(a.color);
-    const active = a.status === "working";
-    lines += `<line class="spoke ${active ? "active" : ""}" style="${active ? `stroke:${col}` : ""}" x1="${MAP.cx}" y1="${MAP.cy}" x2="${p.x}" y2="${p.y}"/>`;
-  }
-  $("#mapLines", svg).innerHTML = lines;
-
-  const mission = latestTeamMission();
-  let arcsHtml = "";
-  if (S.mapMode === "chain" && S.chain.length > 0) {
-    const pairs = [["you", S.chain[0]]];
-    for (let i = 0; i < S.chain.length - 1; i++) pairs.push([S.chain[i], S.chain[i + 1]]);
-    for (const [fromId, toId] of pairs) {
-      if (fromId === toId) continue;
-      const geo = arcPathData(fromId, toId);
-      if (!geo) continue;
-      const col = fromId === "you" ? colorOf(toId) : colorOf(fromId);
-      arcsHtml += `<path class="arc-glow" d="${geo.d}" stroke="${col}"/>`;
-      arcsHtml += `<path class="arc-path chain" d="${geo.d}" stroke="${col}" data-from="${esc(fromId)}" data-to="${esc(toId)}"/>`;
-    }
-  } else if (mission) {
-    const dedup = new Map();
-    for (const e of mission.edges) {
-      const k = `${e.from}>${e.to}:${e.kind}`;
-      const prev = dedup.get(k);
-      if (!prev || e.state === "active") dedup.set(k, e);
-    }
-    for (const e of dedup.values()) {
-      if (e.state === "queued" && mission.goal.status !== "running") continue;
-      const geo = arcPathData(e.from, e.to);
-      if (!geo) continue;
-      const color = e.kind === "reroute" ? "var(--warn)" : e.kind === "return" || e.kind === "handoff" ? colorOf(e.from) : colorOf(e.to);
-      const cls = e.kind === "reroute" ? "reroute" : e.state === "active" ? "active" : "done";
-      if (e.state === "active") arcsHtml += `<path class="arc-glow" d="${geo.d}" stroke="${color}"/>`;
-      arcsHtml += `<path class="arc-path ${cls}" d="${geo.d}" stroke="${color}" data-from="${esc(e.from)}" data-to="${esc(e.to)}"/>`;
-    }
-  }
-  $("#mapArcs", svg).innerHTML = arcsHtml;
-
-  let nodes = `<g class="you-node" data-map-target="team" role="button" tabindex="0" aria-label="Message whole team">
-    <circle class="you" cx="${MAP.cx}" cy="${MAP.cy}" r="22"/>
-    <text class="you-text" x="${MAP.cx}" y="${MAP.cy + 4}">YOU</text>
-  </g>`;
-
-  for (const a of S.agents) {
-    const p = S.pos[a.id];
-    const col = safeColor(a.color);
-    const persona = personaOf(a);
-    const up = Math.sin(p.ang) < -0.3;
-    const ly = up ? -50 : 41;
-    const active = activeTaskFor(a.id);
-    const isAsk = Boolean(active?.awaitingApproval);
-    const isWorking = !isAsk && (a.status === "working" || S.previewWork.has(a.id));
-    const isOnline = a.live && a.enabled && a.status === "idle" && !isWorking && !isAsk;
-    const chainPos = S.mapMode === "chain" ? S.chain.indexOf(a.id) : -1;
-    const isSelected = S.mapMode === "chain" ? chainPos >= 0 : S.target === a.id;
-    const subText = isAsk ? "Needs OK" : active ? persona.thinking : persona.role;
-    nodes += `<g class="map-node ${isSelected ? "selected" : ""}" data-map-target="${esc(a.id)}" role="button" tabindex="0" aria-label="${S.mapMode === "chain" ? `Add ${esc(a.name)} to relay chain` : `Chat with ${esc(a.name)}`}" transform="translate(${p.x.toFixed(1)},${p.y.toFixed(1)})" opacity="${a.enabled ? 1 : 0.42}">
-      ${isWorking ? `<circle class="pulse" r="26" fill="none" stroke="${col}" stroke-width="2"/>
-        <circle class="orbit-spin" r="30" fill="none" stroke="${col}" stroke-width="1.6" stroke-dasharray="14 28" stroke-linecap="round"/>` : ""}
-      ${isOnline ? `<circle class="breathe" r="28" fill="none" stroke="${col}" stroke-width="1.1"/>` : ""}
-      <g class="node-core">
-        ${mapPortraitMarkup(a, isWorking)}
-        <circle class="node-ring" r="24" fill="none" stroke="${col}" stroke-width="${isSelected || isWorking ? 2.4 : 1.7}"/>
-      </g>
-      <circle cx="17" cy="17" r="4.8" fill="${isAsk ? "var(--warn)" : isWorking ? col : isOnline ? "var(--ok)" : a.status === "offline" ? "var(--danger)" : "var(--faint)"}" stroke="var(--panel)" stroke-width="2"/>
-      ${chainPos >= 0 ? `<circle class="chain-badge-bg" cx="-18" cy="-18" r="10"/><text class="chain-badge-txt" x="-18" y="-18">${chainPos + 1}</text>` : ""}
-      ${a.isLead ? `<text class="crown" y="${up ? 37 : -32}" fill="var(--accent-text)">LEAD</text>` : ""}
-      <text class="node-label" y="${ly}">${esc(a.name)}</text>
-      <text class="${active ? "node-phase" : "node-sub"}" y="${ly + 13}" ${active ? `fill="${isAsk ? "var(--warn)" : col}"` : ""}>${esc(subText)}</text>
-    </g>`;
-  }
-  $("#mapNodes", svg).innerHTML = nodes;
-  setHoverAgent(null);
-
-  const lead = agentById(S.lead);
-  $("#leadLabel").textContent = lead ? `${lead.name} leads` : "";
-
-  const busy = S.agents.filter((a) => a.status === "working");
-  const ready = S.agents.filter((a) => a.live && a.enabled && a.status !== "offline").length;
-  const cap = $("#mapCaption");
-  cap.classList.toggle("busy", busy.length > 0);
-  if (S.mapMode === "chain") {
-    cap.innerHTML = `<i class="live-dot" aria-hidden="true"></i><span>${S.chain.length ? `${S.chain.length} step${S.chain.length === 1 ? "" : "s"} wired · click more or Launch below` : "Click assistants in order to build a custom relay"}</span>`;
-  } else if (busy.length) {
-    const first = busy[0];
-    cap.innerHTML = `<i class="live-dot" aria-hidden="true"></i><span><b>${esc(first.name)}</b> · ${esc(personaOf(first).thinking.toLowerCase())}…</span>`;
-  } else {
-    cap.innerHTML = `<i class="live-dot" aria-hidden="true"></i><span>${ready} of ${S.agents.length} ready · click to chat · double-click to set Lead</span>`;
-  }
-  renderChainBar();
-}
-
-$("#mapModeSeg")?.addEventListener("click", (e) => {
-  const b = e.target.closest("[data-map-mode]");
-  if (b) setMapMode(b.dataset.mapMode);
-});
-
-$("#mapPulseBtn")?.addEventListener("click", () => {
-  const live = S.agents.filter((a) => a.enabled);
-  if (!live.length) return;
-  SFX.play("dispatch");
-  live.forEach((a, i) => {
-    setTimeout(() => {
-      animateBaton({ from: i === 0 ? "you" : live[i - 1].id, to: a.id, kind: i === 0 ? "delegate" : "handoff" });
-      if (i > 0) SFX.play("baton");
-    }, i * 240);
-  });
-  setTimeout(() => {
-    animateBaton({ from: live[live.length - 1].id, to: "you", kind: "return" });
-    SFX.play("done");
-  }, live.length * 240 + 120);
-});
-
-$("#map").addEventListener("mouseover", (e) => {
-  const node = e.target.closest("[data-map-target]");
-  setHoverAgent(node && node.dataset.mapTarget !== "team" ? node.dataset.mapTarget : null);
-});
-$("#map").addEventListener("mouseleave", () => setHoverAgent(null));
-$("#map").addEventListener("click", (e) => {
-  const node = e.target.closest("[data-map-target]");
-  if (!node) return;
-  const id = node.dataset.mapTarget;
-  if (S.mapMode === "chain") {
-    if (id === "team") return;
-    const prev = S.chain.length ? S.chain[S.chain.length - 1] : "you";
-    if (S.chain.includes(id)) {
-      S.chain = S.chain.filter((x) => x !== id);
-    } else if (S.chain.length >= 6) {
-      toast("Up to 6 steps in a custom relay");
-      return;
-    } else {
-      S.chain.push(id);
-      animateBaton({ from: prev, to: id, kind: prev === "you" ? "delegate" : "handoff" });
-      SFX.play(prev === "you" ? "dispatch" : "baton");
-    }
-    renderMap();
-    return;
-  }
-  focusAgent(id, { switchTab: true });
-});
-$("#map").addEventListener("dblclick", async (e) => {
-  if (S.mapMode !== "explore") return;
-  const node = e.target.closest("[data-map-target]");
-  const id = node?.dataset.mapTarget;
-  if (!id || id === "team" || id === S.lead) return;
-  try {
-    await api("/api/lead", { method: "POST", body: JSON.stringify({ agentId: id }) });
-    toast(`★ ${nameOf(id)} now leads team missions`);
-  } catch (err) {
-    toast(err.message);
-  }
-});
-$("#map").addEventListener("keydown", (e) => {
-  if (e.key !== "Enter" && e.key !== " ") return;
-  const node = e.target.closest("[data-map-target]");
-  if (!node) return;
-  e.preventDefault();
-  node.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-});
-
-$("#mapChainBar")?.addEventListener("click", (e) => {
-  const rm = e.target.closest("[data-chain-rm]");
-  if (rm) {
-    const idx = Number(rm.dataset.chainRm);
-    if (Number.isInteger(idx)) S.chain.splice(idx, 1);
-    renderMap();
-    return;
-  }
-  if (e.target.closest("#chainClear")) {
-    S.chain = [];
-    renderMap();
-  }
-});
-$("#mapChainBar")?.addEventListener("submit", (e) => {
-  e.preventDefault();
-  if (!S.chain.length) return;
-  const goal = $("#chainGoal")?.value.trim();
-  if (!goal) { toast("Type a goal for this relay first"); $("#chainGoal")?.focus(); return; }
-  const chainNames = S.chain.map((id, i) => `Step ${i + 1}: ${nameOf(id)}`).join(" -> ");
-  const prompt = S.chain.length === 1
-    ? `@${S.chain[0]} ${goal}`
-    : `@team Use this handoff sequence (${chainNames}): ${goal}`;
-  S.chain = [];
-  setMapMode("explore");
-  $("#input").value = prompt;
-  autosize();
-  $("#composer").requestSubmit();
-  if (matchMedia("(max-width: 960px)").matches) setTab("thread");
-});
-
-let replayTimers = [];
-function replayLastMission() {
-  const mission = latestTeamMission();
-  if (!mission) return toast("No team mission yet — start one with Team");
-  replayTimers.forEach((t) => clearTimeout(t));
-  replayTimers = [];
-  const seq = [
-    { from: "you", to: mission.goal.agentId, kind: "delegate", taskId: mission.goal.id },
-    ...mission.edges,
-  ];
-  if (mission.goal.status === "done") seq.push({ from: mission.goal.agentId, to: "you", kind: "return", taskId: mission.goal.id });
-  seq.forEach((b, i) => {
-    const handle = setTimeout(() => {
-      animateBaton(b);
-      if (i === 0) SFX.play("dispatch");
-      else if (i === seq.length - 1 && b.to === "you") SFX.play("done");
-      else SFX.play("baton");
-    }, i * 420);
-    replayTimers.push(handle);
+    schedule();
   });
 }
-$("#replayBtn")?.addEventListener("click", replayLastMission);
 
-function jumpToTask(taskId) {
-  const t = S.tasks.get(taskId);
-  const topId = t?.parentId || taskId;
-  const top = S.tasks.get(topId);
-  if (top && S.filter !== "all" && top.channel !== S.filter) {
-    S.filter = "all";
-    renderThreadFilter();
-    renderThread();
-  }
-  if (matchMedia("(max-width: 960px)").matches) setTab("thread", { scrollBottom: false });
-  if (t?.parentId) S.openSteps.add(t.id);
-  const el = $(`#thread [data-task-id="${topId}"]`);
-  if (!el) return toast("Task is older than visible history");
-  el.scrollIntoView({ behavior: "smooth", block: "center" });
-  const bubble = el.querySelector(".bubble") || el;
-  bubble.classList.remove("flash");
-  void bubble.offsetWidth;
-  bubble.classList.add("flash");
-  if (t?.parentId) {
-    const det = el.querySelector(`details[data-step-id="${t.id}"]`);
-    if (det) det.open = true;
-  }
-}
-
-function renderMissionPipeline() {
-  const wrap = $("#missionPipeline");
-  const replayBtn = $("#replayBtn");
-  const select = $("#missionSelect");
-  const missions = recentTeamMissions();
-  const mission = latestTeamMission();
-  if (select) {
-    if (missions.length > 1) {
-      select.hidden = false;
-      const activeId = mission?.goal.id ?? "";
-      select.innerHTML = missions
-        .map((m) => `<option value="${esc(m.goal.id)}" ${m.goal.id === activeId ? "selected" : ""}>${esc(m.goal.title.slice(0, 36))}</option>`)
-        .join("");
-    } else {
-      select.hidden = true;
-    }
-  }
-  if (!wrap) return;
-  if (!mission || !mission.kids.length) {
-    wrap.hidden = true;
-    if (replayBtn) replayBtn.hidden = true;
-    return;
-  }
-  wrap.hidden = false;
-  if (replayBtn) replayBtn.hidden = false;
-
-  const { goal, kids, subtasks } = mission;
-  const plan = kids.find((c) => c.kind === "plan");
-  const synth = kids.find((c) => c.kind === "synthesis");
-  const doneCount = subtasks.filter((s) => s.status === "done").length;
-
-  const depthOf = new Map();
-  const getDepth = (s, seenSet = new Set()) => {
-    if (depthOf.has(s.step)) return depthOf.get(s.step);
-    if (seenSet.has(s.step)) return 0;
-    seenSet.add(s.step);
-    const deps = (s.after ?? []).map((n) => subtasks.find((x) => x.step === n)).filter(Boolean);
-    const d = deps.length ? Math.max(...deps.map((x) => getDepth(x, seenSet))) + 1 : 0;
-    depthOf.set(s.step, d);
-    return d;
-  };
-  const cols = [];
-  if (plan) cols.push([plan]);
-  const byDepth = new Map();
-  for (const s of subtasks) {
-    const d = getDepth(s);
-    if (!byDepth.has(d)) byDepth.set(d, []);
-    byDepth.get(d).push(s);
-  }
-  [...byDepth.keys()].sort((a, b) => a - b).forEach((d) => cols.push(byDepth.get(d)));
-  if (synth) cols.push([synth]);
-
-  const isLive = goal.status === "running" || goal.status === "queued";
-  const elapsed = goal.startedAt
-    ? goal.finishedAt
-      ? fmtMs(Date.parse(goal.finishedAt) - Date.parse(goal.startedAt))
-      : `<span data-since="${esc(goal.startedAt)}">${fmtMs(Date.now() - Date.parse(goal.startedAt))}</span>`
-    : "";
-  const statText = isLive ? `${doneCount}/${subtasks.length} steps · ${elapsed}` : `${goal.status === "done" ? "Done" : stateLabel(goal)} · ${elapsed}`;
-
-  const chip = (c) => {
-    const a = agentById(c.agentId);
-    const role = c.kind === "plan" ? "Plan" : c.kind === "synthesis" ? "Wrap" : `#${c.step ?? ""}`;
-    const mark = c.status === "done" ? "✓" : c.status === "running" ? "◉" : c.status === "failed" || c.status === "blocked" ? "!" : "○";
-    return `<button type="button" class="pipe-chip ${esc(c.status)}" style="--c:${colorOf(c.agentId)}" data-jump-task="${esc(c.id)}" data-hover-agent="${esc(c.agentId)}" title="${esc(c.title)}">
-      <span class="pipe-av">${renderPortraitContent(a ?? { id: c.agentId, name: c.agentId }, c.status === "running", true)}</span>
-      <span>${esc(nameOf(c.agentId))}</span>
-      <span class="pipe-role">${esc(role)}</span>
-      <span class="pipe-mark">${mark}</span>
-    </button>`;
-  };
-
-  wrap.innerHTML = `
-    <div class="pipe-top">
-      <span class="pipe-goal" title="${esc(goal.title)}">${esc(goal.title)}</span>
-      <span class="pipe-stat ${isLive ? "live" : ""}">${statText}</span>
-    </div>
-    <div class="pipe-track">
-      ${cols.map((col, idx) => `${idx > 0 ? '<svg class="pipe-arrow" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h9M9 4.5 12.5 8 9 11.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>' : ""}<div class="pipe-col">${col.map(chip).join("")}</div>`).join("")}
-    </div>`;
-}
-
-$("#missionSelect")?.addEventListener("change", (e) => {
-  S.selectedMissionId = e.target.value || null;
-  renderMap();
-  renderMissionPipeline();
-});
-$("#missionPipeline")?.addEventListener("click", (e) => {
-  const btn = e.target.closest("[data-jump-task]");
-  if (btn) jumpToTask(btn.dataset.jumpTask);
-});
-$("#missionPipeline")?.addEventListener("mouseover", (e) => {
-  const btn = e.target.closest("[data-hover-agent]");
-  setHoverAgent(btn ? btn.dataset.hoverAgent : null);
-});
-$("#missionPipeline")?.addEventListener("mouseleave", () => setHoverAgent(null));
-
-function animateBaton(b) {
-  const layer = $("#mapBatons");
-  const a = S.pos[b.from];
-  const z = S.pos[b.to];
-  if (!layer || !a || !z || matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-  const color = b.kind === "return" || b.kind === "handoff" ? colorOf(b.from) : b.kind === "reroute" ? "var(--warn)" : colorOf(b.to);
-  const mx = (a.x + z.x) / 2, my = (a.y + z.y) / 2;
-  const dx = mx - MAP.cx, dy = my - MAP.cy;
-  const d = Math.hypot(dx, dy) || 1;
-  const bend = b.from === "you" || b.to === "you" ? 18 : 34;
-  const cx = mx + (dx / d) * bend + (d < 2 ? 20 : 0), cy = my + (dy / d) * bend;
-  const ns = "http://www.w3.org/2000/svg";
-  const trail = Array.from({ length: 6 }, (_, i) => {
-    const c = document.createElementNS(ns, "circle");
-    c.setAttribute("r", String(5 - i * 0.7));
-    c.setAttribute("fill", color);
-    c.setAttribute("opacity", String(1 - i * 0.15));
-    layer.appendChild(c);
-    return c;
-  });
-  const glow = document.createElementNS(ns, "circle");
-  glow.setAttribute("r", "11");
-  glow.setAttribute("fill", color);
-  glow.setAttribute("opacity", "0.22");
-  layer.appendChild(glow);
-  const at = (t) => {
-    const u = 1 - t;
-    return [u * u * a.x + 2 * u * t * cx + t * t * z.x, u * u * a.y + 2 * u * t * cy + t * t * z.y];
-  };
-  const start = performance.now();
-  const dur = 1100;
-  const step = (now) => {
-    const raw = Math.min(1, (now - start) / dur);
-    const t = raw < 0.5 ? 2 * raw * raw : 1 - (-2 * raw + 2) ** 2 / 2;
-    trail.forEach((c, i) => {
-      const [x, y] = at(Math.max(0, t - i * 0.035));
-      c.setAttribute("cx", x);
-      c.setAttribute("cy", y);
-    });
-    const [gx, gy] = at(t);
-    glow.setAttribute("cx", gx);
-    glow.setAttribute("cy", gy);
-    if (raw < 1) requestAnimationFrame(step);
-    else {
-      glow.setAttribute("r", "4");
-      let o = 0.6;
-      const fade = () => {
-        o -= 0.06;
-        glow.setAttribute("r", String(Number(glow.getAttribute("r")) + 1.6));
-        glow.setAttribute("opacity", String(Math.max(0, o)));
-        if (o > 0) requestAnimationFrame(fade);
-        else [...trail, glow].forEach((c) => c.remove());
-      };
-      trail.forEach((c) => c.setAttribute("opacity", "0"));
-      requestAnimationFrame(fade);
-    }
-  };
-  requestAnimationFrame(step);
-}
-
-function renderHandoffs() {
-  renderMissionPipeline();
-  const list = S.handoffs.slice(0, 12);
-  $("#handoffs").innerHTML = list.length
-    ? list
-        .map((h) => {
-          const t = S.tasks.get(h.taskId);
-          const key = `${h.taskId}:${h.kind}:${h.from}`;
-          const isOpen = S.openHandoffs.has(key);
-          const verb = h.kind === "return" ? "returned" : h.kind === "reroute" ? "handed off" : h.kind === "handoff" ? "passed to" : "";
-          const snippet = (t?.result || t?.error || t?.prompt || "").replace(/\s+/g, " ").trim();
-          const preview = snippet.length > 200 ? `${snippet.slice(0, 197)}…` : snippet;
-          return `<li class="${enter("handoffs", key).trim()}${isOpen ? " open" : ""}" data-handoff-key="${esc(key)}" data-hover-agent="${esc(h.to)}">
-            <button type="button" class="hrow" aria-expanded="${isOpen ? "true" : "false"}">
-              <span class="route"><span class="dot" style="--c:${colorOf(h.from)}"></span>${esc(nameOf(h.from))}
-                <svg viewBox="0 0 16 16"><path d="M3 8h9M9 4.5 12.5 8 9 11.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                <span class="dot" style="--c:${colorOf(h.to)}"></span>${esc(nameOf(h.to))}</span>
-              <span class="what">${verb ? `<b>${esc(verb)}</b> · ` : ""}${esc(t?.title ?? "")}</span>
-              <time data-ago="${esc(h.at)}">${ago(h.at)}</time>
-            </button>
-            <div class="hpreview">
-              <div>${esc(preview || "Working…")}</div>
-              ${t ? `<button type="button" class="hjump" data-jump-task="${esc(t.id)}">Open in chat →</button>` : ""}
-            </div>
-          </li>`;
-        })
-        .join("")
-    : `<li class="empty" style="display:block">Start a <b>Team mission</b> to watch your crew pass work live.</li>`;
-}
-
-$("#handoffs").addEventListener("click", (e) => {
-  const jump = e.target.closest("[data-jump-task]");
-  if (jump) { e.stopPropagation(); jumpToTask(jump.dataset.jumpTask); return; }
-  const li = e.target.closest("[data-handoff-key]");
-  if (!li) return;
-  const key = li.dataset.handoffKey;
-  const next = !S.openHandoffs.has(key);
-  if (next) S.openHandoffs.add(key);
-  else S.openHandoffs.delete(key);
-  li.classList.toggle("open", next);
-  li.querySelector(".hrow")?.setAttribute("aria-expanded", String(next));
-});
-$("#handoffs").addEventListener("mouseover", (e) => {
-  const li = e.target.closest("[data-hover-agent]");
-  setHoverAgent(li && li.dataset.hoverAgent !== "you" ? li.dataset.hoverAgent : null);
-});
-$("#handoffs").addEventListener("mouseleave", () => setHoverAgent(null));
-
-// ------------------------------------------------------------------ crew cards (clean, living, action-first)
-const STATUS_TEXT = { idle: "Ready", working: "Working", limited: "At limit", paused: "Paused", offline: "Offline" };
-const BILL_HELP = {
-  subscription: "Included with your existing subscription.",
-  local: "Runs locally on your Mac.",
-  metered: "Pay-per-use API.",
-  prepaid: "Spends prepaid credit per use, capped by its monthly budget.",
-};
-
-function renderCompactMeter(a) {
-  const pq = a.providerQuota;
-  if (pq?.live && pq.windows?.length) {
-    return `<div class="meter-row">
-      <div class="meter-bars">
-        ${pq.windows.slice(0, 2).map((w) => {
-          const pct = Math.max(0, Math.min(100, Math.round(w.usedPercent)));
-          const cls = pct >= 92 ? "full" : pct >= 75 ? "warn" : "";
-          const scale = pct > 0 ? Math.max(0.04, pct / 100).toFixed(3) : "0";
-          return `<div class="meter-item" title="${esc(w.label)}: ${pct}% used">
-            <div class="meter-top"><span>${esc(w.label)}</span><b>${pct}%</b></div>
-            <div class="bar ${cls}"><span style="transform:scaleX(${scale})"></span></div>
-          </div>`;
-        }).join("")}
-      </div>
-    </div>`;
-  }
-  if (pq?.live && typeof pq.creditsRemainingUsd === "number") {
-    const rem = pq.creditsRemainingUsd;
-    const spent = typeof pq.periodSpendUsd === "number" ? pq.periodSpendUsd : 0;
-    const total = pq.monthlyCreditsUsd && pq.monthlyCreditsUsd > 0 ? pq.monthlyCreditsUsd : rem + spent;
-    const share = total > 0 ? Math.max(0.04, Math.min(1, rem / total)) : 1;
-    return `<div class="meter-row">
-      <div class="meter-bars">
-        <div class="meter-item">
-          <div class="meter-top"><span>Credits left</span><b>${fmtUsd(rem)}</b></div>
-          <div class="bar ${rem < 2 ? "full" : rem < 10 ? "warn" : ""}"><span style="transform:scaleX(${share.toFixed(3)})"></span></div>
-        </div>
-      </div>
-    </div>`;
-  }
-  return "";
-}
-
-function renderCrew() {
-  const ready = S.agents.filter((a) => a.live && a.enabled && a.status !== "offline").length;
-  const summary = $("#crewSummary");
-  if (summary) summary.textContent = `${ready} of ${S.agents.length} ready`;
-
-  $("#crew").innerHTML = S.agents
-    .map((a, idx) => {
-      const p = personaOf(a);
-      const col = safeColor(a.color);
-      const seed = MOTION_SEED[idx % MOTION_SEED.length];
-      const activeTask = activeTaskFor(a.id);
-      const isAsk = Boolean(activeTask?.awaitingApproval);
-      const isPreview = !isAsk && S.previewWork.has(a.id);
-      const isWorking = (!isAsk && a.status === "working") || isPreview;
-      const avatarState = isAsk ? "ask" : isWorking ? "working" : a.status === "idle" && a.live ? "online" : a.status;
-      const statusCls = isAsk ? "ask" : isWorking ? "working" : a.status;
-      const statusLabel = isAsk
-        ? "Needs OK"
-        : isWorking
-          ? `<span class="eq" aria-hidden="true"><i></i><i></i><i></i></span><span>${esc(p.thinking)}</span>`
-          : esc(STATUS_TEXT[a.status] ?? a.status ?? "");
-
-      let midHtml = "";
-      if (isAsk && activeTask) {
-        midHtml = `<button type="button" class="agent-activity ask" data-go-approvals>
-          <span class="act-text">Needs your OK: ${esc(activeTask.title)}</span>
-          <span class="act-meta">Review →</span>
-        </button>`;
-      } else if (activeTask) {
-        const since = activeTask.startedAt ?? activeTask.createdAt;
-        midHtml = `<div class="agent-activity live">
-          <span class="act-text" title="${esc(activeTask.title)}">${esc(activeTask.title)}</span>
-          <span class="act-meta"><span data-since="${esc(since)}">${fmtMs(Date.now() - Date.parse(since))}</span><button type="button" class="act-cancel" data-cancel="${esc(activeTask.id)}">Stop</button></span>
-        </div>`;
-      } else {
-        const meter = renderCompactMeter(a);
-        if (meter) midHtml = meter;
-      }
-
-      const quickBtn = p.quick
-        ? `<button type="button" class="btn ghost quick-go" data-card-quick="${esc(a.id)}" title="${esc(p.quick.prompt)}"><span>${esc(p.quick.label)}</span></button>`
-        : "";
-
-      const traitsHtml = p.traits.length
-        ? `<div class="trait-row">${p.traits.slice(0, 4).map((t) => `<button type="button" class="trait-chip" data-trait-agent="${esc(a.id)}" data-trait="${esc(t)}" title="Try ${esc(a.name)}'s ${esc(t)} mode">${esc(t)}</button>`).join("")}</div>`
-        : "";
-      const quipHtml = S.activeQuips[a.id] ? `<div class="quip-bubble">${esc(S.activeQuips[a.id])}</div>` : "";
-      const canToggleStatus = !isAsk && !isWorking && (a.status === "idle" || a.status === "paused") && !a.blocked;
-      const statusHtml = canToggleStatus
-        ? `<button type="button" class="status-pill toggleable ${esc(statusCls)}" data-toggle-enabled="${esc(a.id)}" title="${a.enabled ? `Click to pause ${esc(a.name)}` : `Click to resume ${esc(a.name)}`}">${statusLabel}</button>`
-        : `<span class="status-pill ${esc(statusCls)}" title="${esc(isWorking ? p.thinking : STATUS_TEXT[a.status] ?? a.status ?? "")}">${statusLabel}</span>`;
-
-      return `<article class="agent ${a.enabled ? "" : "paused"} ${isWorking ? "is-working" : ""} ${isAsk ? "is-ask" : ""} ${S.target === a.id ? "is-target" : ""}" style="--c:${col};--phase:${seed.phase};--dur:${seed.dur}" data-agent-card="${esc(a.id)}" draggable="true">
-        <div class="agent-top">
-          <button type="button" class="avatar ${esc(avatarState)}" data-preview-avatar="${esc(a.id)}" title="Poke ${esc(a.name)} · ${esc(shortModel(a.model, a))}" aria-label="Wake ${esc(a.name)}">
-            <span class="aura" aria-hidden="true"></span>
-            <span class="sparks" aria-hidden="true"><i></i><i></i><i></i></span>
-            <span class="avatar-stage">${renderPortraitContent(a, isWorking)}</span>
-            <i class="presence-dot" aria-hidden="true"></i>
-          </button>
-          <div class="agent-id">
-            <div class="agent-name-row">
-              ${brandBadgeMarkup(a)}
-              <span class="agent-name">${esc(a.name)}</span>
-              ${a.isLead ? '<span class="lead-star">Lead</span>' : ""}
-            </div>
-            <div class="agent-role">${esc(p.role)}</div>
-          </div>
-          ${statusHtml}
-        </div>
-
-        ${quipHtml}
-        ${traitsHtml}
-        <p class="agent-motto">“${esc(p.motto)}”</p>
-        ${a.tagline ? `<p class="agent-best"><b>Best for</b>${esc(a.tagline)}</p>` : ""}
-
-        ${midHtml}
-
-        <div class="agent-foot">
-          <button type="button" class="btn agent-go" data-ask="${esc(a.id)}">Chat</button>
-          ${quickBtn}
-          <button type="button" class="gear-btn" data-edit="${esc(a.id)}" title="Settings · ${esc(shortModel(a.model, a))} (${esc(levelLabel(a.reasoning))})" aria-label="Settings for ${esc(a.name)}">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3h.1a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8v.1a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
-          </button>
-        </div>
-      </article>`;
-    })
-    .join("");
-}
-
-// Smooth mouse/pen-only cursor parallax without firing on child boundaries
-$("#crew").addEventListener("pointermove", (e) => {
-  if (e.pointerType && e.pointerType !== "mouse" && e.pointerType !== "pen") return;
-  const card = e.target.closest(".agent");
-  if (!card) return;
-  const r = card.getBoundingClientRect();
-  const px = Math.max(-1, Math.min(1, ((e.clientX - r.left) / r.width) * 2 - 1));
-  const py = Math.max(-1, Math.min(1, ((e.clientY - r.top) / r.height) * 2 - 1));
-  card.style.setProperty("--px", px.toFixed(3));
-  card.style.setProperty("--py", py.toFixed(3));
-});
-$("#crew").addEventListener("pointerleave", (e) => {
-  if (e.target instanceof Element && e.target.classList.contains("agent")) {
-    e.target.style.setProperty("--px", "0");
-    e.target.style.setProperty("--py", "0");
-  }
-}, true);
-$("#crew").addEventListener("pointerleave", () => {
-  $$("#crew .agent").forEach((c) => {
-    c.style.setProperty("--px", "0");
-    c.style.setProperty("--py", "0");
-  });
-});
-
-// Drag a crew card straight onto the Chat composer to target that assistant
-$("#crew").addEventListener("dragstart", (e) => {
-  const card = e.target.closest(".agent[data-agent-card]");
-  if (!card) return;
-  const id = card.dataset.agentCard;
-  e.dataTransfer?.setData("text/relay-agent", id);
-  e.dataTransfer?.setData("text/plain", `@${id} `);
-  card.classList.add("dragging");
-});
-$("#crew").addEventListener("dragend", (e) => {
-  const card = e.target.closest(".agent[data-agent-card]");
-  if (card) card.classList.remove("dragging");
-  const comp = $("#composer");
-  comp?.classList.remove("drag-over");
-  comp?.querySelector(".drop-hint")?.remove();
-});
-
-const composerEl = $("#composer");
-composerEl?.addEventListener("dragover", (e) => {
-  if (!e.dataTransfer?.types.includes("text/relay-agent")) return;
-  e.preventDefault();
-  if (!composerEl.classList.contains("drag-over")) {
-    composerEl.classList.add("drag-over");
-    const hint = document.createElement("div");
-    hint.className = "drop-hint";
-    hint.textContent = "Drop to chat with this assistant";
-    composerEl.appendChild(hint);
-  }
-});
-composerEl?.addEventListener("dragleave", (e) => {
-  if (composerEl.contains(e.relatedTarget)) return;
-  composerEl.classList.remove("drag-over");
-  composerEl.querySelector(".drop-hint")?.remove();
-});
-composerEl?.addEventListener("drop", (e) => {
-  const id = e.dataTransfer?.getData("text/relay-agent");
-  composerEl.classList.remove("drag-over");
-  composerEl.querySelector(".drop-hint")?.remove();
-  if (!id || !agentById(id)) return;
-  e.preventDefault();
-  focusAgent(id, { switchTab: true });
-  SFX.play("dispatch");
-  toast(`Talking to ${nameOf(id)}`);
-});
-
-$("#crew").addEventListener("click", async (e) => {
-  const previewBtn = e.target.closest("[data-preview-avatar]");
-  if (previewBtn) {
-    const id = previewBtn.dataset.previewAvatar;
-    if (activeTaskFor(id)?.awaitingApproval) return;
-    clearTimeout(S.previewTimers[id]);
-    const p = personaOf(agentById(id));
-    if (S.previewWork.has(id)) {
-      S.previewWork.delete(id);
-      delete S.activeQuips[id];
-    } else {
-      const nextIdx = (S.quipIdx[id] ?? 0) % p.quips.length;
-      S.quipIdx[id] = nextIdx + 1;
-      S.activeQuips[id] = p.quips[nextIdx];
-      S.previewWork.add(id);
-      SFX.play("baton");
-      S.previewTimers[id] = setTimeout(() => {
-        S.previewWork.delete(id);
-        delete S.activeQuips[id];
-        renderCrew(); renderMap(); renderCrewStrip();
-      }, 4200);
-    }
-    renderCrew(); renderMap(); renderCrewStrip();
-    $(`#crew [data-preview-avatar="${id}"]`)?.focus();
-    return;
-  }
-  const toggleBtn = e.target.closest("[data-toggle-enabled]");
-  if (toggleBtn) {
-    const id = toggleBtn.dataset.toggleEnabled;
-    const a = agentById(id);
-    if (a) await quickUpdateAgent(id, { enabled: !a.enabled }, toggleBtn);
-    return;
-  }
-  const traitBtn = e.target.closest("[data-trait]");
-  if (traitBtn) {
-    const id = traitBtn.dataset.traitAgent;
-    const trait = traitBtn.dataset.trait;
-    const a = agentById(id);
-    const p = personaOf(a);
-    const prompt = p.traitPrompts[trait] || `Use your ${trait.toLowerCase()} strength to help with: `;
-    focusAgent(id, { switchTab: true, prompt });
-    SFX.play("dispatch");
-    return;
-  }
-  const cancelBtn = e.target.closest("[data-cancel]");
-  if (cancelBtn) {
-    try {
-      await api(`/api/tasks/${cancelBtn.dataset.cancel}/cancel`, { method: "POST" });
-      toast("Stopping…");
-    } catch (err) {
-      toast(err.message);
-    }
-    return;
-  }
-  if (e.target.closest("[data-go-approvals]")) {
-    if (matchMedia("(max-width: 960px)").matches) setTab("thread");
-    $("#approvals").scrollIntoView({ behavior: "smooth", block: "start" });
-    return;
-  }
-  const quickBtn = e.target.closest("[data-card-quick]");
-  if (quickBtn) {
-    const a = agentById(quickBtn.dataset.cardQuick);
-    const q = personaOf(a).quick;
-    if (a && q) focusAgent(a.id, { switchTab: true, prompt: q.prompt, run: Boolean(q.run) });
-    return;
-  }
-  const askBtn = e.target.closest("[data-ask]");
-  if (askBtn) { focusAgent(askBtn.dataset.ask, { switchTab: true }); return; }
-  const editBtn = e.target.closest("[data-edit]");
-  if (editBtn) { openEditor(editBtn.dataset.edit, editBtn); return; }
-  const card = e.target.closest(".agent[data-agent-card]");
-  if (card && !e.target.closest("button, a, input, select")) {
-    focusAgent(card.dataset.agentCard);
-  }
-});
-
-// ------------------------------------------------------------------ activity board (interactive filters + actions)
-function renderActivityFilters() {
-  const el = $("#activityFilters");
-  if (!el) return;
-  const pills = [
-    { id: "all", name: "All crew", color: "var(--accent)" },
-    ...S.agents.map((a) => ({ id: a.id, name: a.name, color: safeColor(a.color) })),
-  ];
-  el.innerHTML = pills
-    .map((p) => `<button type="button" class="af-pill ${S.activityAgent === p.id ? "on" : ""}" style="--c:${p.color}" data-af="${esc(p.id)}"><span class="dot"></span>${esc(p.name)}</button>`)
-    .join("");
-}
-
-function tcard(t) {
-  const a = agentById(t.agentId);
-  const secs = t.startedAt
-    ? t.finishedAt
-      ? fmtMs(Date.parse(t.finishedAt) - Date.parse(t.startedAt))
-      : `<span data-since="${esc(t.startedAt)}">${fmtMs(Date.now() - Date.parse(t.startedAt))}</span>`
-    : ago(Date.parse(t.createdAt));
-  const bad = t.status === "failed" || t.status === "blocked" || t.status === "cancelled";
-  const isLive = t.status === "running" || t.status === "queued";
-  const canRetry = !isLive && t.kind !== "plan" && t.kind !== "synthesis" && Boolean(t.display || t.prompt);
-  const actHtml = isLive
-    ? `<div class="tcard-actions"><button type="button" class="tcard-act stop" data-cancel="${esc(t.id)}">Stop</button></div>`
-    : canRetry
-      ? `<div class="tcard-actions"><button type="button" class="tcard-act" data-jump-task="${esc(t.id)}">Open</button><button type="button" class="tcard-act" data-retry-task="${esc(t.id)}">Re-run</button></div>`
-      : "";
-  return `<div class="tcard ${bad ? "err" : ""}${enter("lanes", `${t.id}:${t.status}`)}" style="--c:${safeColor(a?.color)}" data-jump-task="${esc(t.id)}" role="button" tabindex="0">
-    <div class="t">${esc(t.title)}</div>
-    ${bad && t.error ? `<div class="e">${esc(t.error.slice(0, 140))}</div>` : ""}
-    <div class="m"><span class="who"><span class="dot"></span>${esc(a?.name ?? t.agentId)}</span><span>${t.awaitingApproval ? "Needs OK" : secs}</span></div>
-    ${actHtml}
-  </div>`;
-}
-
-function renderLanes() {
-  renderActivityFilters();
-  const q = S.activityQuery.trim().toLowerCase();
-  const work = [...S.tasks.values()].filter((t) => {
-    if (t.kind === "goal") return false;
-    if (S.activityAgent !== "all" && t.agentId !== S.activityAgent) return false;
-    if (q) {
-      const hay = `${t.title || ""} ${t.prompt || ""} ${t.error || ""} ${nameOf(t.agentId)}`.toLowerCase();
-      if (!hay.includes(q)) return false;
-    }
-    return true;
-  });
-  const by = (st) => work.filter((t) => st.includes(t.status));
-  const recent = (arr, n) => arr.sort((x, y) => Date.parse(y.finishedAt ?? y.createdAt) - Date.parse(x.finishedAt ?? x.createdAt)).slice(0, n);
-  const lanes = [
-    ["Active", by(["running", "queued"]), q || S.activityAgent !== "all" ? "No matching active tasks" : "Nothing running right now"],
-    ["Completed", recent(by(["done"]), 18), q || S.activityAgent !== "all" ? "No matching finished tasks" : "Finished work shows up here"],
-    ["Needs attention", recent(by(["failed", "blocked", "cancelled"]), 10), "All clear"],
-  ];
-  $("#lanes").innerHTML = lanes
-    .map(([name, items, emptyText]) => `<div class="lane"><div class="lane-head">${esc(name)}<b>${items.length}</b></div>
-      <div class="lane-list">${items.length ? items.map(tcard).join("") : `<div class="empty">${esc(emptyText)}</div>`}</div></div>`)
-    .join("");
-  const done = work.filter((t) => t.status === "done").length;
-  $("#boardCount").textContent = S.activityAgent !== "all" || q ? `${work.length} matching · ${done} completed` : `${done} completed`;
-}
-
-$("#activitySearch")?.addEventListener("input", (e) => {
-  S.activityQuery = e.target.value || "";
-  renderLanes();
-});
-$("#activityFilters")?.addEventListener("click", (e) => {
-  const b = e.target.closest("[data-af]");
-  if (!b) return;
-  S.activityAgent = b.dataset.af;
-  renderLanes();
-});
-
-function retryTask(taskId) {
-  const t = S.tasks.get(taskId);
-  if (!t) return;
-  const raw = (t.display ?? t.prompt ?? "").trim();
-  if (!raw) return;
-  const cmd = raw.startsWith("@") || raw.startsWith("/")
-    ? raw
-    : t.kind === "goal"
-      ? `@team ${raw}`
-      : `@${t.agentId} ${raw}`;
-  $("#input").value = cmd;
-  autosize();
-  $("#composer").requestSubmit();
-  if (matchMedia("(max-width: 960px)").matches) setTab("thread");
-  toast(`Re-running with ${t.kind === "goal" ? "Team" : nameOf(t.agentId)}…`);
-}
-
-$("#lanes")?.addEventListener("click", async (e) => {
-  const stopBtn = e.target.closest("[data-cancel]");
-  if (stopBtn) {
-    e.stopPropagation();
-    try {
-      await api(`/api/tasks/${stopBtn.dataset.cancel}/cancel`, { method: "POST" });
-      toast("Stopping…");
-    } catch (err) {
-      toast(err.message);
-    }
-    return;
-  }
-  const retryBtn = e.target.closest("[data-retry-task]");
-  if (retryBtn) {
-    e.stopPropagation();
-    retryTask(retryBtn.dataset.retryTask);
-    return;
-  }
-  const c = e.target.closest("[data-jump-task]");
-  if (c) jumpToTask(c.dataset.jumpTask);
-});
-$("#lanes")?.addEventListener("keydown", (e) => {
-  if (e.key !== "Enter" && e.key !== " ") return;
-  const c = e.target.closest(".tcard[data-jump-task]");
-  if (!c || e.target !== c) return;
-  e.preventDefault();
-  jumpToTask(c.dataset.jumpTask);
-});
-
-// ------------------------------------------------------------------ interactive stats
-function metricValue(r, metric) {
-  if (metric === "tokens") return r.tokens || 0;
-  if (metric === "speed") return r.avgMs > 0 ? 1 / r.avgMs : 0;
-  if (metric === "reliability") return r.done + r.failed > 0 ? r.successRate * 100 : 0;
-  return r.done || 0;
-}
-
-function metricLabel(r, metric) {
-  if (metric === "tokens") return `${fmtK(r.tokens)} tok`;
-  if (metric === "speed") return r.avgMs ? fmtMs(r.avgMs) : "—";
-  if (metric === "reliability") return r.done + r.failed ? `${Math.round(r.successRate * 100)}% ok` : "—";
-  return `${r.done} done`;
-}
-
-function renderStatsDetail() {
-  const el = $("#statsDetail");
-  if (!el) return;
-  const id = S.selectedStatAgent;
-  const a = id ? agentById(id) : null;
-  if (!a) { el.hidden = true; return; }
-  const p = personaOf(a);
-  const col = safeColor(a.color);
-  const recent = [...S.tasks.values()]
-    .filter((t) => t.agentId === id && t.status === "done" && t.kind !== "goal")
-    .sort((x, y) => Date.parse(y.finishedAt ?? y.createdAt) - Date.parse(x.finishedAt ?? x.createdAt))
-    .slice(0, 4);
-  el.hidden = false;
-  el.style.setProperty("--c", col);
-  el.innerHTML = `
-    <div class="stats-detail-head">
-      <div class="stats-detail-who">
-        <span class="mini-av" style="--c:${col};width:32px;height:32px;border-radius:9px;overflow:hidden;display:grid;place-items:center">${renderPortraitContent(a, false, true)}</span>
-        <div>
-          <div style="font-weight:700">${esc(a.name)} <span class="muted small" style="font-weight:400">· ${esc(p.role)}</span></div>
-          <div class="muted small">${esc(shortModel(a.model, a))} · ${esc(levelLabel(a.reasoning))} depth</div>
-        </div>
-      </div>
-      <div style="display:flex;gap:6px">
-        <button type="button" class="btn agent-go" style="--c:${col}" data-stat-chat="${esc(a.id)}">Chat with ${esc(a.name)}</button>
-        <button type="button" class="btn ghost" data-stat-close>Close</button>
-      </div>
-    </div>
-    <div class="stats-detail-list">
-      ${recent.length
-        ? recent.map((t) => `<button type="button" class="stats-detail-task" data-jump-task="${esc(t.id)}"><span>${esc(t.title)}</span><span class="muted small mono">${t.startedAt && t.finishedAt ? fmtMs(Date.parse(t.finishedAt) - Date.parse(t.startedAt)) : ago(Date.parse(t.createdAt))}</span></button>`).join("")
-        : `<div class="muted small">No recent finished tasks for ${esc(a.name)} yet.</div>`}
-    </div>`;
-}
-
-function renderRanks() {
-  const baseRows = [...(S.lb[S.period] ?? [])];
-  const rows = baseRows.sort((a, b) => metricValue(b, S.statMetric) - metricValue(a, S.statMetric) || b.done - a.done);
-  const totalDone = rows.reduce((s, r) => s + r.done, 0);
-  const totalTok = rows.reduce((s, r) => s + r.tokens, 0);
-  const cost = S.kpis.costMonth ?? 0;
-  const totalFailed = rows.reduce((s, r) => s + (r.failed ?? 0), 0);
-  const timed = rows.filter((r) => r.avgMs > 0 && r.done > 0);
-  const timedDone = timed.reduce((s, r) => s + r.done, 0);
-  const avgMs = timedDone ? timed.reduce((s, r) => s + r.avgMs * r.done, 0) / timedDone : 0;
-  const success = totalDone + totalFailed ? Math.round((totalDone / (totalDone + totalFailed)) * 100) : null;
-  const tile = (value, label, tone = "") => `<div class="stat-box ${tone}"><span>${label}</span><b>${value}</b></div>`;
-  $("#statsSummary").innerHTML = [
-    tile(totalDone, "Completed", "t-a"),
-    tile(fmtK(totalTok), "Tokens used", "t-b"),
-    tile(avgMs ? fmtMs(avgMs) : "—", "Avg speed", "t-c"),
-    tile(success === null ? "—" : `${success}%`, "Success rate", "t-d"),
-    ...(cost > 0 ? [tile(fmtUsd(cost), "Month spend", "t-e")] : []),
-  ].join("");
-
-  const podiumEl = $("#podium");
-  const eligible = rows.filter((r) => metricValue(r, S.statMetric) > 0);
-  if (!eligible.length) {
-    podiumEl.hidden = true;
-  } else {
-    podiumEl.hidden = false;
-    const top = eligible.slice(0, 3);
-    const max = Math.max(1e-9, ...top.map((r) => metricValue(r, S.statMetric)));
-    const order = [top[1], top[0], top[2]];
-    podiumEl.innerHTML = order
-      .map((r, i) => {
-        if (!r) return `<div></div>`;
-        const a = agentById(r.agentId);
-        const place = i === 1 ? 1 : i === 0 ? 2 : 3;
-        // Podium steps always read 1st > 2nd > 3rd; the value nudges height within each step.
-        const base = place === 1 ? 62 : place === 2 ? 48 : 38;
-        const h = base * (0.82 + 0.18 * (Math.max(0, metricValue(r, S.statMetric)) / max));
-        const av = a ? `<span class="pod-av">${renderPortraitContent(a, false, true)}</span>` : "";
-        return `<button type="button" class="step place-${place} ${S.selectedStatAgent === r.agentId ? "selected" : ""}" style="--c:${safeColor(a?.color)}" data-stat-agent="${esc(r.agentId)}" title="Inspect ${esc(a?.name ?? r.agentId)}'s recent work">
-          <div class="who">${av}<b>${esc(a?.name ?? r.agentId)}</b></div>
-          <div class="col" style="height:${h.toFixed(1)}%"><span class="medal" aria-label="Place ${place}">${place}</span><span class="val">${esc(metricLabel(r, S.statMetric))}</span></div></button>`;
-      })
-      .join("");
-  }
-
-  $("#rankTable").innerHTML =
-    `<div class="rrow head"><span>#</span><span>Assistant</span><span class="num">${S.statMetric === "tokens" ? "Tokens" : '<span class="lbl-full">Completed</span><span class="lbl-short">Done</span>'}</span><span class="num"><span class="lbl-full">Reliability</span><span class="lbl-short">OK</span></span><span class="num"><span class="lbl-full">Avg speed</span><span class="lbl-short">Speed</span></span></div>` +
-    rows
-      .map((r, i) => {
-        const a = agentById(r.agentId);
-        const p = personaOf(a);
-        const sel = S.selectedStatAgent === r.agentId;
-        return `<button type="button" class="rrow clickable ${sel ? "selected" : ""}" style="--c:${safeColor(a?.color)}" data-stat-agent="${esc(r.agentId)}"><span class="n">${i + 1}</span>
-          <span class="a"><span class="dot" style="--c:${safeColor(a?.color)}"></span><span>${esc(a?.name ?? r.agentId)} <span class="role-sub">· ${esc(p.role)}</span></span></span>
-          <span class="num">${S.statMetric === "tokens" ? fmtK(r.tokens) : r.done}</span>
-          <span class="num">${r.done + r.failed ? Math.round(r.successRate * 100) + "%" : "—"}</span>
-          <span class="num">${r.avgMs ? fmtMs(r.avgMs) : "—"}</span></button>`;
-      })
-      .join("");
-  renderStatsDetail();
-}
-
-$("#rankSeg").addEventListener("click", (e) => {
-  const b = e.target.closest("button[data-p]");
-  if (!b) return;
-  S.period = b.dataset.p;
-  $$("#rankSeg button").forEach((x) => {
-    const on = x === b;
-    x.classList.toggle("on", on);
-    x.setAttribute("aria-selected", String(on));
-  });
-  renderRanks();
-});
-$("#rankMetricSeg")?.addEventListener("click", (e) => {
-  const b = e.target.closest("button[data-m]");
-  if (!b) return;
-  S.statMetric = b.dataset.m;
-  $$("#rankMetricSeg button").forEach((x) => {
-    const on = x === b;
-    x.classList.toggle("on", on);
-    x.setAttribute("aria-selected", String(on));
-  });
-  renderRanks();
-});
-const onStatSelect = (e) => {
-  const b = e.target.closest("[data-stat-agent]");
-  if (!b) return;
-  const id = b.dataset.statAgent;
-  S.selectedStatAgent = S.selectedStatAgent === id ? null : id;
-  renderRanks();
-};
-$("#podium")?.addEventListener("click", onStatSelect);
-$("#rankTable")?.addEventListener("click", onStatSelect);
-$("#statsDetail")?.addEventListener("click", (e) => {
-  if (e.target.closest("[data-stat-close]")) { S.selectedStatAgent = null; renderRanks(); return; }
-  const chatBtn = e.target.closest("[data-stat-chat]");
-  if (chatBtn) { focusAgent(chatBtn.dataset.statChat, { switchTab: true }); return; }
-  const jump = e.target.closest("[data-jump-task]");
-  if (jump) jumpToTask(jump.dataset.jumpTask);
-});
-
-// ------------------------------------------------------------------ thread header crew strip
-function renderCrewStrip() {
-  const el = $("#crewStrip");
-  if (!el) return;
-  el.innerHTML = S.agents
-    .map((a) => {
-      const p = personaOf(a);
-      const working = !activeTaskFor(a.id)?.awaitingApproval && (a.status === "working" || S.previewWork.has(a.id));
-      const cls = working ? "working" : a.status === "idle" && a.live ? "online" : a.status;
-      return `<button type="button" class="strip-pip ${esc(cls)} ${S.target === a.id ? "on" : ""}" style="--c:${safeColor(a.color)}" data-strip-target="${esc(a.id)}" title="${esc(a.name)} · ${esc(p.role)}" aria-label="Chat with ${esc(a.name)}">
-        <span class="pip-stage">${renderPortraitContent(a, working, true)}</span>
-        <i aria-hidden="true"></i>
-      </button>`;
-    })
-    .join("");
-}
-$("#crewStrip").addEventListener("click", (e) => {
-  const b = e.target.closest("[data-strip-target]");
-  if (b) focusAgent(b.dataset.stripTarget);
-});
-
-// ------------------------------------------------------------------ thread / chat
-function stateLabel(t) {
-  return { queued: "waiting", running: "working", done: "done", failed: "failed", blocked: "blocked", cancelled: "stopped" }[t.status] ?? t.status;
-}
-
-function thinking(t, label) {
-  const since = t.startedAt ?? t.createdAt;
-  return `<div class="thinking"><span class="bars"><i></i><i></i><i></i></span>${esc(label)}… <span class="mono small" data-since="${esc(since)}">${fmtMs(Date.now() - Date.parse(since))}</span></div>`;
-}
-
-function detailTextFor(t, a) {
-  const modelText = t.servedModel || shortModel(t.model ?? a?.model ?? "", a);
-  const tok = t.usage ? `${fmtK(t.usage.input + t.usage.output)} tokens` : "";
-  const cost = t.costUsd ? fmtUsd(t.costUsd) : "";
-  return [modelText, t.reasoning ? `depth: ${levelLabel(t.reasoning)}` : "", tok, cost].filter(Boolean).join(" · ");
-}
-
-function handoffOptionsFor(t) {
-  const fromName = t.kind === "goal" ? "the team" : nameOf(t.agentId);
-  const enabled = new Set(S.agents.filter((a) => a.enabled).map((a) => a.id));
-  const opts = [];
-  if (enabled.has("zen") && t.agentId !== "zen") {
-    opts.push({ agent: "zen", label: "→ Zen review", prompt: `@zen Pressure-test and critique the reply above from ${fromName}. Call out the biggest flaw and cleanest fix.` });
-  }
-  if (enabled.has("muse") && t.agentId !== "muse") {
-    opts.push({ agent: "muse", label: "→ Muse polish", prompt: `@muse Rewrite the reply above from ${fromName} to be sharper, punchier, and more memorable.` });
-  }
-  if (enabled.has("cline") && t.agentId !== "cline") {
-    opts.push({ agent: "cline", label: "→ Cline build", prompt: `@cline Turn the reply above from ${fromName} into clean, working code or commands.` });
-  }
-  if (enabled.has("hermes") && t.agentId !== "hermes") {
-    opts.push({ agent: "hermes", label: "→ Hermes plan", prompt: `@hermes Turn the reply above from ${fromName} into a crisp step-by-step action plan.` });
-  }
-  opts.push({
-    agent: t.kind === "goal" ? "muse" : t.agentId,
-    label: "Shorter",
-    prompt: `@${t.kind === "goal" ? (enabled.has("muse") ? "muse" : S.lead) : t.agentId} Condense the reply above into 3 crisp bullet points.`,
-  });
-  return opts.slice(0, 5);
-}
-
-function footer(t, a) {
-  const dur = t.startedAt && t.finishedAt ? fmtMs(Date.parse(t.finishedAt) - Date.parse(t.startedAt)) : "";
-  const cancel = t.status === "running" || t.status === "queued" ? `<button type="button" data-cancel="${esc(t.id)}">Stop</button>` : "";
-  const copy = t.status === "done" && t.result ? `<button type="button" data-copy="${esc(t.id)}">Copy</button>` : "";
-  const rerun = t.status === "done" || t.status === "failed" || t.status === "blocked" || t.status === "cancelled"
-    ? `<button type="button" data-rerun="${esc(t.id)}">Re-run</button>`
-    : "";
-  const handoffOpen = S.openHandoffMsg === t.id;
-  const handoffBtn = t.status === "done" && t.result
-    ? `<button type="button" data-toggle-handoff="${esc(t.id)}">${handoffOpen ? "Close handoff" : "Hand off ▾"}</button>`
-    : "";
-  const detailText = detailTextFor(t, a);
-  const showDetails = S.detailMsgs.has(t.id);
-  const detailsBtn = detailText && t.status === "done"
-    ? `<button type="button" data-toggle-detail="${esc(t.id)}">${showDetails ? "Hide details" : "Details"}</button>`
-    : "";
-  const detailLine = detailText ? `<div class="afoot-detail" ${showDetails ? "" : "hidden"}>${esc(detailText)}</div>` : "";
-  const handoffTray = t.status === "done" && t.result
-    ? `<div class="handoff-tray" ${handoffOpen ? "" : "hidden"}>${handoffOptionsFor(t)
-        .map((o) => `<button type="button" class="handoff-chip" style="--c:${colorOf(o.agent)}" data-handoff-cmd="${esc(o.prompt)}"><span class="dot"></span>${esc(o.label)}</button>`)
-        .join("")}</div>`
-    : "";
-  return `<div class="afoot">${dur ? `<span>${dur}</span>` : ""}${copy}${handoffBtn}${rerun}${detailsBtn}${cancel}${handoffTray}${detailLine}</div>`;
-}
-
-function collapsibleBody(id, html, rawText) {
-  const long = isLongReply(rawText);
-  const open = S.expandedMsgs.has(id);
-  if (!long) return `<div class="body">${html}</div>`;
-  return `<div class="body-wrap ${open ? "" : "clamped"}"><div class="body">${html}</div></div>
-    <button type="button" class="expand-btn" data-expand-msg="${esc(id)}">${open ? "Show less" : "Read full reply"}</button>`;
-}
-
-function agentBubble(t) {
-  const a = agentById(t.agentId);
-  const p = personaOf(a);
-  const col = safeColor(a?.color);
-  const working = t.status === "running" || t.status === "queued";
-  const head = `<div class="ahead">
-    <span class="mini-av" style="--c:${col}">${renderPortraitContent(a ?? { id: t.agentId, name: t.agentId }, working, true)}</span>
-    ${brandBadgeMarkup(a, "sm")}
-    <span class="nm">${esc(a?.name ?? t.agentId)}</span>
-    <span class="role-pill">${esc(p.role)}</span>
-  </div>`;
-  const reroute = t.reroutedFrom ? `<div class="reroute">↪ Picked up from ${esc(nameOf(t.reroutedFrom))}</div>` : "";
-  let body;
-  if (t.status === "done") body = collapsibleBody(t.id, md(t.result), t.result);
-  else if (t.awaitingApproval) body = `<div class="needs-ok">Waiting for your OK above (or in Telegram)</div>`;
-  else if (t.status === "running" || t.status === "queued") body = thinking(t, t.status === "queued" ? "In line" : `${a?.name ?? "Assistant"} is ${p.thinking.toLowerCase()}`);
-  else body = `<div class="err-text">${esc(stateLabel(t))}: ${esc(t.error ?? "")}</div>`;
-  return `<div class="msg bot" data-task-id="${esc(t.id)}"><div class="bubble" style="--c:${col}">${head}${reroute}${body}${footer(t, a)}</div></div>`;
-}
-
-function goalBubble(t) {
-  const lead = agentById(t.agentId);
-  const kids = [...S.tasks.values()].filter((c) => c.parentId === t.id).sort((x, y) => Date.parse(x.createdAt) - Date.parse(y.createdAt));
-  const subtasks = kids.filter((c) => c.kind === "subtask");
-  const doneSteps = subtasks.filter((c) => c.status === "done").length;
-  const label = (c) => (c.kind === "plan" ? "Plan" : c.kind === "synthesis" ? "Summary" : nameOf(c.agentId));
-  const stepState = (c) => (c.awaitingApproval ? "Needs OK" : c.status === "queued" && c.after?.length ? "Waiting" : stateLabel(c));
-  const progressLine = subtasks.length
-    ? `<div class="team-progress"><span class="muted small">${doneSteps} of ${subtasks.length} steps done</span>${subtasks.some((c) => c.reroutedFrom) ? '<span class="reroute" style="margin:0">↪ teammate stepped in</span>' : ""}</div>`
-    : "";
-  const steps = kids.length
-    ? `<div class="steps">${progressLine}${kids
-        .map((c) => {
-          const ca = agentById(c.agentId);
-          const cWorking = c.status === "running";
-          const isOpen = S.openSteps.has(c.id) || c.status === "failed" || c.status === "blocked";
-          return `<details data-step-id="${esc(c.id)}"${isOpen ? " open" : ""}><summary><span class="mini-av step-av" style="--c:${colorOf(c.agentId)}">${renderPortraitContent(ca ?? { id: c.agentId, name: c.agentId }, cWorking, true)}</span><span class="sname">${esc(label(c))}</span>
-            <span class="stitle">${esc(c.kind === "subtask" ? c.title : nameOf(c.agentId))}</span><span class="sstate ${c.awaitingApproval ? "ask" : esc(c.status)}">${esc(stepState(c))}</span></summary>
-            <div class="sbody body">${c.status === "done" ? (c.kind === "plan" ? `<pre><code>${esc(c.result)}</code></pre>` : md(c.result)) : c.error ? `<span class="err-text">${esc(c.error)}</span>` : "Working…"}</div></details>`;
-        })
-        .join("")}</div>`
-    : "";
-  let body;
-  if (t.status === "done") body = collapsibleBody(t.id, md(t.result), t.result);
-  else if (t.status === "running" || t.status === "queued") {
-    const activeSub = subtasks.find((c) => c.status === "running");
-    const stage = kids.some((c) => c.kind === "synthesis")
-      ? `${lead?.name ?? "Lead"} wrapping up`
-      : activeSub
-        ? `${nameOf(activeSub.agentId)} is ${personaOf(agentById(activeSub.agentId)).thinking.toLowerCase()}`
-        : `${lead?.name ?? "Lead"} planning the steps`;
-    body = thinking(t, stage);
-  } else body = `<div class="err-text">${esc(stateLabel(t))}: ${esc(t.error ?? "")}</div>`;
-  return `<div class="msg bot" data-task-id="${esc(t.id)}"><div class="bubble" style="--c:var(--accent)">
-    <div class="ahead"><span class="dot" style="--c:var(--accent);background:conic-gradient(var(--a1) 0 33%,var(--a2) 0 66%,var(--a3) 0)"></span><span class="nm">Team</span><span class="role-pill">Led by ${esc(lead?.name ?? "")}</span></div>
-    ${steps}${body}${footer(t, lead)}</div></div>`;
-}
-
-function userBubble(text, meta, cls = "") {
-  return `<div class="msg user${cls}"><div class="meta">${meta}</div><div class="bubble">${esc(text)}</div></div>`;
-}
-
-const TRIES = [
-  ["@team", "Team mission", "Research what's new in AI today, pitch 3 video hooks, and pick the strongest one"],
-  ["@grok", "Live scout", "What's actually moving on X right now?"],
-  ["@muse", "Creative", "Give me 3 punchy hooks for a short video"],
-  ["@hermes", "Operator", "Help me organize my top 3 priorities today"],
-];
-
-function renderThread() {
-  const el = $("#thread");
-  const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
-  const tops = [...S.tasks.values()]
-    .filter((t) => (t.kind === "direct" || t.kind === "goal") && (S.filter === "all" || t.channel === S.filter))
-    .map((t) => ({ at: Date.parse(t.createdAt), t }));
-  const notes = S.filter === "all" || S.filter === "web" ? S.notes.map((n) => ({ at: n.at, n })) : [];
-  const items = [...tops, ...notes].sort((a, b) => a.at - b.at).slice(-80);
-  if (!items.length) {
-    const ids = new Set(S.agents.map((a) => a.id));
-    el.innerHTML = `<div class="welcome"><h3>Your crew is <em>ready.</em></h3>
-      <p>Pick an assistant, drop a goal for the whole team, or click a starter below.</p>
-      <div class="tries">${TRIES.filter(([who]) => who === "@team" || ids.has(who.slice(1)))
-        .map(([who, tag, text]) => `<button type="button" class="try" data-try="${esc(`${who} ${text}`)}"><span><b>${esc(tag)}</b> ${esc(text)}</span><span class="muted">→</span></button>`)
-        .join("")}</div></div>`;
-    return;
-  }
-  el.innerHTML = items
-    .map(({ t, n, at }) => {
-      if (n) {
-        const cls = enter("thread", `note:${at}`);
-        return userBubble(n.text, clock(new Date(at).toISOString()), cls) + `<div class="msg sys${cls}"><div class="bubble">${esc(n.reply)}</div></div>`;
-      }
-      const chan = t.channel === "telegram" ? "Telegram · " : t.channel === "imessage" ? "iMessage · " : "";
-      const to = t.kind === "goal" ? "Team" : nameOf(t.reroutedFrom ?? t.agentId);
-      const meta = `${chan}${clock(t.createdAt)} · To ${esc(to)}`;
-      const cls = enter("thread", t.id);
-      const reply = (t.kind === "goal" ? goalBubble(t) : agentBubble(t)).replace('<div class="msg bot"', `<div class="msg bot${cls}"`);
-      return userBubble(t.display ?? t.prompt, meta, cls) + reply;
-    })
-    .join("");
-  if (nearBottom || renderThread.forceBottom) {
-    el.scrollTop = el.scrollHeight;
-    renderThread.forceBottom = false;
-  }
-}
-
-// Persist user-toggled team steps across SSE re-renders
-$("#thread").addEventListener("toggle", (e) => {
-  const det = e.target;
-  if (!(det instanceof HTMLDetailsElement) || !det.dataset.stepId) return;
-  if (det.open) S.openSteps.add(det.dataset.stepId);
-  else S.openSteps.delete(det.dataset.stepId);
-}, true);
-
-$("#thread").addEventListener("click", async (e) => {
-  const tryBtn = e.target.closest("[data-try]");
-  if (tryBtn) { $("#input").value = tryBtn.dataset.try; autosize(); $("#input").focus(); return; }
-  // Toggle long replies in-place (no scroll jump!)
-  const exp = e.target.closest("[data-expand-msg]");
-  if (exp) {
-    const id = exp.dataset.expandMsg;
-    const next = !S.expandedMsgs.has(id);
-    if (next) S.expandedMsgs.add(id);
-    else S.expandedMsgs.delete(id);
-    exp.previousElementSibling?.classList.toggle("clamped", !next);
-    exp.textContent = next ? "Show less" : "Read full reply";
-    return;
-  }
-  // Toggle inline handoff tray without scroll jump
-  const ho = e.target.closest("[data-toggle-handoff]");
-  if (ho) {
-    const id = ho.dataset.toggleHandoff;
-    const next = S.openHandoffMsg !== id;
-    S.openHandoffMsg = next ? id : null;
-    $$("#thread .handoff-tray").forEach((el) => { el.hidden = true; });
-    $$("#thread [data-toggle-handoff]").forEach((el) => { el.textContent = "Hand off ▾"; });
-    if (next) {
-      ho.textContent = "Close handoff";
-      const tray = ho.closest(".afoot")?.querySelector(".handoff-tray");
-      if (tray) tray.hidden = false;
-    }
-    return;
-  }
-  const hoCmd = e.target.closest("[data-handoff-cmd]");
-  if (hoCmd) {
-    S.openHandoffMsg = null;
-    $("#input").value = hoCmd.dataset.handoffCmd;
-    autosize();
-    $("#composer").requestSubmit();
-    SFX.play("baton");
-    return;
-  }
-  const rerunBtn = e.target.closest("[data-rerun]");
-  if (rerunBtn) {
-    retryTask(rerunBtn.dataset.rerun);
-    return;
-  }
-  // Toggle footer details in-place
-  const det = e.target.closest("[data-toggle-detail]");
-  if (det) {
-    const id = det.dataset.toggleDetail;
-    const next = !S.detailMsgs.has(id);
-    if (next) S.detailMsgs.add(id);
-    else S.detailMsgs.delete(id);
-    det.textContent = next ? "Hide details" : "Details";
-    const box = det.closest(".afoot")?.querySelector(".afoot-detail");
-    if (box) box.hidden = !next;
-    return;
-  }
-  const codeBtn = e.target.closest("[data-copy-code]");
-  if (codeBtn) {
-    const pre = codeBtn.parentElement?.querySelector("code");
-    if (pre) await copyText(pre.textContent || "", "Code copied");
-    return;
-  }
-  const c = e.target.closest("[data-cancel]");
-  if (c) {
-    try {
-      await api(`/api/tasks/${c.dataset.cancel}/cancel`, { method: "POST" });
-      toast("Stopping…");
-    } catch (err) {
-      toast(err.message);
-    }
-    return;
-  }
-  const cp = e.target.closest("[data-copy]");
-  if (cp) {
-    const t = S.tasks.get(cp.dataset.copy);
-    await copyText(t?.result ?? "", "Copied");
-  }
-});
-
-$("#threadFilter")?.addEventListener("click", (e) => {
-  const b = e.target.closest("button[data-f]");
-  if (!b) return;
-  S.filter = b.dataset.f;
-  renderThreadFilter();
-  renderThread.forceBottom = true;
-  renderThread();
-});
-
-// ------------------------------------------------------------------ composer + keyboard slash menu
-function renderTargets() {
-  if (S.target !== "auto" && S.target !== "team" && !agentById(S.target)) S.target = "auto";
-  const chips = [
-    { id: "auto", name: "Auto", cls: "", color: "var(--muted)" },
-    { id: "team", name: "Team", cls: "team", color: "var(--accent)" },
-    ...S.agents.map((a) => ({ id: a.id, name: a.name, cls: a.status === "working" ? "busy" : "", color: safeColor(a.color), off: !a.enabled })),
-  ];
-  $("#targets").innerHTML = chips
-    .map((c) => `<button type="button" class="target ${c.cls} ${S.target === c.id ? "on" : ""}" data-target="${esc(c.id)}" style="--c:${c.color}${c.off ? ";opacity:.45" : ""}"><span class="dot"></span>${esc(c.name)}</button>`)
-    .join("");
-  const a = agentById(S.target);
-  $("#input").placeholder = S.target === "auto"
-    ? "Ask anything — auto-picks the best fit…"
-    : S.target === "team"
-      ? "Give the team a multi-step goal…"
-      : personaOf(a).placeholder;
-}
-
-function renderActiveBar() {
-  const bar = $("#activeBar");
-  if (!bar) return;
-  const activeEl = document.activeElement;
-  if (activeEl && activeEl.matches("#activeBar select")) return;
-
-  if (S.target === "auto" || S.target === "team") { bar.hidden = true; return; }
-  const a = agentById(S.target);
-  if (!a) { bar.hidden = true; return; }
-  bar.hidden = false;
-  const p = personaOf(a);
-  const col = safeColor(a.color);
-  const opts = Array.from(new Set([a.model, ...(a.modelOptions ?? [])]));
-  const modelSel = opts.length > 1
-    ? `<select class="inline-select" data-model-for="${esc(a.id)}" style="--c:${col}" aria-label="Model for ${esc(a.name)}">${modelOptionsMarkup(a)}</select>`
-    : `<span class="chip">${esc(shortModel(a.model, a))}</span>`;
-  const rSel = `<select class="inline-select reasoning" data-reasoning-for="${esc(a.id)}" style="--c:${col}" aria-label="Depth for ${esc(a.name)}">${LEVELS.map((l) => `<option value="${l}" ${a.reasoning === l ? "selected" : ""}>${levelLabel(l)}</option>`).join("")}</select>`;
-  bar.innerHTML = `<div class="active-bar-who">
-      <span class="dot" style="--c:${col}"></span>
-      <b>${esc(a.name)}</b>
-      <span>${esc(p.role)}</span>
-    </div>
-    <div class="active-bar-controls">${modelSel}${rSel}</div>`;
-}
-
-$("#activeBar").addEventListener("change", (e) => {
-  const modelSel = e.target.closest("[data-model-for]");
-  if (modelSel) {
-    const id = modelSel.dataset.modelFor;
-    const a = agentById(id);
-    if (a) void quickUpdateAgent(id, modelPatchFor(a, modelSel.value), modelSel);
-    return;
-  }
-  const rSel = e.target.closest("[data-reasoning-for]");
-  if (rSel) void quickUpdateAgent(rSel.dataset.reasoningFor, { reasoning: rSel.value }, rSel);
-});
-
-$("#targets").addEventListener("click", (e) => {
-  const b = e.target.closest("[data-target]");
-  if (b) focusAgent(b.dataset.target);
-});
-
-const COMMANDS = [
-  ["/doctor", "Run a full health check"],
-  ["/agents", "See models and usage"],
-  ["/status", "What's running right now"],
-  ["/team ", "Start a team mission"],
-  ["/inbox", "Check recent email (read-only)"],
-  ["/inbox summary", "Summarize urgent email"],
-  ["/approvals", "Pending approvals"],
-  ["/help", "Show all commands"],
-];
-
-let slashIdx = 0;
-let slashHits = [];
-
-function autosize() {
-  const t = $("#input");
-  t.style.height = "auto";
-  t.style.height = Math.min(160, t.scrollHeight) + "px";
-}
-
-function renderSlash() {
-  const v = $("#input").value;
-  const box = $("#slash");
-  const lower = v.toLowerCase();
-  if (lower.startsWith("@") && !/\s/.test(lower)) {
-    const q = lower.slice(1);
-    const mentions = [
-      { cmd: "@team ", label: "@team", sub: "Split a goal across the crew", avatar: null, color: "var(--accent)" },
-      ...S.agents.map((a) => ({
-        cmd: `@${a.id} `,
-        label: `@${a.id}`,
-        sub: `${a.name} · ${personaOf(a).role}`,
-        agent: a,
-        color: safeColor(a.color),
-      })),
-    ].filter((m) => m.label.slice(1).includes(q) || m.sub.toLowerCase().includes(q));
-    slashHits = mentions.map((m) => [m.cmd, m.sub, m]);
-    if (!slashHits.length) { box.hidden = true; return; }
-    slashIdx = Math.max(0, Math.min(slashIdx, slashHits.length - 1));
-    box.hidden = false;
-    box.innerHTML = slashHits
-      .map(([c, d, m], i) => `<button type="button" role="option" aria-selected="${i === slashIdx}" class="mention-opt ${i === slashIdx ? "on" : ""}" data-cmd="${esc(c)}">
-        <span class="mention-av" style="--c:${m.color}">${m.agent ? renderPortraitContent(m.agent, false, true) : '<span class="dot" style="background:conic-gradient(var(--a1) 0 33%,var(--a2) 0 66%,var(--a3) 0)"></span>'}</span>
-        <code>${esc(m.label)}</code><span>${esc(d)}</span></button>`)
-      .join("");
-    return;
-  }
-  if (!lower.startsWith("/")) { box.hidden = true; slashHits = []; return; }
-  slashHits = COMMANDS.filter(([c]) => c.toLowerCase().startsWith(lower));
-  if (!slashHits.length || (slashHits.length === 1 && slashHits[0][0].toLowerCase() === lower)) {
-    box.hidden = true;
-    return;
-  }
-  slashIdx = Math.max(0, Math.min(slashIdx, slashHits.length - 1));
-  box.hidden = false;
-  box.innerHTML = slashHits
-    .map(([c, d], i) => `<button type="button" role="option" aria-selected="${i === slashIdx}" class="${i === slashIdx ? "on" : ""}" data-cmd="${esc(c)}"><code>${esc(c.trim())}</code><span>${esc(d)}</span></button>`)
-    .join("");
-}
-
-function pickSlash(cmd) {
-  $("#input").value = cmd;
-  $("#slash").hidden = true;
-  slashHits = [];
-  autosize();
-  $("#input").focus();
-  if (!cmd.endsWith(" ")) $("#composer").requestSubmit();
-}
-
-$("#slash").addEventListener("click", (e) => {
-  const b = e.target.closest("[data-cmd]");
-  if (b) pickSlash(b.dataset.cmd);
-});
-document.addEventListener("click", (e) => {
-  if (!$("#slash").hidden && !e.target.closest("#composer")) $("#slash").hidden = true;
-});
-$("#input").addEventListener("input", () => { slashIdx = 0; autosize(); renderSlash(); });
-$("#input").addEventListener("keydown", (e) => {
-  const slashOpen = !$("#slash").hidden && slashHits.length > 0;
-  if (slashOpen) {
-    if (e.key === "ArrowDown") { e.preventDefault(); slashIdx = (slashIdx + 1) % slashHits.length; renderSlash(); return; }
-    if (e.key === "ArrowUp") { e.preventDefault(); slashIdx = (slashIdx - 1 + slashHits.length) % slashHits.length; renderSlash(); return; }
-    if (e.key === "Tab") { e.preventDefault(); pickSlash(slashHits[slashIdx][0]); return; }
-    if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
-      e.preventDefault();
-      pickSlash(slashHits[slashIdx][0]);
-      return;
-    }
-  }
-  if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
-    e.preventDefault();
-    $("#composer").requestSubmit();
-  }
-});
-
-$("#composer").addEventListener("submit", async (e) => {
-  e.preventDefault();
-  const raw = $("#input").value.trim();
-  if (!raw) return;
-  let text = raw;
-  if (!raw.startsWith("@") && !raw.startsWith("/")) {
-    if (S.target === "team") text = `@team ${raw}`;
-    else if (S.target !== "auto") text = `@${S.target} ${raw}`;
-  }
-  if (S.filter !== "all" && S.filter !== "web") {
-    S.filter = "all";
-    renderThreadFilter();
-  }
-  $("#input").value = "";
-  autosize();
-  $("#slash").hidden = true;
-  renderThread.forceBottom = true;
-
-  const isSlowCmd = /^\/(doctor|health|check|inbox|email|mail)\b/i.test(text);
-  const pendingNote = isSlowCmd ? { at: Date.now(), text: raw, reply: "Checking…" } : null;
-  if (pendingNote) { S.notes.push(pendingNote); renderThread(); }
-
-  try {
-    const res = await api("/api/command", { method: "POST", body: JSON.stringify({ text }) });
-    if (pendingNote) {
-      pendingNote.reply = res.reply;
-      renderThread();
-    } else if (!res.taskId) {
-      S.notes.push({ at: Date.now(), text: raw, reply: res.reply });
-      renderThread();
-    }
-  } catch (err) {
-    if (pendingNote) {
-      S.notes = S.notes.filter((n) => n !== pendingNote);
-      renderThread();
-    }
-    if (err.message !== "locked") {
-      if (!$("#input").value.trim()) { $("#input").value = raw; autosize(); }
-      toast(err.message);
-    }
-  }
-});
-
-// ------------------------------------------------------------------ clean settings drawer
-function quotaBoxLine(pq) {
-  if (!pq) return "";
-  if (!pq.live) return pq.note ? `<br><span class="small">${esc(pq.note)}</span>` : "";
-  const parts = [];
-  if (typeof pq.creditsRemainingUsd === "number") parts.push(`<b>${fmtUsd(pq.creditsRemainingUsd)}</b> left`);
-  if (pq.windows?.length) parts.push(pq.windows.map((w) => `${esc(w.label)} <b>${Math.round(w.usedPercent)}%</b>`).join(" · "));
-  return parts.length ? `<br><span class="small">${esc(pq.provider)}: ${parts.join(" · ")}</span>` : "";
-}
-
-let drawerTrigger = null;
-
-function openEditor(id, triggerEl = null) {
-  const a = agentById(id);
-  if (!a) return;
-  const p = personaOf(a);
-  const col = safeColor(a.color);
-  S.editing = id;
-  drawerTrigger = triggerEl || document.activeElement;
-  const d = $("#drawer");
-  d.style.setProperty("--c", col);
-  const opts = Array.from(new Set([a.model, ...(a.modelOptions ?? [])]));
-  const avState = a.status === "working" ? "working" : a.status === "idle" && a.live ? "online" : a.status;
-  d.innerHTML = `
-    <div class="drawer-head">
-      <div class="avatar lg ${esc(avState)}" id="drawerAvatar" style="--c:${col}">
-        <span class="aura" aria-hidden="true"></span>
-        <span class="sparks" aria-hidden="true"><i></i><i></i><i></i></span>
-        <span class="avatar-stage">${renderPortraitContent(a, a.status === "working")}</span>
-        <i class="presence-dot" aria-hidden="true"></i>
-      </div>
-      <div>
-        <div class="agent-name-row">${brandBadgeMarkup(a)}<h3>${esc(a.name)}</h3></div>
-        <div class="muted small">${esc(p.role)}</div>
-        <div class="preview-row">
-          <div class="preview-toggle" id="avatarPreviewToggle" role="group" aria-label="Preview avatar state">
-            <button type="button" data-av-mode="idle" class="${a.status === "working" ? "" : "on"}">Ready</button>
-            <button type="button" data-av-mode="working" class="${a.status === "working" ? "on" : ""}">Working</button>
-          </div>
-        </div>
-      </div>
-      <button type="button" class="icon-btn x" data-close aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
-    </div>
-    <form class="drawer-body" id="editForm">
-      <div class="grid2">
-        <div class="field"><label for="fRole">Role</label><input class="input" id="fRole" value="${esc(p.role)}" maxlength="60" /></div>
-        <div class="field">
-          <label for="fModelPick">Model</label>
-          <select class="input" id="fModelPick">${modelOptionsMarkup(a)}</select>
-        </div>
-      </div>
-
-      <div class="field">
-        <label for="fMotto">Signature motto</label>
-        <input class="input" id="fMotto" value="${esc(p.motto)}" maxlength="140" />
-      </div>
-
-      <div class="field">
-        <label for="fTraits">Character traits (up to 4, comma-separated)</label>
-        <input class="input" id="fTraits" value="${esc(p.traits.join(", "))}" />
-      </div>
-
-      <div class="field">
-        <label for="fPersonality">Personality summary</label>
-        <textarea class="input short" id="fPersonality" rows="2" maxlength="220">${esc(p.vibe)}</textarea>
-      </div>
-
-      <div class="field">
-        <label for="fSystem">Voice &amp; instructions</label>
-        <textarea class="input" id="fSystem" required maxlength="2400">${esc(a.system || "")}</textarea>
-      </div>
-
-      <div class="field">
-        <span class="lbl">Thinking depth</span>
-        <div class="levels" id="fLevels">${LEVELS.map((l) => `<button type="button" data-level="${l}" class="${a.reasoning === l ? "on" : ""}">${think(l)}${levelLabel(l)}</button>`).join("")}</div>
-      </div>
-
-      <label class="switch"><span><b>Active</b><br><span class="muted small">Paused assistants sit out of rotation.</span></span><input type="checkbox" id="fOn" ${a.enabled ? "checked" : ""}/></label>
-
-      <details class="adv-box">
-        <summary>Advanced · limits, skills &amp; connection</summary>
-        <div class="adv-inner">
-          <div class="conn-box">${a.live ? (a.online === false ? `<span class="err-text">●</span> <b>${esc(a.connectorLabel)}</b> is offline.` : `● Connected via <b>${esc(a.connectorLabel)}</b>${a.billing ? ` · ${esc(BILL_HELP[a.billing])}` : ""}${quotaBoxLine(a.providerQuota)}`) : `◌ <b>${esc(a.connectorLabel)}</b>`}</div>
-          <div class="field">
-            <label for="fModel">Custom model ID</label>
-            <input class="input mono" id="fModel" list="modelList" value="${esc(a.model)}" required spellcheck="false" />
-            <datalist id="modelList">${opts.map((m) => `<option value="${esc(m)}"></option>`).join("")}</datalist>
-          </div>
-          ${a.supportsProvider ? `<div class="field"><label for="fProv">Provider</label><input class="input mono" id="fProv" value="${esc(a.provider)}" placeholder="${esc(a.discoveredProvider || "default")}" spellcheck="false" /></div>` : ""}
-          <div class="grid3">
-            <div class="field"><label for="fReq">Daily asks</label><input class="input mono" id="fReq" type="number" min="0" step="1" value="${a.limits.dailyRequests}"/></div>
-            <div class="field"><label for="fTok">Daily tokens</label><input class="input mono" id="fTok" type="number" min="0" step="1000" value="${a.limits.dailyTokens}"/></div>
-            <div class="field"><label for="fBud">Budget $/mo</label><input class="input mono" id="fBud" type="number" min="0" step="1" value="${a.limits.monthlyBudgetUsd}"/></div>
-          </div>
-          <div class="grid2">
-            <div class="field"><label for="fIn">Input $/1M</label><input class="input mono" id="fIn" type="number" min="0" step="0.01" value="${a.pricing.inputPerMTok}"/></div>
-            <div class="field"><label for="fOut">Output $/1M</label><input class="input mono" id="fOut" type="number" min="0" step="0.01" value="${a.pricing.outputPerMTok}"/></div>
-          </div>
-          <div class="field"><label for="fSkills">Auto-routing keywords</label><input class="input" id="fSkills" value="${esc(a.skills.join(", "))}" /></div>
-          <div class="grid2">
-            <div class="field"><label for="fPar">Parallel tasks</label><input class="input mono" id="fPar" type="number" min="1" max="8" value="${a.maxConcurrent}"/></div>
-            <div class="field"><label for="fTag">Best for</label><input class="input" id="fTag" value="${esc(a.tagline)}" maxlength="120"/></div>
-          </div>
-        </div>
-      </details>
-    </form>
-    <div class="drawer-foot">
-      <button type="button" class="btn ghost" id="makeLead" ${a.isLead ? "disabled" : ""}>${a.isLead ? "★ Team lead" : "Make lead"}</button>
-      <div style="display:flex;gap:8px"><button type="button" class="btn" data-close>Cancel</button><button type="submit" form="editForm" class="btn primary" id="saveAgent">Save</button></div>
-    </div>`;
-  $("#scrim").hidden = false;
-  d.inert = false;
-  d.setAttribute("aria-hidden", "false");
-  requestAnimationFrame(() => { d.classList.add("open"); $("#fRole")?.focus(); });
-}
-
-function closeEditor() {
-  const d = $("#drawer");
-  d.classList.remove("open");
-  d.setAttribute("aria-hidden", "true");
-  d.inert = true;
-  $("#scrim").hidden = true;
-  S.editing = null;
-  if (drawerTrigger instanceof HTMLElement && drawerTrigger.isConnected) drawerTrigger.focus();
-  drawerTrigger = null;
-}
-$("#scrim").addEventListener("click", closeEditor);
-
-$("#drawer").addEventListener("keydown", (e) => trapFocus($("#drawer"), e));
-
-$("#drawer").addEventListener("change", (e) => {
-  const pick = e.target.closest("#fModelPick");
-  if (pick) {
-    const a = agentById(S.editing);
-    const fModel = $("#fModel");
-    if (fModel) fModel.value = pick.value;
-    const fProv = $("#fProv");
-    if (fProv && a?.discoveredProvider) fProv.value = pick.value === "hermes-agent" ? "" : a.discoveredProvider;
-    return;
-  }
-  const fModel = e.target.closest("#fModel");
-  if (fModel) {
-    const pickEl = $("#fModelPick");
-    if (pickEl && [...pickEl.options].some((o) => o.value === fModel.value.trim())) pickEl.value = fModel.value.trim();
-  }
-});
-
-async function saveEditor() {
-  const form = $("#editForm");
-  if (!form || !S.editing) return;
-  if (!form.reportValidity()) return;
-  const model = $("#fModel").value.trim();
-  const system = $("#fSystem").value.trim();
-  if (!model) { toast("Model ID is required"); $("#fModel").focus(); return; }
-  if (!system) { toast("Voice & instructions cannot be empty"); $("#fSystem").focus(); return; }
-
-  const saveBtn = $("#saveAgent");
-  if (saveBtn) saveBtn.disabled = true;
-  const n = (sel) => Number($(sel).value || 0);
-  const patch = {
-    role: $("#fRole").value.trim(),
-    motto: $("#fMotto").value.trim(),
-    traits: $("#fTraits").value.split(",").map((s) => s.trim()).filter(Boolean).slice(0, 4),
-    personality: $("#fPersonality").value.trim(),
-    system,
-    model,
-    ...($("#fProv") ? { provider: $("#fProv").value.trim() } : {}),
-    reasoning: $("#fLevels .on")?.dataset.level,
-    limits: { dailyRequests: n("#fReq"), dailyTokens: n("#fTok"), monthlyBudgetUsd: n("#fBud") },
-    pricing: { inputPerMTok: n("#fIn"), outputPerMTok: n("#fOut") },
-    skills: $("#fSkills").value.split(",").map((s) => s.trim()).filter(Boolean),
-    maxConcurrent: n("#fPar") || 1,
-    tagline: $("#fTag").value.trim(),
-    enabled: $("#fOn").checked,
-  };
-  try {
-    const updated = await api(`/api/agents/${S.editing}`, { method: "PATCH", body: JSON.stringify(patch) });
-    const idx = S.agents.findIndex((x) => x.id === updated.id);
-    if (idx >= 0) S.agents[idx] = updated;
-    dirty.add("agents");
-    flush();
-    toast(`Saved ${updated.name}`);
-    closeEditor();
-  } catch (err) {
-    toast(err.message);
-  } finally {
-    if (saveBtn) saveBtn.disabled = false;
-  }
-}
-
-$("#drawer").addEventListener("submit", (e) => {
-  e.preventDefault();
-  void saveEditor();
-});
-
-$("#drawer").addEventListener("click", async (e) => {
-  if (e.target.closest("[data-close]")) return closeEditor();
-  const avMode = e.target.closest("[data-av-mode]");
-  if (avMode) {
-    const a = agentById(S.editing);
-    if (!a) return;
-    const working = avMode.dataset.avMode === "working";
-    $$("#avatarPreviewToggle button").forEach((b) => b.classList.toggle("on", b === avMode));
-    const av = $("#drawerAvatar");
-    if (av) {
-      av.classList.toggle("working", working);
-      av.classList.toggle("online", !working && a.status === "idle" && a.live);
-    }
-    return;
-  }
-  const lvl = e.target.closest("[data-level]");
-  if (lvl) { $$("#fLevels button").forEach((b) => b.classList.toggle("on", b === lvl)); return; }
-  const leadBtn = e.target.closest("#makeLead");
-  if (leadBtn && S.editing) {
-    leadBtn.disabled = true;
-    const id = S.editing;
-    try {
-      await api("/api/lead", { method: "POST", body: JSON.stringify({ agentId: id }) });
-      toast(`${nameOf(id)} now leads team missions`);
-      closeEditor();
-    } catch (err) {
-      leadBtn.disabled = false;
-      toast(err.message);
-    }
-  }
-});
-
-// ------------------------------------------------------------------ tabs, theme, focus, sound
-function setTab(tab, { scrollBottom = true } = {}) {
-  document.body.dataset.tab = tab;
-  if (tab !== "thread") setView(tab, { syncMobile: false });
-  $$("#tabbar button").forEach((b) => b.classList.toggle("on", b.dataset.go === tab));
-  if (tab === "thread" && scrollBottom) {
-    renderThread.forceBottom = true;
-    renderThread();
-  }
-}
-$("#tabbar").addEventListener("click", (e) => {
-  const b = e.target.closest("[data-go]");
-  if (b) setTab(b.dataset.go);
-});
-
-function applyTheme(theme) {
-  document.documentElement.dataset.theme = theme;
-  document.querySelector('meta[name="theme-color"]').content = theme === "light" ? "#f4f2eb" : "#0b0c10";
-}
-applyTheme(store.get("relay-theme") || (matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark"));
-$("#themeBtn").addEventListener("click", () => {
-  const next = document.documentElement.dataset.theme === "light" ? "dark" : "light";
-  store.set("relay-theme", next);
-  applyTheme(next);
-});
-
-function applyFocus(on, { persist = false } = {}) {
-  S.focusMode = Boolean(on);
-  if (persist) store.set("relay-focus", S.focusMode ? "1" : "0");
-  document.body.classList.toggle("focus-mode", S.focusMode);
-  const btn = $("#focusBtn");
-  if (btn) {
-    btn.classList.toggle("on", S.focusMode);
-    btn.setAttribute("aria-pressed", String(S.focusMode));
-  }
-}
-applyFocus(S.focusMode);
-$("#focusBtn")?.addEventListener("click", () => {
-  const next = !S.focusMode;
-  applyFocus(next, { persist: true });
-  const viewName = S.view[0].toUpperCase() + S.view.slice(1);
-  toast(next ? "Wide chat on" : `${viewName} view on`);
-});
-
-function applySound(on) {
-  S.soundOn = Boolean(on);
-  const btn = $("#soundBtn");
-  if (btn) {
-    btn.classList.toggle("on", S.soundOn);
-    btn.setAttribute("aria-pressed", String(S.soundOn));
-  }
-}
-applySound(S.soundOn);
-$("#soundBtn")?.addEventListener("click", () => {
-  const next = !S.soundOn;
-  store.set("relay-sound", next ? "1" : "0");
-  applySound(next);
-  if (next) SFX.play("baton");
-  toast(next ? "Sound cues on" : "Sound cues muted");
-});
-
-// ------------------------------------------------------------------ Cmd+K palette + unified Escape
-const cmdk = { open: false, idx: 0, items: [], trigger: null };
-
-function cmdkCatalog() {
-  const out = [
-    { group: "Crew", id: "ask-team", title: "Start a Team mission", sub: `${nameOf(S.lead)} coordinates across your crew`, tag: "@team", color: "var(--accent)", iconHtml: "★", run: () => focusAgent("team", { switchTab: true }) },
-  ];
-  for (const a of S.agents) {
-    const p = personaOf(a);
-    out.push({
-      group: "Crew",
-      id: `ask-${a.id}`,
-      title: `Chat with ${a.name}`,
-      sub: `${p.role} · ${p.vibe}`,
-      tag: `@${a.id}`,
-      color: safeColor(a.color),
-      iconHtml: renderPortraitContent(a, false, true),
-      run: () => focusAgent(a.id, { switchTab: true }),
-    });
-  }
-  out.push(
-    { group: "Views", id: "v-studio", title: "Go to Studio", sub: "Quick launch and your crew", tag: "view", iconHtml: "⊞", run: () => setView("studio") },
-    { group: "Views", id: "v-map", title: "Go to Map", sub: "Live handoffs and team relay", tag: "view", iconHtml: "◎", run: () => setView("map") },
-    { group: "Views", id: "v-activity", title: "Go to Activity", sub: "Active, completed, and attention items", tag: "view", iconHtml: "☰", run: () => setView("activity") },
-    { group: "Views", id: "v-stats", title: "Go to Stats", sub: "Crew leaderboard and speed", tag: "view", iconHtml: "▲", run: () => setView("stats") },
-    { group: "Actions", id: "doctor", title: "Run health check", sub: "Check every assistant and channel", tag: "/doctor", iconHtml: "✓", run: () => { if (matchMedia("(max-width: 960px)").matches) setTab("thread"); $("#input").value = "/doctor"; $("#composer").requestSubmit(); } },
-    { group: "Actions", id: "replay", title: "Replay last team relay", sub: "Watch handoffs on the Map", tag: "map", iconHtml: "▶", run: () => { setView("map"); setTimeout(replayLastMission, 120); } },
-  );
-  for (const a of S.agents) {
-    out.push({
-      group: "Settings",
-      id: `settings-${a.id}`,
-      title: `Customize ${a.name}`,
-      sub: `Personality, model, depth (${a.enabled ? "active" : "paused"})`,
-      tag: "edit",
-      color: safeColor(a.color),
-      iconHtml: renderPortraitContent(a, false, true),
-      run: () => openEditor(a.id),
-    });
-  }
-  out.push(
-    { group: "Workspace", id: "toggle-focus", title: S.focusMode ? "Show Studio sidebar" : "Wide chat mode", sub: "Toggle focused full-width chat", tag: "view", iconHtml: "⛶", run: () => $("#focusBtn")?.click() },
-    { group: "Workspace", id: "toggle-sound", title: S.soundOn ? "Mute sound cues" : "Enable sound cues", sub: "Subtle dispatch and completion chimes", tag: "audio", iconHtml: S.soundOn ? "🔇" : "🔊", run: () => $("#soundBtn")?.click() },
-    { group: "Workspace", id: "toggle-theme", title: "Switch Dark / Light theme", sub: "Change appearance", tag: "theme", iconHtml: "◐", run: () => $("#themeBtn")?.click() },
-  );
-  return out;
-}
-
-function renderCmdk() {
-  const q = ($("#cmdkInput")?.value || "").trim().toLowerCase();
-  const terms = q ? q.split(/\s+/) : [];
-  const all = cmdkCatalog();
-  cmdk.items = terms.length
-    ? all.filter((it) => terms.every((t) => `${it.title} ${it.sub} ${it.tag} ${it.group}`.toLowerCase().includes(t)))
-    : all;
-  cmdk.idx = Math.max(0, Math.min(cmdk.idx, Math.max(0, cmdk.items.length - 1)));
-  const list = $("#cmdkList");
-  if (!cmdk.items.length) { list.innerHTML = `<div class="cmdk-empty">No matches for “${esc(q)}”</div>`; return; }
-  let lastGroup = "";
-  list.innerHTML = cmdk.items
-    .map((it, i) => {
-      const hdr = it.group !== lastGroup ? `<div class="cmdk-group">${esc(it.group)}</div>` : "";
-      lastGroup = it.group;
-      return `${hdr}<button type="button" class="cmdk-item${i === cmdk.idx ? " on" : ""}" role="option" aria-selected="${i === cmdk.idx}" data-cmdk-i="${i}" style="--c:${safeColor(it.color)}">
-        <span class="cmdk-icon">${it.iconHtml}</span>
-        <span class="cmdk-main"><span class="cmdk-title">${esc(it.title)}</span><span class="cmdk-sub">${esc(it.sub)}</span></span>
-        <span class="cmdk-tag">${esc(it.tag)}</span>
-      </button>`;
-    })
-    .join("");
-  list.querySelector(".cmdk-item.on")?.scrollIntoView({ block: "nearest" });
-}
-
-function openCmdk() {
-  if (!$("#lock").hidden) return;
-  cmdk.open = true; cmdk.idx = 0; cmdk.trigger = document.activeElement;
-  $("#cmdkWrap").hidden = false;
-  $("#cmdkInput").value = "";
-  renderCmdk();
-  requestAnimationFrame(() => $("#cmdkInput").focus());
-}
-function closeCmdk({ restoreFocus = true } = {}) {
-  cmdk.open = false;
-  $("#cmdkWrap").hidden = true;
-  if (restoreFocus && cmdk.trigger instanceof HTMLElement && cmdk.trigger.isConnected) cmdk.trigger.focus();
-  cmdk.trigger = null;
-}
-function runCmdk(i) {
-  const it = cmdk.items[i];
-  if (!it) return;
-  closeCmdk({ restoreFocus: false });
-  it.run();
-}
-
-$("#cmdBtn")?.addEventListener("click", openCmdk);
-$("#cmdkWrap")?.addEventListener("click", (e) => {
-  if (e.target === $("#cmdkWrap")) return closeCmdk();
-  const btn = e.target.closest("[data-cmdk-i]");
-  if (btn) runCmdk(Number(btn.dataset.cmdkI));
-});
-$("#cmdkWrap")?.addEventListener("keydown", (e) => trapFocus($("#cmdkWrap"), e));
-$("#cmdkInput")?.addEventListener("input", () => { cmdk.idx = 0; renderCmdk(); });
-
-document.addEventListener("keydown", (e) => {
-  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
-    if (!$("#lock").hidden) return;
-    e.preventDefault();
-    cmdk.open ? closeCmdk() : openCmdk();
-    return;
-  }
-  if (e.key === "Escape") {
-    if (cmdk.open) { e.preventDefault(); closeCmdk(); return; }
-    if (S.editing) { e.preventDefault(); closeEditor(); return; }
-    if (!$("#slash").hidden) { e.preventDefault(); $("#slash").hidden = true; return; }
-  }
-  if (!cmdk.open) return;
-  if (e.key === "ArrowDown") { e.preventDefault(); cmdk.idx = Math.min(cmdk.items.length - 1, cmdk.idx + 1); renderCmdk(); }
-  else if (e.key === "ArrowUp") { e.preventDefault(); cmdk.idx = Math.max(0, cmdk.idx - 1); renderCmdk(); }
-  else if (e.key === "Enter") { e.preventDefault(); runCmdk(cmdk.idx); }
-});
-
-// ------------------------------------------------------------------ approvals
-function pendingApprovals() { return S.approvals.filter((a) => a.status === "pending"); }
-function untilText(iso) {
-  const s = Math.max(0, Math.round((Date.parse(iso) - Date.now()) / 1000));
-  return s >= 60 ? `${Math.ceil(s / 60)}m` : `${s}s`;
-}
-
-let lastApprovalKey = "";
-function renderApprovals() {
-  const open = pendingApprovals();
-  const key = open.map((a) => `${a.id}:${a.status}:${a.kind}`).join("|");
-  const el = $("#approvals");
-  const tab = $('#tabbar [data-go="thread"]');
-  if (tab) tab.dataset.badge = open.length ? String(open.length) : "";
-  // Avoid wiping a focused question input if the pending approval set hasn't changed.
-  if (key === lastApprovalKey && el.contains(document.activeElement)) return;
-  lastApprovalKey = key;
-
-  const drafts = Object.fromEntries($$("#approvals [data-answer-for]").map((i) => [i.dataset.answerFor, i.value]));
-  el.innerHTML = open
-    .map((a) => a.kind === "question" ? `<form class="ask-card" style="--c:${colorOf(a.agentId)}" data-question="${esc(a.id)}">
-      <div class="ask-head"><span class="dot"></span><b>${esc(a.agentName)} has a question</b></div>
-      <div class="ask-detail">${esc(a.detail)}</div>
-      <input class="input" data-answer-for="${esc(a.id)}" placeholder="Type your answer…" value="${esc(drafts[a.id] ?? "")}" autocomplete="off" />
-      <div class="ask-foot">
-        <span class="muted small">Expires in <span data-until="${esc(a.expiresAt)}">${untilText(a.expiresAt)}</span></span>
-        <span class="ask-btns"><button type="button" class="btn" data-decide="${esc(a.id)}" data-approve="0">Skip</button><button type="submit" class="btn primary">Send</button></span>
-      </div>
-    </form>` : `<div class="ask-card" style="--c:${colorOf(a.agentId)}">
-      <div class="ask-head"><span class="dot"></span><b>${esc(a.title)}</b></div>
-      <div class="ask-detail">${esc(a.detail)}</div>
-      <div class="ask-foot">
-        <span class="muted small">Auto-denies in <span data-until="${esc(a.expiresAt)}">${untilText(a.expiresAt)}</span></span>
-        <span class="ask-btns"><button type="button" class="btn" data-decide="${esc(a.id)}" data-approve="0">Deny</button><button type="button" class="btn primary" data-decide="${esc(a.id)}" data-approve="1">Approve</button></span>
-      </div>
-    </div>`)
-    .join("");
-}
-
-$("#approvals").addEventListener("click", async (e) => {
-  const b = e.target.closest("[data-decide]");
-  if (!b) return;
-  b.disabled = true;
-  try {
-    const a = await api(`/api/approvals/${b.dataset.decide}`, { method: "POST", body: JSON.stringify({ approve: b.dataset.approve === "1" }) });
-    toast(a.status === "approved" ? "Approved" : a.status === "denied" ? "Denied" : `Already ${a.status}`);
-  } catch (err) {
-    b.disabled = false; toast(err.message);
-  }
-});
-$("#approvals").addEventListener("submit", async (e) => {
-  e.preventDefault();
-  const form = e.target.closest("[data-question]");
-  if (!form) return;
-  const input = form.querySelector("[data-answer-for]");
-  const submitBtn = form.querySelector('button[type="submit"]');
-  const answer = input.value.trim();
-  if (!answer) return input.focus();
-  if (submitBtn) submitBtn.disabled = true;
-  try {
-    const a = await api(`/api/approvals/${form.dataset.question}`, { method: "POST", body: JSON.stringify({ answer }) });
-    toast(a.status === "approved" ? `Sent to ${a.agentName}` : `Already ${a.status}`);
-  } catch (err) {
-    if (submitBtn) submitBtn.disabled = false;
-    toast(err.message);
-  }
-});
-
-$("#kpis").addEventListener("click", (e) => {
-  if (!e.target.closest("[data-go-approvals]")) return;
-  if (matchMedia("(max-width: 960px)").matches) setTab("thread");
-  $("#approvals").scrollIntoView({ behavior: "smooth", block: "start" });
-  if (typeof Notification !== "undefined" && Notification.permission === "default") Notification.requestPermission().catch(() => {});
-});
-
-setInterval(() => {
-  $$("[data-until]").forEach((el) => (el.textContent = untilText(el.dataset.until)));
-}, 1000);
-setInterval(() => {
-  $$("[data-since]").forEach((el) => (el.textContent = fmtMs(Date.now() - Date.parse(el.dataset.since))));
-  $$("[data-ago]").forEach((el) => (el.textContent = ago(Number(el.dataset.ago))));
-}, 1000);
-
-async function boot(retryDelay = 2000) {
+async function boot(delay = 1500) {
   try {
     applySnapshot(await api("/api/state"));
     connect();
   } catch (err) {
-    if (err.message !== "locked") {
-      S.connected = false;
-      renderKpis();
-      toast(`Can't reach Relay — retrying…`);
-      setTimeout(() => void boot(Math.min(10000, retryDelay * 1.5)), retryDelay);
-    }
+    if (err.message === "locked") return;
+    S.connected = false;
+    updateChrome(route());
+    main.innerHTML = `<div class="view"><div class="drafting" role="status"><span>Can't reach Causeway on this Mac. Retrying…</span></div></div>`;
+    setTimeout(() => void boot(Math.min(10_000, delay * 1.5)), delay);
   }
 }
-
-setView(S.view, { keepFocus: true, syncMobile: false });
-setTab("thread", { scrollBottom: false });
 void boot();

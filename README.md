@@ -1,24 +1,26 @@
-# Relay
+# Causeway
 
-One place to run all your AI agents together. Talk to Grok, Muse, and Hermes from one dashboard, Telegram, or iMessage. Give the crew a goal and the lead agent splits it, delegates in parallel, and hands back one answer.
+Direct a crew of AI specialists. Describe the outcome you want; Causeway recommends who does each step, why, and what runs in parallel. You edit the plan, launch it, and watch the work hand off between specialists until one finished answer lands. Works from the dashboard, Telegram, or iMessage.
+
+Causeway was called Relay. Internal names are unchanged so existing installs keep working: `RELAY_*` settings in `.env`, the `com.relay.hub` background service, `npm run relay:update`, and the `~/agent-loop-runner` folder.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 [![CI](https://github.com/TonkaToyXL/agent-loop-runner/actions/workflows/ci.yml/badge.svg)](https://github.com/TonkaToyXL/agent-loop-runner/actions/workflows/ci.yml)
 [![Node >=22.13](https://img.shields.io/badge/node-%3E%3D22.13-brightgreen)](./package.json)
 
-![Relay dashboard](docs/relay-dashboard.jpg)
+![Causeway run view: parallel steps, a handoff, and the step inspector](docs/causeway-run.jpg)
 
 ## What it does
 
-- **One thread for every agent.** `@grok`, `@muse`, `@hermes`, or plain text (Relay picks the best agent from its strengths).
-- **Team mode, step by step.** `@team <goal>`: the lead plans up to 6 steps. Independent steps run in parallel; a step that needs earlier work waits for it and gets those results (research → draft → review). The lead writes the wrap-up. Watch the baton move on the crew map.
-- **Read-only email.** `/inbox`, `/inbox unread`, `/inbox search <words>` list mail with no AI involved; `/inbox summary` (or "anything urgent in my email?") has one text-only agent you choose summarize it. Relay can't send, delete, move, or mark mail as read.
-- **Approve from your phone.** Nothing acts for you without a tap. When Hermes or Grok Bot is about to send, post, buy, delete, or pay, and whenever Hermes pauses mid-task for permission, you get **Approve / Deny** buttons in Telegram and on the dashboard. No answer in 15 minutes = deny.
-- **Limits that reroute.** Daily request/token caps and a monthly budget per agent. When one agent is capped, auto-routed and team work moves to a teammate; direct asks stop and say why.
-- **Model and reasoning labels everywhere**, editable from the dashboard or by chat (`/model grok grok-4-fast-reasoning`, `/reasoning hermes high`).
-- **Dashboard:** who's working, board of queued/working/done/failed, leaderboard of who did the most work, tokens, spend, and provider rate-limit headroom when the provider reports it.
-- **Phone control** through Telegram and iMessage, with allowlists.
-- **Works before you add keys.** Agents without keys run in a labeled demo mode so you can try the whole flow first.
+- **Start with a goal, review the plan.** Causeway drafts a plan: the specialist for each step, the reason, what runs in parallel, which steps are peer reviews, and which will ask for your OK. Swap specialists, rewrite steps, change what builds on what, then launch.
+- **Watch the crew work together.** The run view shows parallel waves, dependencies, handoffs as they land, reviews, blockers, and the final output. Open any step to see the findings it built on and what it handed off.
+- **Every specialist has a lane.** Each profile shows what it does best, the tools it can actually use, what it's doing now, and its recent work. Talk to one directly, or reassign work without losing context.
+- **You stay in control.** Anything that needs you (approvals, questions, blocked steps) shows in pink on every screen and in Telegram. Specialists that can act (Hermes on your Mac, Grok Bot on X) ask before sending, posting, spending, or changing things; no answer in 15 minutes means no. Stop a run or a step, or redirect a step to someone else with your note.
+- **Lessons you approve.** After a run, Causeway proposes a reusable playbook and planning notes from what actually happened (a backup that worked, an approval that timed out). Approved notes go into the planner's brief. No agent is retrained.
+- **Read-only email.** `/inbox`, `/inbox unread`, `/inbox search <words>`, and `/inbox summary`. Causeway can't send, delete, move, or mark mail as read.
+- **Limits that reroute, and no surprise bills.** Daily caps and monthly budgets per specialist; pay-per-use APIs are blocked unless you allow them.
+- **Fast to drive.** `N` new goal, `⌘K` command palette, `!` what needs you, `G` then `O/R/C/P/S` to jump around. Opt-in sound cues for a finished run or an approval request. Reduced motion is respected.
+- **Works before you add keys.** Specialists without keys run in a labeled demo mode so you can try the whole flow first.
 
 ## Set up on a Mac (one command)
 
