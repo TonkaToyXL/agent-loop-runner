@@ -139,7 +139,16 @@ function waitForWebhook(taskId: string, timeoutMs: number, signal: AbortSignal) 
   let settle: Settle = () => {};
   const promise = new Promise<string>((resolve, reject) => {
     const onAbort = () => settle(new Error("Cancelled"));
-    const timer = setTimeout(() => settle(new Error(`No webhook reply after ${Math.round(timeoutMs / 1000)}s`)), timeoutMs);
+    const timer = setTimeout(
+      () =>
+        settle(
+          new Error(
+            `No webhook reply after ${Math.round(timeoutMs / 1000)}s. The routine accepted the task but never called Relay back. ` +
+              "In its run history, check: did it run, is its computer this Mac, and is relay-reply.sh allowed to run without asking?",
+          ),
+        ),
+      timeoutMs,
+    );
     settle = (err, text) => {
       clearTimeout(timer);
       signal.removeEventListener("abort", onAbort);
