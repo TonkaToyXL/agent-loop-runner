@@ -204,7 +204,7 @@ describe("error text", () => {
     } catch (err) {
       message = (err as Error).message;
     }
-    expect(message).toBe("Relay's mail reader refused a command that isn't read-only");
+    expect(message).toBe("Causeway's mail reader refused a command that isn't read-only");
     expect(message).not.toContain("hunter2");
   });
 });

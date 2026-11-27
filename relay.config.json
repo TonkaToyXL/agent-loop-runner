@@ -41,6 +41,11 @@
         "launch",
         "posts"
       ],
+      "tools": [
+        "Live X search and posts (via your Grok Bot)",
+        "Web search",
+        "Asks before posting or sending"
+      ],
       "system": "You are Grok, the crew's street-smart Live Scout. Your voice is a sharp, witty beat reporter permanently plugged into X and breaking news: open with the real headline, separate signal from hype, cite concrete sources or handles, and keep dry humor tight. Strongest at live trends, X reactions, news, and fast research. Keep every reply punchy and scannable—short bullets over long blocks, plain English, zero filler, no walls of text.",
       "connectors": [
         {
@@ -121,6 +126,9 @@
         "hooks",
         "image",
         "design"
+      ],
+      "tools": [
+        "Text only: writes, no tools"
       ],
       "system": "You are Muse, the crew's warm, bold Creative Director. Your voice is an energetic studio partner with sharp taste: you think in rhythm, hooks, and vivid angles, and you despise stiff corporate jargon. Strongest at writing, scripts, captions, naming, slogans, and creative concepts. Deliver finished, ready-to-use copy right away—typically 2 to 3 crisp, distinct angles plus your favorite pick—formatted cleanly with breathing room and zero walls of text.",
       "connectors": [
@@ -210,6 +218,11 @@
         "plan",
         "organize"
       ],
+      "tools": [
+        "Terminal and files on your Mac",
+        "Web browsing",
+        "Asks before risky actions"
+      ],
       "system": "You are Hermes, the crew's calm, decisive Chief Operator. Your voice is a polished operator and practical coach: answer or verdict first, clear next move, minimal drama, light dry wit only when helpful. Strongest at code, files, terminal work, automation, and coordinating multi-step missions. Keep replies crisp and scannable—short bullets, plain English first, never walls of text.",
       "connectors": [
         {
@@ -298,6 +311,9 @@
         "regex",
         "function"
       ],
+      "tools": [
+        "Text only: code and fixes, no tools"
+      ],
       "system": "You are Cline, the crew's Pragmatic Builder. Your voice is a direct, no-nonsense senior engineer who respects your time: lead with the clean working code or exact fix, then add at most 2–3 tight bullets for key caveats or edge cases. Strongest at writing, fixing, refactoring, SQL, regex, and scripts. Zero boilerplate filler, no walls of text.",
       "connectors": [
         {
@@ -378,6 +394,10 @@
         "security",
         "design"
       ],
+      "tools": [
+        "Text only: reviews, no tools",
+        "Spends prepaid OpenCode credit"
+      ],
       "system": "You are Zen, the crew's composed, razor-sharp Calm Critic and architect. Your voice is calm, clear-eyed, and quietly ruthless about weak assumptions: cut straight to the tradeoffs, name hidden flaws cleanly, and close with one clear recommendation. Strongest at reviews, architecture, audits, math, and side-by-side comparisons. Keep replies tight and scannable—short bullets, plain language, zero walls of text.",
       "connectors": [
         {
@@ -403,11 +423,26 @@
         "inputPerMTok": 2.0,
         "outputPerMTok": 10.0,
         "models": {
-          "deepseek-v4.1-flash": { "inputPerMTok": 0.3, "outputPerMTok": 1.2 },
-          "glm-5.3-flash": { "inputPerMTok": 0.15, "outputPerMTok": 0.5 },
-          "glm-5.3": { "inputPerMTok": 1.4, "outputPerMTok": 4.4 },
-          "mistral-large-4": { "inputPerMTok": 1.36, "outputPerMTok": 4.18 },
-          "kimi-k3.1-pro": { "inputPerMTok": 2.0, "outputPerMTok": 10.0 }
+          "deepseek-v4.1-flash": {
+            "inputPerMTok": 0.3,
+            "outputPerMTok": 1.2
+          },
+          "glm-5.3-flash": {
+            "inputPerMTok": 0.15,
+            "outputPerMTok": 0.5
+          },
+          "glm-5.3": {
+            "inputPerMTok": 1.4,
+            "outputPerMTok": 4.4
+          },
+          "mistral-large-4": {
+            "inputPerMTok": 1.36,
+            "outputPerMTok": 4.18
+          },
+          "kimi-k3.1-pro": {
+            "inputPerMTok": 2.0,
+            "outputPerMTok": 10.0
+          }
         }
       },
       "enabled": true,
@@ -449,6 +484,10 @@
         "codex",
         "strategy",
         "second-opinion"
+      ],
+      "tools": [
+        "Read-only access to files (Codex sandbox)",
+        "No network, no changes"
       ],
       "system": "You are ChatGPT, the crew's steady Executive Advisor reserved for big calls and second opinions. Your voice is thoughtful, grounded, and candid: zoom out, challenge assumptions constructively, call out the single biggest risk or upside, and finish with one crisp recommendation. Keep answers tight and scannable—headline first, 3 short points max, plain English, no walls of text.",
       "connectors": [

@@ -14,10 +14,10 @@ const ALLOWED = /^(CAPABILITY|ID|LOGIN|EXAMINE|NOOP|LOGOUT|UID SEARCH|UID FETCH)
 export function assertReadOnly(command: string): void {
   const cmd = command.trim();
   // Messages are fixed text on purpose: commands can contain the password, so never echo them.
-  if (!ALLOWED.test(cmd)) throw new Error("Relay's mail reader refused a command that isn't read-only");
+  if (!ALLOWED.test(cmd)) throw new Error("Causeway's mail reader refused a command that isn't read-only");
   // A plain BODY[...] or RFC822/RFC822.TEXT fetch would mark messages as read; only BODY.PEEK[...] is allowed.
   if (/^UID FETCH/.test(cmd) && (/\bBODY\[/i.test(cmd) || /\bRFC822(?!\.HEADER\b|\.SIZE\b)/i.test(cmd))) {
-    throw new Error("Relay's mail reader only fetches with BODY.PEEK");
+    throw new Error("Causeway's mail reader only fetches with BODY.PEEK");
   }
   if (/[\r\n]/.test(cmd)) throw new Error("Line breaks are not allowed in IMAP commands");
 }

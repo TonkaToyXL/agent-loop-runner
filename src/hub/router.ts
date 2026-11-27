@@ -317,7 +317,7 @@ export function pickAgent(text: string, agents: RoutableAgent[], fallback: strin
 }
 
 export const HELP_TEXT = [
-  "Relay: one line to all your agents.",
+  "Causeway: one line to your whole crew.",
   "",
   "@grok <ask>       talk to one agent",
   "@team <goal>      lead plans, crew splits the work",

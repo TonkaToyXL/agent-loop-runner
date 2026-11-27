@@ -127,6 +127,8 @@ export interface AgentConfig {
   optional: boolean;
   /** Can act outside Relay (run commands, use accounts). Risky-sounding tasks need your OK first. */
   actsInWorld: boolean;
+  /** Plain-English list of what this agent can actually use (shown on its profile). */
+  tools: string[];
 }
 
 export type EditableAgentFields = Pick<
@@ -188,6 +190,14 @@ export interface Task {
   untrustedData?: boolean;
   /** Id of the approval this task is waiting on, if any. */
   awaitingApproval?: string;
+  /** Team steps: why this specialist got the step. */
+  why?: string;
+  /** Goals: where the plan came from. */
+  planSource?: "owner" | "planner" | "fallback" | "fast";
+  /** Set when the owner redirected this work; the id of the task that replaced or continued it. */
+  redirectedTo?: string;
+  /** Set on a task the owner started from another one (redirect / follow-up). */
+  continues?: string;
   replyTo?: ReplyTarget;
 }
 
@@ -244,4 +254,26 @@ export interface ChannelStatus {
   enabled: boolean;
   connected: boolean;
   detail: string;
+}
+
+export type LessonKind = "playbook" | "note";
+export type LessonStatus = "proposed" | "approved" | "dismissed";
+
+/**
+ * Something learned from a finished run, proposed by Relay from what actually happened.
+ * Approved notes are added to the planner's brief; approved playbooks can start a new plan.
+ * Nothing here retrains an agent.
+ */
+export interface Lesson {
+  id: string;
+  kind: LessonKind;
+  status: LessonStatus;
+  createdAt: string;
+  /** The goal run this came from. */
+  goalId: string;
+  title: string;
+  /** Note text (notes) or a short description (playbooks). Owner-editable. */
+  text: string;
+  /** Playbooks: the plan that worked, ready to reuse. */
+  steps?: { agentId: string; task: string; after: number[]; why?: string }[];
 }

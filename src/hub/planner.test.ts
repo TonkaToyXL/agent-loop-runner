@@ -9,6 +9,9 @@ import {
   stepPrompt,
   synthesisPrompt,
   type PlannerAgent,
+  explainStep,
+  planWaves,
+  validatePlan,
 } from "./planner.js";
 
 const team: PlannerAgent[] = [
@@ -220,5 +223,41 @@ describe("planPrompt delegation rules", () => {
     expect(p).toMatch(/cannot contact or message each other/);
     expect(p).toMatch(/give each of them their own step/);
     expect(p).toMatch(/do not\s+tell an agent to send, share, post/);
+  });
+});
+
+describe("plan review helpers", () => {
+  const team = [
+    { id: "grok", name: "Grok", skills: ["news", "x"], tagline: "Live X and news", role: "Live Scout", enabled: true },
+    { id: "muse", name: "Muse", skills: ["hooks", "copy"], tagline: "Hooks and copy", role: "Creative Director", enabled: true },
+    { id: "zen", name: "Zen", skills: ["review"], tagline: "Sharp reviews", enabled: false },
+  ];
+
+  it("groups steps into parallel waves", () => {
+    expect(planWaves([{ agentId: "a", task: "x", after: [] }, { agentId: "b", task: "y", after: [] }, { agentId: "c", task: "z", after: [0, 1] }, { agentId: "d", task: "w", after: [2] }])).toEqual([0, 0, 1, 2]);
+  });
+
+  it("explains a step from the planner's reason, or the specialist's role and matching skills", () => {
+    expect(explainStep({ agentId: "grok", task: "find news", after: [], why: "fresh X takes" }, team)).toBe("fresh X takes");
+    expect(explainStep({ agentId: "grok", task: "find the latest news on x", after: [] }, team)).toBe("Live Scout: Live X and news (matches news, x).");
+  });
+
+  it("checks an owner-edited plan", () => {
+    expect(validatePlan([{ agentId: "grok", task: "find", after: [] }, { agentId: "muse", task: "write", after: [0] }], team)).toEqual({
+      steps: [{ agentId: "grok", task: "find", after: [] }, { agentId: "muse", task: "write", after: [0] }],
+    });
+    expect(validatePlan([], team)).toEqual({ error: "The plan needs at least one step." });
+    expect(validatePlan([{ agentId: "zen", task: "review", after: [] }], team)).toEqual({ error: "Step 1: pick an available specialist." });
+    expect(validatePlan([{ agentId: "grok", task: "  ", after: [] }], team)).toEqual({ error: "Step 1: say what this step should produce." });
+    expect(validatePlan([{ agentId: "grok", task: "a", after: [0] }], team)).toEqual({ error: "Step 1 can only build on earlier steps." });
+    expect(validatePlan(Array.from({ length: 7 }, () => ({ agentId: "grok", task: "a", after: [] })), team)).toEqual({ error: "Keep it to 6 steps or fewer." });
+  });
+
+  it("reads the planner's reason and adds owner-approved notes to the brief", () => {
+    const parsed = parsePlan('[{"step":1,"agent":"grok","task":"find","why":"live X"}]', ["grok"]);
+    expect(parsed).toEqual([{ agentId: "grok", task: "find", after: [], why: "live X" }]);
+    const p = planPrompt("goal", team, ["Prefer Zen for SQL reviews."]);
+    expect(p).toMatch(/Planning notes the owner approved[\s\S]*- Prefer Zen for SQL reviews\./);
+    expect(planPrompt("goal", team)).not.toMatch(/Planning notes/);
   });
 });

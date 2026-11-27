@@ -31,6 +31,10 @@ import {
   type PlannerAgent,
   type PlanStep,
   type StepResult,
+  explainStep,
+  isReviewStep,
+  planWaves,
+  validatePlan,
 } from "./planner.js";
 import { HELP_TEXT, isRollCall, parseCommand, pickAgent } from "./router.js";
 import { fetchProviderQuota, formatProviderQuotaSummary, providerQuotaKey } from "./quota.js";
@@ -45,6 +49,7 @@ import type {
   ReplyTarget,
   Task,
   TaskKind,
+  Lesson,
 } from "./types.js";
 import { agentUsage, costOf, leaderboard, limitState, startOfDay, type AgentUsage, type LimitState } from "./usage.js";
 
@@ -151,7 +156,7 @@ export function findAgentBrandLogo(agentId: string, webRoot = resolve(process.en
 
 /** Plain check-in: no tools, no outward actions, so it never needs an approval. */
 export const ROLL_CALL_PROMPT =
-  "Roll call from Relay (your team hub): answer in one short line. Say hi and name the one thing you're best at. No tools or actions needed.";
+  "Roll call from Causeway (your crew's hub): answer in one short line. Say hi and name the one thing you're best at. No tools or actions needed.";
 
 /** Chat apps show markdown markers literally; keep the text, drop the markers. */
 export function toPlainText(md: string): string {
@@ -170,6 +175,8 @@ export class Hub {
   private readonly waiters = new Map<string, (() => void)[]>();
   /** Requests started but not yet recorded in usage, per agent. */
   private readonly inFlight = new Map<string, number>();
+  /** Owner redirects waiting to be applied to a team step: step task id -> new agent and/or note. */
+  private readonly redirects = new Map<string, { agentId: string; note: string }>();
   private readonly health = new Map<string, { ok: boolean; detail: string }>();
   private readonly discoveredModels = new Map<string, DiscoveredModels>();
   private readonly providerQuotas = new Map<string, ProviderQuota>();
@@ -257,13 +264,13 @@ export class Hub {
       this.version = "";
     }
     const live = this.agents().filter((a) => resolveConnector(a).live).map((a) => a.name);
-    this.notifyOwner(`🟢 Relay is running on ${hostname()}.\nCrew: ${live.join(", ") || "none connected yet"}.\nSend /doctor for a full check.`);
+    this.notifyOwner(`🌴 Causeway is up on ${hostname()}.\nCrew: ${live.join(", ") || "none connected yet"}.\nSend /doctor for a full check.`);
   }
 
   /** Full health report, readable on a phone. */
   async doctorText(): Promise<string> {
     const up = Math.round((Date.now() - this.startedAt) / 60_000);
-    const lines = [`🩺 Relay check · ${hostname()} · up ${up < 90 ? `${up}m` : `${Math.round(up / 60)}h`}${this.version ? ` · ${this.version}` : ""}`, "", "Agents"];
+    const lines = [`🩺 Causeway check · ${hostname()} · up ${up < 90 ? `${up}m` : `${Math.round(up / 60)}h`}${this.version ? ` · ${this.version}` : ""}`, "", "Agents"];
     for (const a of this.agents()) {
       const v = this.agentView(a);
       const icon = v.blocked ? "⛔" : !v.live ? "⚪" : v.online === false ? "🔴" : !v.enabled ? "⏸" : !v.limit.ok ? "🟡" : "✅";
@@ -752,6 +759,7 @@ export class Hub {
       },
       channels: [...this.channels.values()].map((c) => c.status()),
       approvals: this.approvals.items.slice(-30),
+      lessons: this.store.state.lessons.slice(-60),
     };
   }
 
@@ -845,7 +853,7 @@ export class Hub {
         const limit = this.limitFor(target);
         if (!target.enabled) return { reply: `${target.name} is paused. Turn it back on in the dashboard, or try @team.` };
         const conn = resolveConnector(target);
-        if (conn.blocked) return { reply: `${target.name} is off: its only connection is pay-per-use, and Relay blocks paid APIs. Try @team or another agent.` };
+        if (conn.blocked) return { reply: `${target.name} is off: its only connection is pay-per-use, and Causeway blocks paid APIs. Try @team or another agent.` };
         if (!limit.ok) return { reply: `${target.name} hit its ${limit.reason}. Raise the limit or ask someone else.` };
         const task = this.submitDirect(cmd.agentId, cmd.text, origin, "explicit");
         const a = this.agent(task.agentId)!;
@@ -887,7 +895,7 @@ export class Hub {
     if (!id || id === "none") return { why: "No agent is allowed to read your email yet (MAIL_SUMMARIZER isn't set)." };
     const agent = this.agent(id);
     if (!agent) return { why: `MAIL_SUMMARIZER is "${id}", but there's no such agent connected.` };
-    if (agent.actsInWorld) return { why: `${agent.name} can act on your computer or accounts, so Relay won't let it read email (an email could try to give it orders).` };
+    if (agent.actsInWorld) return { why: `${agent.name} can act on your computer or accounts, so Causeway won't let it read email (an email could try to give it orders).` };
     if (!agent.enabled || !resolveConnector(agent).live) return { why: `${agent.name} is off or not connected right now.` };
     return { agent };
   }
@@ -1011,7 +1019,7 @@ export class Hub {
     return task;
   }
 
-  submitGoal(goal: string, origin: ReplyTarget): Task {
+  submitGoal(goal: string, origin: ReplyTarget, preset?: PlanStep[]): Task {
     const task = this.createTask({
       kind: "goal",
       agentId: this.leadId,
@@ -1019,9 +1027,232 @@ export class Hub {
       channel: origin.channel,
       replyTo: origin,
       routing: "auto",
+      ...(preset ? { planSource: "owner" as const } : {}),
     });
-    void this.runGoal(task).finally(() => this.deliver(task));
+    void this.runGoal(task, preset).finally(() => this.deliver(task));
     return task;
+  }
+
+  /** Launch a goal with a plan the owner reviewed (and maybe edited). Throws a PublicError if the plan isn't valid. */
+  launchGoal(goal: string, rawSteps: unknown, origin: ReplyTarget): Task {
+    const text = goal.trim();
+    if (!text) throw new PublicError("Describe the goal first.");
+    const checked = validatePlan(rawSteps, this.team());
+    if ("error" in checked) throw new PublicError(checked.error);
+    return this.submitGoal(text.slice(0, 20_000), origin, checked.steps);
+  }
+
+  /** Owner-approved planning notes, newest first, as given to the planner. */
+  approvedNotes(): string[] {
+    return this.store.state.lessons
+      .filter((l) => l.kind === "note" && l.status === "approved" && l.text.trim())
+      .slice(-8)
+      .reverse()
+      .map((l) => l.text.trim());
+  }
+
+  /** Plan a goal (planner call, fast path, or fallback) without running it. Shared by drafts and runs. */
+  private async buildPlan(
+    goalText: string,
+    opts: { parentId?: string; chatCtx?: string; title?: string },
+  ): Promise<{ steps: PlanStep[]; source: "planner" | "fallback" | "fast"; plannerId: string }> {
+    const lead = this.agent(this.leadId);
+    if (!lead) throw new PublicError("No agents are currently available.");
+    const team = this.team();
+    const planner = this.orchestratorFor(lead);
+    if (shouldFastTrackSingleStep(goalText)) {
+      const pool = this.routableWithLoad();
+      const fallback = pool.some((a) => a.id === lead.id) ? lead.id : pool[0]?.id ?? lead.id;
+      const pickedId = pickAgent(goalText, pool, fallback);
+      return { steps: [{ agentId: pickedId, task: goalText, after: [], why: "A small, single-specialist ask: no plan needed." }], source: "fast", plannerId: planner.id };
+    }
+    const planTask = this.createTask({
+      kind: "plan",
+      agentId: planner.id,
+      ...(opts.parentId ? { parentId: opts.parentId } : {}),
+      prompt: planPrompt(`${goalText}${opts.chatCtx ?? ""}`, team, this.approvedNotes()),
+      title: opts.title ?? `Plan: ${titleOf(goalText)}`,
+      channel: "system",
+      routing: "auto",
+    });
+    try {
+      const reply = await this.execute(planTask, "plan", planTask.prompt);
+      const parsed = parsePlan(reply, team.filter((a) => a.enabled).map((a) => a.id));
+      if (parsed) return { steps: refinePlan(parsed, team), source: "planner", plannerId: planner.id };
+    } catch {
+      // fall through to the keyword fallback
+    }
+    return { steps: refinePlan(fallbackPlan(goalText, team), team), source: "fallback", plannerId: planner.id };
+  }
+
+  /**
+   * Recommend a plan for the owner to review before launch: who does what, why, and what runs in parallel.
+   * Nothing runs except the planning call itself. A saved playbook skips the planner entirely.
+   */
+  async draftPlan(goal: string, opts: { playbookId?: string } = {}) {
+    const text = goal.trim();
+    if (!text) throw new PublicError("Describe the goal first.");
+    if (text.length > 20_000) throw new PublicError("That goal is too long.");
+    const team = this.team();
+    let steps: PlanStep[];
+    let source: "planner" | "fallback" | "fast" | "playbook";
+    let plannerId = this.orchestratorFor(this.agent(this.leadId) ?? this.agents()[0]).id;
+    if (opts.playbookId) {
+      const book = this.store.state.lessons.find((l) => l.id === opts.playbookId && l.kind === "playbook" && l.status === "approved");
+      if (!book?.steps?.length) throw new PublicError("That playbook isn't available.", 404);
+      const checked = validatePlan(book.steps, team);
+      if ("error" in checked) throw new PublicError(`That playbook no longer fits your crew: ${checked.error}`);
+      steps = checked.steps;
+      source = "playbook";
+    } else {
+      const built = await this.buildPlan(text, { title: `Draft plan: ${titleOf(text)}` });
+      steps = built.steps;
+      source = built.source;
+      plannerId = built.plannerId;
+    }
+    const waves = planWaves(steps);
+    return {
+      goal: text,
+      source,
+      planner: { id: plannerId, name: this.agent(plannerId)?.name ?? plannerId },
+      notes: this.approvedNotes(),
+      steps: steps.map((st, i) => {
+        const a = this.agent(st.agentId);
+        const v = a ? this.agentView(a) : undefined;
+        return {
+          agentId: st.agentId,
+          task: st.task,
+          after: st.after,
+          why: explainStep(st, team),
+          wave: waves[i],
+          review: st.after.length > 0 && isReviewStep(st.task),
+          needsApproval: Boolean(a?.actsInWorld && riskyAction(st.task)),
+          agentStatus: v ? (v.live ? v.status : "demo") : "missing",
+        };
+      }),
+    };
+  }
+
+  /**
+   * Redirect work: hand it to another specialist and/or add your direction, without losing context.
+   * A step in a running team goal is restarted in place (its inputs come along). Anything else
+   * becomes a new task that carries the original ask and the earlier attempt as fenced context.
+   */
+  redirect(taskId: string, opts: { agentId?: string; note?: string }, origin: ReplyTarget): { taskId: string; mode: "step" | "new" } {
+    const task = this.store.state.tasks.find((t) => t.id === taskId);
+    if (!task) throw new PublicError("That task isn't here anymore.", 404);
+    if (task.kind === "goal" || task.kind === "plan") throw new PublicError("Redirect a single step, or start a new goal.");
+    const agentId = (opts.agentId ?? task.agentId).trim().toLowerCase();
+    const target = this.agent(agentId);
+    if (!target || !target.enabled) throw new PublicError("Pick an available specialist.");
+    const note = (opts.note ?? "").trim().slice(0, 2000);
+    if (agentId === task.agentId && !note) throw new PublicError("Pick a different specialist or add a note.");
+    if (task.untrustedData && target.actsInWorld) throw new PublicError(`This work read untrusted content, so it can't go to ${target.name}, which can act on your accounts.`);
+
+    const parent = task.parentId ? this.store.state.tasks.find((t) => t.id === task.parentId) : undefined;
+    const live = task.status === "queued" || task.status === "running";
+    if (task.kind === "subtask" && parent?.status === "running" && live) {
+      this.redirects.set(task.id, { agentId, note });
+      const ctrl = this.controllers.get(task.id);
+      if (ctrl) {
+        this.approvals.cancelForTask(task.id);
+        ctrl.abort();
+      }
+      return { taskId: task.id, mode: "step" };
+    }
+
+    if (live) this.cancel(task.id);
+    const base = (task.display ?? task.prompt).trim();
+    const ask = note ? `${base}\n\nOwner's direction: ${note}` : base;
+    const earlier = task.result ?? task.error;
+    const prevName = this.agent(task.agentId)?.name ?? task.agentId;
+    const prompt = earlier ? stepPrompt(ask, [{ step: 1, agentName: prevName, ok: task.status === "done", text: earlier }]) : ask;
+    const next = this.submitDirect(agentId, prompt, origin, "explicit", {
+      title: titleOf(base),
+      display: note ? `${base} — ${note}` : base,
+      ...(task.untrustedData ? { untrustedData: true } : {}),
+    });
+    next.continues = task.id;
+    task.redirectedTo = next.id;
+    this.touch(next);
+    this.touch(task);
+    return { taskId: next.id, mode: "new" };
+  }
+
+  /** Approve, dismiss, or edit a proposed lesson. */
+  updateLesson(id: string, patch: { status?: unknown; text?: unknown; title?: unknown }): Lesson {
+    const lesson = this.store.state.lessons.find((l) => l.id === id);
+    if (!lesson) throw new PublicError("That lesson isn't here anymore.", 404);
+    if (patch.status !== undefined) {
+      if (patch.status !== "approved" && patch.status !== "dismissed" && patch.status !== "proposed") throw new PublicError("status must be approved, dismissed, or proposed");
+      lesson.status = patch.status;
+    }
+    if (patch.text !== undefined) {
+      const text = String(patch.text).trim();
+      if (!text) throw new PublicError("A lesson needs some text.");
+      lesson.text = text.slice(0, 600);
+    }
+    if (patch.title !== undefined) {
+      const title = String(patch.title).trim();
+      if (title) lesson.title = title.slice(0, 120);
+    }
+    this.store.save();
+    this.emit("lessons", this.store.state.lessons.slice(-60));
+    return lesson;
+  }
+
+  /**
+   * Propose lessons from what actually happened in a finished run: the plan as a reusable playbook,
+   * and planning notes from reroutes, expired approvals, failures, and the owner's own redirects.
+   * They stay proposals until the owner approves them.
+   */
+  private proposeLessons(goal: Task): void {
+    if (goal.status !== "done" && goal.status !== "failed") return;
+    const subs = this.store.state.tasks
+      .filter((t) => t.parentId === goal.id && t.kind === "subtask")
+      .sort((a, b) => (a.step ?? 0) - (b.step ?? 0));
+    if (!subs.length) return;
+    const name = (id: string) => this.agent(id)?.name ?? id;
+    const short = (t: Task) => titleOf(t.prompt).slice(0, 60);
+    const existing = new Set(this.store.state.lessons.filter((l) => l.status !== "dismissed").map((l) => l.text));
+    const fresh: Lesson[] = [];
+    const add = (kind: Lesson["kind"], title: string, text: string, steps?: Lesson["steps"]) => {
+      if (existing.has(text)) return;
+      existing.add(text);
+      fresh.push({ id: randomUUID().slice(0, 8), kind, status: "proposed", createdAt: new Date().toISOString(), goalId: goal.id, title, text, ...(steps ? { steps } : {}) });
+    };
+
+    const succeeded = goal.status === "done" && subs.every((s) => s.status === "done");
+    if (succeeded && subs.length >= 2) {
+      const secs = goal.startedAt && goal.finishedAt ? Math.round((Date.parse(goal.finishedAt) - Date.parse(goal.startedAt)) / 1000) : 0;
+      add(
+        "playbook",
+        `Playbook: ${titleOf(goal.prompt)}`,
+        `${subs.length} steps · ${[...new Set(subs.map((s) => name(s.agentId)))].join(", ")}${secs ? ` · finished in ${secs < 90 ? `${secs}s` : `${Math.round(secs / 60)} min`}` : ""}`,
+        subs.map((s) => ({ agentId: s.agentId, task: s.prompt, after: (s.after ?? []).map((n) => n - 1), ...(s.why ? { why: s.why } : {}) })),
+      );
+    }
+    for (const s of subs) {
+      if (s.reroutedFrom && s.status === "done") {
+        add("note", "Backup that worked", `If ${name(s.reroutedFrom)} can't take a step like "${short(s)}", ${name(s.agentId)} can cover it.`);
+      }
+      if (s.status === "blocked" && /No answer within/.test(s.error ?? "")) {
+        add("note", "Approval that timed out", `Keep ${name(s.agentId)}'s research steps free of words like send, post, share, or upload, so they don't wait on approval.`);
+      }
+      if (s.status === "failed" && s.error) {
+        add("note", `${name(s.agentId)} failed`, `${name(s.agentId)} failed on "${short(s)}" (${s.error.slice(0, 120)}). Consider another specialist for this kind of step.`);
+      }
+    }
+    for (const t of this.store.state.tasks) {
+      if (t.continues && subs.some((s) => s.id === t.continues)) {
+        const from = subs.find((s) => s.id === t.continues)!;
+        if (from.agentId !== t.agentId) add("note", "Your reassignment", `For steps like "${short(from)}", prefer ${name(t.agentId)} over ${name(from.agentId)}.`);
+      }
+    }
+    if (!fresh.length) return;
+    this.store.state.lessons.push(...fresh);
+    this.store.save();
+    this.emit("lessons", this.store.state.lessons.slice(-60));
   }
 
   cancel(taskId: string): boolean {
@@ -1043,7 +1274,7 @@ export class Hub {
     return true;
   }
 
-  private async runGoal(goal: Task): Promise<void> {
+  private async runGoal(goal: Task, preset?: PlanStep[]): Promise<void> {
     const lead = this.agent(this.leadId);
     if (!lead) {
       this.fail(goal, "blocked", "No agents are currently available.");
@@ -1068,29 +1299,15 @@ export class Hub {
         ? this.recentContext(goal.replyTo, goal.prompt, { force: false, targetActsInWorld: teamHasWorldAgent })
         : "";
       let steps: PlanStep[];
-      if (shouldFastTrackSingleStep(goal.prompt)) {
-        const pool = this.routableWithLoad();
-        const fallback = pool.some((a) => a.id === lead.id) ? lead.id : pool[0]?.id ?? lead.id;
-        const pickedId = pickAgent(goal.prompt, pool, fallback);
-        steps = [{ agentId: pickedId, task: goal.prompt, after: [] }];
+      if (preset) {
+        steps = preset;
+        goal.planSource = "owner";
       } else {
-        const planTask = this.createTask({
-          kind: "plan",
-          agentId: planner.id,
-          parentId: goal.id,
-          prompt: planPrompt(`${goal.prompt}${chatCtx}`, team),
-          title: `Plan: ${titleOf(goal.prompt)}`,
-          channel: "system",
-          routing: "auto",
-        });
-        try {
-          const reply = await this.execute(planTask, "plan", planTask.prompt);
-          const parsed = parsePlan(reply, team.filter((a) => a.enabled).map((a) => a.id));
-          steps = refinePlan(parsed ?? fallbackPlan(goal.prompt, team), team);
-        } catch {
-          steps = refinePlan(fallbackPlan(goal.prompt, team), team);
-        }
+        const built = await this.buildPlan(goal.prompt, { parentId: goal.id, chatCtx });
+        steps = built.steps;
+        goal.planSource = built.source;
       }
+      this.touch(goal);
       if (controller.signal.aborted) throw new Error("Cancelled");
       if (!steps.length) throw new Error("No available agents could take on this team goal.");
 
@@ -1105,6 +1322,7 @@ export class Hub {
           routing: "auto",
           step: i + 1,
           after: step.after.map((d) => d + 1),
+          why: explainStep(step, team),
         }),
       );
       const usedLater = new Set(steps.flatMap((s) => s.after));
@@ -1120,6 +1338,22 @@ export class Hub {
           results[i] = { step: i + 1, agentName: nameOf(i), ok: false, text: "Cancelled" };
           finished.add(i);
           return;
+        }
+        const pending = this.redirects.get(sub.id);
+        if (pending) {
+          this.redirects.delete(sub.id);
+          if (pending.agentId !== sub.agentId) {
+            this.baton({ from: sub.agentId, to: pending.agentId, taskId: sub.id, kind: "reroute" });
+            sub.reroutedFrom = sub.agentId;
+            sub.agentId = pending.agentId;
+            sub.model = this.agent(pending.agentId)?.model;
+            sub.why = "You reassigned this step.";
+          }
+          if (pending.note) {
+            steps[i] = { ...steps[i], task: `${steps[i].task}\n\nOwner's direction: ${pending.note}` };
+            sub.prompt = steps[i].task;
+          }
+          this.touch(sub);
         }
         const inputs = steps[i].after.map((d) => results[d]);
         if (inputs.length && inputs.every((r) => !r.ok)) {
@@ -1137,6 +1371,35 @@ export class Hub {
             results[i] = { step: i + 1, agentName: nameOf(i), ok: true, text };
             if (!usedLater.has(i)) this.baton({ from: sub.agentId, to: lead.id, taskId: sub.id, kind: "return" });
           } catch {
+            const redirect = this.redirects.get(sub.id);
+            if (redirect && !controller.signal.aborted) {
+              this.redirects.delete(sub.id);
+              const prevId = sub.agentId;
+              if (redirect.agentId !== prevId) {
+                sub.reroutedFrom = prevId;
+                sub.agentId = redirect.agentId;
+                sub.model = this.agent(redirect.agentId)?.model;
+                sub.why = "You reassigned this step.";
+                this.baton({ from: prevId, to: redirect.agentId, taskId: sub.id, kind: "reroute" });
+              }
+              if (redirect.note) {
+                steps[i] = { ...steps[i], task: `${steps[i].task}\n\nOwner's direction: ${redirect.note}` };
+                sub.prompt = steps[i].task;
+              }
+              sub.status = "queued";
+              sub.error = undefined;
+              sub.finishedAt = undefined;
+              sub.result = undefined;
+              this.touch(sub);
+              try {
+                const text = await this.execute(sub, "work", stepPrompt(steps[i].task, inputs) + (!inputs.length && chatCtx ? chatCtx : ""));
+                results[i] = { step: i + 1, agentName: nameOf(i), ok: true, text };
+                if (!usedLater.has(i)) this.baton({ from: sub.agentId, to: lead.id, taskId: sub.id, kind: "return" });
+              } catch {
+                results[i] = { step: i + 1, agentName: nameOf(i), ok: false, text: String(sub.error ?? "failed") };
+              }
+              return;
+            }
             // Runtime failover: if a text-only or non-cancelled step fails (e.g. 429 rate limit or timeout),
             // retry once on the best idle text-only teammate rather than stalling downstream steps.
             const failedAgent = this.agent(sub.agentId);
@@ -1265,6 +1528,12 @@ export class Hub {
       goal.costUsd = children.reduce((n, t) => n + (t.costUsd ?? 0), 0);
       this.touch(goal);
       this.emitAgents();
+      for (const sub of children) this.redirects.delete(sub.id);
+      try {
+        this.proposeLessons(goal);
+      } catch (err) {
+        console.warn(`[lessons] ${errorText(err)}`);
+      }
     }
   }
 

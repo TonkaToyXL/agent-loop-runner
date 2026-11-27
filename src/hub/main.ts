@@ -62,7 +62,7 @@ server.listen(port, host, () => {
     .agents()
     .map((a) => `${a.name}: ${hub.agentView(a).connectorLabel}`)
     .join(" | ");
-  console.log(`\n  Relay hub  →  http://${host === "0.0.0.0" ? "localhost" : host}:${port}${token ? "  (token required)" : ""}`);
+  console.log(`\n  Causeway  →  http://${host === "0.0.0.0" ? "localhost" : host}:${port}${token ? "  (token required)" : ""}`);
   console.log(`  Crew       →  ${live}`);
   console.log(`  Channels   →  web${hub.channels.has("telegram") ? ", telegram" : ""}${imessage ? ", imessage" : ""}\n`);
   if (!token) console.log("  Tip: set HUB_TOKEN in .env before exposing this beyond your own machine.\n");

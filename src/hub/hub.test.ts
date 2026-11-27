@@ -322,3 +322,137 @@ describe("Hub roll call", () => {
     expect(tasks.find((t) => t.agentId === "alpha")?.result).toBe("hi-from-alpha");
   });
 });
+
+/** A crew of local "sh" agents: each prints what it was asked plus a tag, after an optional delay. */
+function crew(specs: { id: string; out?: string; delay?: number; acts?: boolean }[], lead = specs[0].id) {
+  const dir = mkdtempSync(join(tmpdir(), "relay-crew-test-"));
+  const agents = specs.map((s, i) =>
+    normalizeAgent(
+      {
+        id: s.id,
+        name: s.id[0].toUpperCase() + s.id.slice(1),
+        model: "m",
+        tagline: `${s.id} work`,
+        skills: [s.id],
+        maxConcurrent: 2,
+        ...(s.acts ? { actsInWorld: true } : {}),
+        connectors: [
+          {
+            kind: "cli",
+            label: "sh",
+            billing: "local",
+            command: "sh",
+            args: ["-c", s.out ?? `sleep ${s.delay ?? 0}; printf 'from-${s.id}: '; head -c 400`],
+          },
+        ],
+      },
+      i,
+    ),
+  );
+  const hub = new Hub({ lead, agents }, new Store(join(dir, "state.json")));
+  const tasks = () => hub.store.state.tasks;
+  const byId = (id: string) => tasks().find((t) => t.id === id) as Task;
+  const settle = async (id: string) => {
+    for (let i = 0; i < 200 && ["queued", "running"].includes(byId(id).status); i++) await new Promise((r) => setTimeout(r, 25));
+  };
+  return { hub, tasks, byId, settle };
+}
+
+const PLAN_JSON = `[{"step":1,"agent":"alpha","task":"Find the facts","why":"alpha digs"},{"step":2,"agent":"beta","task":"Write it up","after":[1]}]`;
+
+describe("Plan review before launch", () => {
+  it("drafts a plan with reasons and waves without running any step", async () => {
+    const { hub, tasks } = crew([{ id: "lead", out: `cat >/dev/null; printf '%s' '${PLAN_JSON}'` }, { id: "alpha" }, { id: "beta" }]);
+    const draft = await hub.draftPlan("research the market and then write a launch post");
+    expect(draft.source).toBe("planner");
+    expect(draft.steps.map((s) => [s.agentId, s.wave, s.after])).toEqual([
+      ["alpha", 0, []],
+      ["beta", 1, [0]],
+    ]);
+    expect(draft.steps[0].why).toBe("alpha digs");
+    expect(draft.steps[1].why).toMatch(/beta work/);
+    expect(tasks().some((t) => t.kind === "goal" || t.kind === "subtask")).toBe(false);
+  });
+
+  it("launches exactly the plan the owner edited", async () => {
+    const { hub, tasks, byId, settle } = crew([{ id: "lead", out: "cat >/dev/null; echo should-not-plan" }, { id: "alpha" }, { id: "beta" }, { id: "gamma" }]);
+    const goal = hub.launchGoal(
+      "compare two options",
+      [
+        { agentId: "alpha", task: "Option A facts", after: [] },
+        { agentId: "gamma", task: "Option B facts", after: [] },
+        { agentId: "beta", task: "Compare them", after: [0, 1] },
+      ],
+      web,
+    );
+    await settle(goal.id);
+    expect(byId(goal.id)).toMatchObject({ status: "done", planSource: "owner" });
+    const subs = tasks().filter((t) => t.parentId === goal.id && t.kind === "subtask");
+    expect(subs.map((s) => [s.agentId, s.after])).toEqual([
+      ["alpha", []],
+      ["gamma", []],
+      ["beta", [1, 2]],
+    ]);
+    expect(tasks().some((t) => t.parentId === goal.id && t.kind === "plan")).toBe(false);
+    expect(subs[2].result).toMatch(/from-beta: Compare them/);
+    expect(subs[2].result).toMatch(/teammate_output step="1" agent="Alpha"/);
+  });
+
+  it("refuses a broken plan with a plain reason", () => {
+    const { hub } = crew([{ id: "lead" }, { id: "alpha" }]);
+    expect(() => hub.launchGoal("x", [{ agentId: "alpha", task: "a", after: [3] }], web)).toThrow("Step 1 can only build on earlier steps.");
+    expect(() => hub.launchGoal("x", [{ agentId: "nobody", task: "a", after: [] }], web)).toThrow("Step 1: pick an available specialist.");
+  });
+});
+
+describe("Redirecting work", () => {
+  it("moves a running step to another specialist with the owner's note, keeping the step in the run", async () => {
+    const { hub, tasks, byId, settle } = crew([{ id: "lead" }, { id: "slowpoke", delay: 3 }, { id: "quick" }]);
+    const goal = hub.launchGoal("x", [{ agentId: "slowpoke", task: "Draft the intro", after: [] }], web);
+    const sub = () => tasks().find((t) => t.parentId === goal.id && t.kind === "subtask")!;
+    for (let i = 0; i < 40 && sub().status !== "running"; i++) await new Promise((r) => setTimeout(r, 25));
+    expect(hub.redirect(sub().id, { agentId: "quick", note: "keep it to one line" }, web)).toEqual({ taskId: sub().id, mode: "step" });
+    await settle(goal.id);
+    expect(sub()).toMatchObject({ agentId: "quick", reroutedFrom: "slowpoke", status: "done" });
+    expect(sub().result).toMatch(/from-quick: Draft the intro\s+Owner's direction: keep it to one line/);
+    expect(byId(goal.id).status).toBe("done");
+  });
+
+  it("continues a finished task on another specialist with the earlier attempt as fenced context", async () => {
+    const { hub, tasks, byId, settle } = crew([{ id: "lead" }, { id: "alpha" }, { id: "beta" }]);
+    const first = await hub.handleText("@alpha outline the post", web);
+    await settle(first.taskId!);
+    const res = hub.redirect(first.taskId!, { agentId: "beta", note: "make it punchier" }, web);
+    expect(res.mode).toBe("new");
+    await settle(res.taskId);
+    const next = byId(res.taskId);
+    expect(next).toMatchObject({ agentId: "beta", continues: first.taskId, status: "done" });
+    expect(byId(first.taskId!).redirectedTo).toBe(res.taskId);
+    expect(next.prompt).toMatch(/outline the post\s+Owner's direction: make it punchier/);
+    expect(next.prompt).toMatch(/<teammate_output step="1" agent="Alpha">\nfrom-alpha:/);
+    expect(tasks().length).toBe(2);
+    expect(() => hub.redirect(first.taskId!, {}, web)).toThrow("Pick a different specialist or add a note.");
+  });
+});
+
+describe("Lessons from finished runs", () => {
+  it("proposes a playbook, and approved items feed the next plan", async () => {
+    const { hub, byId, settle } = crew([{ id: "lead", out: `cat >/dev/null; printf '%s' '${PLAN_JSON}'` }, { id: "alpha" }, { id: "beta" }]);
+    const goal = hub.launchGoal("ship the launch post", [{ agentId: "alpha", task: "Find the facts", after: [] }, { agentId: "beta", task: "Write it up", after: [0] }], web);
+    await settle(goal.id);
+    expect(byId(goal.id).status).toBe("done");
+    const book = hub.store.state.lessons.find((l) => l.kind === "playbook")!;
+    expect(book).toMatchObject({ status: "proposed", goalId: goal.id, steps: [{ agentId: "alpha", after: [] }, { agentId: "beta", after: [0] }] });
+    await expect(hub.draftPlan("again", { playbookId: book.id })).rejects.toThrow("That playbook isn't available.");
+    hub.updateLesson(book.id, { status: "approved" });
+    const draft = await hub.draftPlan("ship another launch post", { playbookId: book.id });
+    expect(draft.source).toBe("playbook");
+    expect(draft.steps.map((s) => s.agentId)).toEqual(["alpha", "beta"]);
+
+    hub.store.state.lessons.push({ id: "n1", kind: "note", status: "proposed", createdAt: new Date().toISOString(), goalId: goal.id, title: "t", text: "Prefer beta for write-ups." });
+    expect(hub.approvedNotes()).toEqual([]);
+    hub.updateLesson("n1", { status: "approved", text: "Prefer beta for every write-up." });
+    expect(hub.approvedNotes()).toEqual(["Prefer beta for every write-up."]);
+    expect(() => hub.updateLesson("n1", { status: "maybe" })).toThrow(/status must be/);
+  });
+});

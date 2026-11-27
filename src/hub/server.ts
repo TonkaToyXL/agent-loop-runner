@@ -219,6 +219,38 @@ export function createHubServer({ hub, token, imessage }: ServerOptions) {
           return a ? send(res, 200, a) : send(res, 404, { error: "unknown approval" });
         }
 
+        if (path === "/api/plan" && req.method === "POST") {
+          const { goal, playbookId } = await readJson<{ goal?: unknown; playbookId?: unknown }>(req);
+          if (typeof goal !== "string") return send(res, 400, { error: "goal is required" });
+          return send(res, 200, await hub.draftPlan(goal, typeof playbookId === "string" ? { playbookId } : {}));
+        }
+
+        if (path === "/api/goals" && req.method === "POST") {
+          const { goal, steps } = await readJson<{ goal?: unknown; steps?: unknown }>(req);
+          if (typeof goal !== "string") return send(res, 400, { error: "goal is required" });
+          const task = hub.launchGoal(goal, steps, { channel: "web", chatId: "web" });
+          return send(res, 200, { taskId: task.id });
+        }
+
+        const redirect = /^\/api\/tasks\/([\w-]+)\/redirect$/.exec(path);
+        if (redirect && req.method === "POST") {
+          const { agentId, note } = await readJson<{ agentId?: unknown; note?: unknown }>(req);
+          return send(
+            res,
+            200,
+            hub.redirect(
+              redirect[1],
+              { agentId: typeof agentId === "string" ? agentId : undefined, note: typeof note === "string" ? note : undefined },
+              { channel: "web", chatId: "web" },
+            ),
+          );
+        }
+
+        const lesson = /^\/api\/lessons\/([\w-]+)$/.exec(path);
+        if (lesson && req.method === "PATCH") {
+          return send(res, 200, hub.updateLesson(lesson[1], await readJson(req)));
+        }
+
         const cancel = /^\/api\/tasks\/([\w-]+)\/cancel$/.exec(path);
         if (cancel && req.method === "POST") return send(res, hub.cancel(cancel[1]) ? 200 : 404, { ok: true });
 
@@ -261,7 +293,7 @@ export function createHubServer({ hub, token, imessage }: ServerOptions) {
       if (err instanceof PublicError) return send(res, err.status, { error: err.message });
       // Unexpected: details stay in the local log, the client gets a generic message.
       console.error(`[server] ${req.method} ${path}: ${errorText(err)}`);
-      send(res, 500, { error: "Something went wrong. Check the Relay log for details." });
+      send(res, 500, { error: "Something went wrong. Check the Causeway log for details." });
     }
   });
 }

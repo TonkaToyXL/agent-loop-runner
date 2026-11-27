@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync, existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import type { EditableAgentFields, RateInfo, Task, UsageEvent } from "./types.js";
+import type { EditableAgentFields, Lesson, RateInfo, Task, UsageEvent } from "./types.js";
 
 const MAX_TASKS = 1000;
 const USAGE_DAYS = 62;
@@ -20,6 +20,7 @@ export interface PersistedState {
   tasks: Task[];
   usage: UsageEvent[];
   rates: Record<string, RateInfo>;
+  lessons: Lesson[];
 }
 
 export function defaultStatePath(): string {
@@ -36,7 +37,7 @@ export class Store {
   }
 
   private read(): PersistedState {
-    const empty: PersistedState = { version: 1, overrides: {}, tasks: [], usage: [], rates: {} };
+    const empty: PersistedState = { version: 1, overrides: {}, tasks: [], usage: [], rates: {}, lessons: [] };
     if (!existsSync(this.path)) return empty;
     try {
       const raw = JSON.parse(readFileSync(this.path, "utf8")) as Partial<PersistedState>;
@@ -82,6 +83,7 @@ export class Store {
       const cutoff = Date.now() - USAGE_DAYS * 86_400_000;
       this.state.usage = this.state.usage.filter((e) => Date.parse(e.at) >= cutoff);
       if (this.state.tasks.length > MAX_TASKS) this.state.tasks = this.state.tasks.slice(-MAX_TASKS);
+      if (this.state.lessons.length > 200) this.state.lessons = this.state.lessons.slice(-200);
       for (const t of this.state.tasks) {
         if (t.prompt.length > MAX_PERSIST_PROMPT) t.prompt = clip(t.prompt, MAX_PERSIST_PROMPT)!;
         if (t.result && t.result.length > MAX_PERSIST_RESULT) t.result = clip(t.result, MAX_PERSIST_RESULT);

@@ -59,6 +59,7 @@ export function normalizeAgent(raw: Partial<AgentConfig>, index: number): AgentC
     enabled: raw.enabled ?? true,
     optional: raw.optional ?? false,
     actsInWorld: raw.actsInWorld ?? false,
+    tools: Array.isArray(raw.tools) ? raw.tools.map((x: unknown) => String(x).trim()).filter(Boolean).slice(0, 8) : [],
     maxConcurrent: Math.max(1, Math.floor(num(raw.maxConcurrent, 2))),
   };
 }

@@ -143,7 +143,7 @@ function waitForWebhook(taskId: string, timeoutMs: number, signal: AbortSignal) 
       () =>
         settle(
           new Error(
-            `No webhook reply after ${Math.round(timeoutMs / 1000)}s. The routine accepted the task but never called Relay back. ` +
+            `No webhook reply after ${Math.round(timeoutMs / 1000)}s. The routine accepted the task but never called Causeway back. ` +
               "In its run history, check: did it run, is its computer this Mac, and is relay-reply.sh allowed to run without asking?",
           ),
         ),
@@ -1024,7 +1024,7 @@ async function runHermesRun(req: RunRequest, config: ConnectorConfig, base: stri
       }
       if (/approval/.test(status) && !pendingControls(run).length && !warned) {
         warned = true;
-        console.warn(`[hermes] run ${runId} is waiting for approval but Relay couldn't read the request.`);
+        console.warn(`[hermes] run ${runId} is waiting for approval but Causeway couldn't read the request.`);
       }
     }
   } catch (err) {

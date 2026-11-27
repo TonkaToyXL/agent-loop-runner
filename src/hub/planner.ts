@@ -3,6 +3,8 @@ export interface PlanStep {
   task: string;
   /** 0-based indexes of earlier steps this one builds on. Empty = can start right away. */
   after: number[];
+  /** Why this specialist got this step (from the planner, or explained by Relay). */
+  why?: string;
 }
 
 export interface PlannerAgent {
@@ -73,6 +75,7 @@ export function refinePlan(steps: PlanStep[], team: PlannerAgent[]): PlanStep[] 
   const out: PlanStep[] = [];
   for (const raw of steps) {
     let agentId = raw.agentId;
+    let moved = "";
     const upstreamAgents = new Set(raw.after.map((idx) => out[idx]?.agentId).filter(Boolean));
     const isDownstreamDraftOrReview = raw.after.length > 0 && WRITING_OR_REVIEW_STEP.test(raw.task);
 
@@ -85,6 +88,7 @@ export function refinePlan(steps: PlanStep[], team: PlannerAgent[]): PlanStep[] 
       !(raw.after.length > 0 && (upstreamAgents.has(grok.id) || isDownstreamDraftOrReview))
     ) {
       agentId = grok.id;
+      moved = "Live X and news work goes to the scout.";
     }
 
     // 2. Local Mac/terminal step assigned to a text-only agent -> Operator (unless downstream copy/review building on operator)
@@ -96,19 +100,81 @@ export function refinePlan(steps: PlanStep[], team: PlannerAgent[]): PlanStep[] 
       !(raw.after.length > 0 && (upstreamAgents.has(operator.id) || isDownstreamDraftOrReview))
     ) {
       agentId = operator.id;
+      moved = "Work on your Mac goes to the operator, the one with local tools.";
     }
 
     // 3. Downstream review/critique step shouldn't review its own upstream draft if an independent reviewer exists
     if (raw.after.length > 0 && REVIEW_STEP.test(raw.task)) {
       if (upstreamAgents.has(agentId)) {
         const independent = reviewers.find((r) => !upstreamAgents.has(r.id) && r.id !== agentId);
-        if (independent) agentId = independent.id;
+        if (independent) {
+          agentId = independent.id;
+          moved = "Reviews go to someone who didn't write the draft.";
+        }
       }
     }
 
-    out.push({ agentId, task: raw.task, after: raw.after });
+    out.push({ agentId, task: raw.task, after: raw.after, ...(moved ? { why: moved } : raw.why ? { why: raw.why } : {}) });
   }
   return out;
+}
+
+/** True when a step checks someone else's work (review, critique, audit, fact-check...). */
+export function isReviewStep(task: string): boolean {
+  return REVIEW_STEP.test(task);
+}
+
+/** Parallel waves: wave 0 starts at once; a step runs one wave after the latest step it builds on. */
+export function planWaves(steps: PlanStep[]): number[] {
+  const waves: number[] = [];
+  steps.forEach((s, i) => {
+    waves[i] = s.after.length ? Math.max(...s.after.map((d) => (d < i ? waves[d] : 0))) + 1 : 0;
+  });
+  return waves;
+}
+
+/** A plain reason for a step when the planner didn't give one: the specialist's role and what matched. */
+export function explainStep(step: PlanStep, team: PlannerAgent[]): string {
+  if (step.why?.trim()) return step.why.trim().slice(0, 200);
+  const a = team.find((x) => x.id === step.agentId);
+  if (!a) return "";
+  const words = new Set(step.task.toLowerCase().match(/[a-z0-9]+/g) ?? []);
+  const hits = a.skills.filter((s) => words.has(s.toLowerCase())).slice(0, 3);
+  const role = a.role ? `${a.role}: ` : "";
+  return `${role}${a.tagline}${hits.length ? ` (matches ${hits.join(", ")})` : ""}.`;
+}
+
+export const MAX_PLAN_STEPS = MAX_STEPS;
+const MAX_TASK_CHARS = 4000;
+
+/**
+ * Check a plan the owner edited before launch. Returns clean steps or a plain-English problem.
+ * Rules: 1-6 steps, a known and enabled agent for each, a non-empty task, and "after" pointing only
+ * at earlier steps (so there are no cycles).
+ */
+export function validatePlan(raw: unknown, team: PlannerAgent[]): { steps: PlanStep[] } | { error: string } {
+  if (!Array.isArray(raw) || !raw.length) return { error: "The plan needs at least one step." };
+  if (raw.length > MAX_STEPS) return { error: `Keep it to ${MAX_STEPS} steps or fewer.` };
+  const enabled = new Map(team.filter((a) => a.enabled).map((a) => [a.id, a]));
+  const steps: PlanStep[] = [];
+  for (let i = 0; i < raw.length; i++) {
+    const rec = (raw[i] ?? {}) as Record<string, unknown>;
+    const agentId = String(rec.agentId ?? rec.agent ?? "").trim().toLowerCase();
+    const task = String(rec.task ?? "").trim();
+    if (!enabled.has(agentId)) return { error: `Step ${i + 1}: pick an available specialist.` };
+    if (!task) return { error: `Step ${i + 1}: say what this step should produce.` };
+    if (task.length > MAX_TASK_CHARS) return { error: `Step ${i + 1} is too long (max ${MAX_TASK_CHARS} characters).` };
+    const afterRaw = Array.isArray(rec.after) ? rec.after : [];
+    const after = new Set<number>();
+    for (const ref of afterRaw) {
+      const n = Number(ref);
+      if (!Number.isInteger(n) || n < 0 || n >= i) return { error: `Step ${i + 1} can only build on earlier steps.` };
+      after.add(n);
+    }
+    const why = typeof rec.why === "string" ? rec.why.trim().slice(0, 200) : "";
+    steps.push({ agentId, task, after: [...after].sort((a, b) => a - b), ...(why ? { why } : {}) });
+  }
+  return { steps };
 }
 
 /** Trim a teammate's reply and stop it from closing or opening a teammate_output fence itself. */
@@ -117,7 +183,7 @@ function fenced(text: string): string {
   return cut.replace(/<(\/?)(teammate_output)/gi, "‹$1$2");
 }
 
-export function planPrompt(goal: string, agents: PlannerAgent[]): string {
+export function planPrompt(goal: string, agents: PlannerAgent[], notes: string[] = []): string {
   const roster = agents
     .filter((a) => a.enabled)
     .map((a) => {
@@ -142,18 +208,26 @@ export function planPrompt(goal: string, agents: PlannerAgent[]): string {
     "  * Hermes: local Mac files, terminal/shell commands, automation, system ops.",
     "  * ChatGPT: reserve for high-stakes strategy or a second opinion (tight quota).",
     '- Avoid duplicate steps. Only point "after" back to earlier steps.',
-    "- Agents cannot contact or message each other; Relay delivers every step. When the goal involves several",
+    "- Agents cannot contact or message each other; the hub delivers every step. When the goal involves several",
     "  agents (e.g. \"all bots\", \"everyone\"), give each of them their own step. Never ask one agent to ping the others.",
-    "- Write each task as an instruction to produce an answer. Results come back to Relay automatically, so do not",
+    "- Write each task as an instruction to produce an answer. Results come back to the hub automatically, so do not",
     "  tell an agent to send, share, post, reply, or message anything unless the goal itself asks for that real action.",
     "",
+    ...(notes.length
+      ? [
+          "Planning notes the owner approved from earlier runs (follow them when they apply):",
+          ...notes.slice(0, 8).map((n) => `- ${n.replace(/\s+/g, " ").slice(0, 240)}`),
+          "",
+        ]
+      : []),
     "Team:",
     roster,
     "",
     `Goal: ${goal}`,
     "",
     "Reply with ONLY a JSON array and no prose. Example:",
-    '[{"step":1,"agent":"grok","task":"Find ..."},{"step":2,"agent":"muse","task":"Write ... using the findings","after":[1]}]',
+    '[{"step":1,"agent":"grok","task":"Find ...","why":"live X and news"},{"step":2,"agent":"muse","task":"Write ... using the findings","after":[1],"why":"hooks and copy"}]',
+    'Give each step a short "why": the reason this agent fits it, in a few words.',
     "Each task must say clearly what to produce and keep output concise.",
   ].join("\n");
 }
@@ -208,7 +282,7 @@ export function parsePlan(text: string, validIds: string[]): PlanStep[] | null {
   for (const raw of extractJsonArrays(text)) {
     if (!Array.isArray(raw)) continue;
     // First pass: keep valid steps and remember how the model numbered them (and which labels were dropped).
-    const kept: { agentId: string; task: string; label: number; afterRaw: unknown }[] = [];
+    const kept: { agentId: string; task: string; label: number; afterRaw: unknown; why: string }[] = [];
     const droppedLabels = new Set<number>();
     raw.forEach((item, i) => {
       if (!item || typeof item !== "object") return;
@@ -221,7 +295,8 @@ export function parsePlan(text: string, validIds: string[]): PlanStep[] | null {
         droppedLabels.add(label);
         return;
       }
-      kept.push({ agentId, task, label, afterRaw: rec.after ?? rec.depends_on ?? rec.dependsOn });
+      const why = typeof (rec.why ?? rec.reason) === "string" ? String(rec.why ?? rec.reason).trim().slice(0, 200) : "";
+      kept.push({ agentId, task, label, afterRaw: rec.after ?? rec.depends_on ?? rec.dependsOn, why });
     });
     if (!kept.length) continue;
     const steps = kept.slice(0, MAX_STEPS);
@@ -240,7 +315,7 @@ export function parsePlan(text: string, validIds: string[]): PlanStep[] | null {
         const idx = steps.findIndex((o) => o.label === n);
         if (idx >= 0 && idx < i) after.add(idx);
       }
-      return { agentId: s.agentId, task: s.task, after: [...after].sort((a, b) => a - b) };
+      return { agentId: s.agentId, task: s.task, after: [...after].sort((a, b) => a - b), ...(s.why ? { why: s.why } : {}) };
     });
     if (brokenDep) continue;
     return mapped;
