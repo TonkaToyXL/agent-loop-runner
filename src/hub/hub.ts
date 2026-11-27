@@ -389,7 +389,8 @@ export class Hub {
       const conn = resolveConnector(a);
       return conn.live && conn.config.kind === "openai" && !conn.config.conserveQuota;
     });
-    for (const id of ["cline", "zen", "muse"]) {
+    // Free plan-covered teammates first; Zen spends prepaid credit, so it is the last resort.
+    for (const id of ["cline", "muse", "zen"]) {
       const hit = candidates.find((a) => a.id === id);
       if (hit) return hit;
     }
