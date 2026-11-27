@@ -39,6 +39,11 @@ From your phone, send `/doctor` to the Telegram bot for a full check of agents, 
 
 To try it without connecting anything: `npm install && npm run hub`, then open http://127.0.0.1:4747. Unconnected agents answer in a labeled demo mode and never join real team work.
 
+## On your phone
+
+- **Telegram works anywhere.** `/plan <goal>` shows the recommended plan with buttons to launch it, switch solo/crew, or compare both. `/runs` shows what's live, `/approvals` what's waiting on you, and results arrive in the chat.
+- **The full dashboard:** run `npm run setup:phone` on the Mac once (Hermes can run it for you from Telegram). It requires the access token, opens the dashboard to your devices, and prints the addresses. Then send `/dashboard` in Telegram for a one-tap sign-in link (single use, 10 minutes). On the same Wi-Fi it works right away; away from home, install the free Tailscale app on the Mac and the phone.
+
 ## No surprise bills
 
 Relay uses the subscriptions and tools you already have. Pay-per-use APIs are **blocked by default**, even if a key is in `.env`; set `RELAY_ALLOW_METERED=true` only if you want them. Every agent card shows how it's paid for.

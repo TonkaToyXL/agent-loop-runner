@@ -140,6 +140,11 @@ export function createHubServer({ hub, token, imessage }: ServerOptions) {
         if (req.method !== "GET" && !String(req.headers["content-type"] ?? "").startsWith("application/json")) {
           return send(res, 415, { error: "content-type must be application/json" });
         }
+        if (path === "/api/pair" && req.method === "POST") {
+          const { code } = await readJson<{ code?: unknown }>(req);
+          return send(res, 200, { token: hub.redeemPairCode(code) });
+        }
+
         const isSse = path === "/api/events" && req.method === "GET";
         if (!authorized(req, url, isSse)) return send(res, 401, { error: "unauthorized" });
 

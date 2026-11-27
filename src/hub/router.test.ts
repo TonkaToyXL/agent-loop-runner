@@ -147,3 +147,14 @@ describe("isRollCall", () => {
     }
   });
 });
+
+describe("phone commands", () => {
+  it("parses /plan, /launch, /runs, and /dashboard", () => {
+    expect(parseCommand("/plan write a launch post", agents)).toEqual({ type: "plan", text: "write a launch post" });
+    expect(parseCommand("/plan", agents).type).toBe("error");
+    expect(parseCommand("/launch AB12cd", agents)).toEqual({ type: "planAction", id: "ab12cd", action: "go" });
+    expect(parseCommand("/runs", agents)).toEqual({ type: "runs" });
+    expect(parseCommand("/dashboard", agents)).toEqual({ type: "dashboard" });
+    expect(parseCommand("/phone@RelayCrewBot", agents)).toEqual({ type: "dashboard" });
+  });
+});

@@ -1592,7 +1592,25 @@ function connect() {
   });
 }
 
+/** A one-time link from Telegram (/dashboard) signs this phone in: trade the code for the token, then forget the code. */
+async function pairFromLink() {
+  const m = /^#pair=([\w-]{6,64})$/.exec(location.hash);
+  if (!m) return;
+  history.replaceState(null, "", `${location.pathname}#/`);
+  try {
+    const res = await fetch("/api/pair", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ code: m[1] }) });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.token) { toast(data.error || "That sign-in link didn't work. Send /dashboard again."); return; }
+    S.token = data.token;
+    store.set("relay-token", S.token);
+    toast("This phone is signed in.");
+  } catch {
+    toast("Couldn't reach Causeway to sign in.");
+  }
+}
+
 async function boot(delay = 1500) {
+  await pairFromLink();
   try {
     applySnapshot(await api("/api/state"));
     connect();

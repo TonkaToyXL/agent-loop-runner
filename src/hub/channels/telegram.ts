@@ -69,6 +69,15 @@ export function approvalText(a: Approval): string {
 }
 
 /** Parse button data "ap:<id>:y|n". */
+/** Plan and comparison buttons: pl:<draft id>:<go|solo|crew|cmp|x> and cv:<comparison id>:<solo|crew|tie>. */
+export function parseHubButton(data: string | undefined): { kind: "plan" | "verdict"; id: string; action: string } | null {
+  const m = /^(pl|cv):([\w-]{1,24}):(go|solo|crew|cmp|x|tie)$/.exec(data ?? "");
+  if (!m) return null;
+  if (m[1] === "cv" && !["solo", "crew", "tie"].includes(m[3])) return null;
+  if (m[1] === "pl" && m[3] === "tie") return null;
+  return { kind: m[1] === "pl" ? "plan" : "verdict", id: m[2], action: m[3] };
+}
+
 export function parseApprovalButton(data: string | undefined): { id: string; approve: boolean } | null {
   const m = /^ap:([0-9a-f]{6}):(y|n)$/.exec(data ?? "");
   return m ? { id: m[1], approve: m[2] === "y" } : null;
@@ -83,7 +92,10 @@ export function buildBotCommands(agents: { id: string; name: string; tagline?: s
       description: (`Ask ${a.name}${a.tagline ? ` — ${a.tagline}` : ""}`).slice(0, 120),
     }));
   return [
+    { command: "plan", description: "See the plan first, then launch it" },
     { command: "team", description: "Give the crew a goal" },
+    { command: "runs", description: "What's live and how far along" },
+    { command: "dashboard", description: "Open Causeway on this phone" },
     ...agentCmds,
     { command: "agents", description: "Models, reasoning, usage" },
     { command: "status", description: "What's running now" },
@@ -140,6 +152,19 @@ export class TelegramChannel implements ChannelAdapter {
   async send(chatId: string, text: string): Promise<void> {
     for (const part of chunk(text)) {
       await this.call("sendMessage", { chat_id: chatId, text: part, disable_web_page_preview: true });
+    }
+  }
+
+  async sendButtons(chatId: string, text: string, buttons: { text: string; data: string }[][]): Promise<void> {
+    const parts = chunk(text);
+    for (const [i, part] of parts.entries()) {
+      const last = i === parts.length - 1;
+      await this.call("sendMessage", {
+        chat_id: chatId,
+        text: part,
+        disable_web_page_preview: true,
+        ...(last && buttons.length ? { reply_markup: { inline_keyboard: buttons.map((row) => row.map((b) => ({ text: b.text, callback_data: b.data }))) } } : {}),
+      });
     }
   }
 
@@ -250,6 +275,34 @@ export class TelegramChannel implements ChannelAdapter {
 
   private async onButton(q: NonNullable<Update["callback_query"]>): Promise<void> {
     const chatId = String(q.message?.chat.id ?? "");
+    const hubBtn = parseHubButton(q.data);
+    if (hubBtn) {
+      if (!this.allowed.has(chatId)) {
+        await this.call("answerCallbackQuery", { callback_query_id: q.id, text: "Not allowed." }).catch(() => {});
+        return;
+      }
+      await this.call("answerCallbackQuery", { callback_query_id: q.id, text: hubBtn.kind === "verdict" ? "Saved" : "On it" }).catch(() => {});
+      try {
+        const res =
+          hubBtn.kind === "plan"
+            ? await this.hub.planAction(hubBtn.id, hubBtn.action as "go" | "solo" | "crew" | "cmp" | "x", { channel: "telegram", chatId })
+            : this.hub.verdictFromChat(hubBtn.id, hubBtn.action as "solo" | "crew" | "tie");
+        if (q.message?.message_id) {
+          await this.call("editMessageText", {
+            chat_id: chatId,
+            message_id: q.message.message_id,
+            text: chunk(res.reply)[0],
+            disable_web_page_preview: true,
+            ...(res.buttons?.length ? { reply_markup: { inline_keyboard: res.buttons.map((row) => row.map((b) => ({ text: b.text, callback_data: b.data }))) } } : {}),
+          }).catch(() => this.send(chatId, res.reply));
+        } else {
+          await this.send(chatId, res.reply);
+        }
+      } catch (err) {
+        await this.send(chatId, `Error: ${errorText(err)}`).catch(() => {});
+      }
+      return;
+    }
     const parsed = parseApprovalButton(q.data);
     // Only the owner's chats can decide, whoever else might see the message.
     if (!parsed || !this.allowed.has(chatId)) {
@@ -290,12 +343,13 @@ export class TelegramChannel implements ChannelAdapter {
       }
       await this.call("sendChatAction", { chat_id: chatId, action: "typing" }).catch(() => {});
       try {
-        const { reply } = await this.hub.handleText(msg.text, {
+        const { reply, buttons } = await this.hub.handleText(msg.text, {
           channel: "telegram",
           chatId,
           from: msg.from?.username ?? msg.from?.first_name,
         });
-        await this.send(chatId, reply);
+        if (buttons?.length) await this.sendButtons(chatId, reply, buttons);
+        else await this.send(chatId, reply);
       } catch (err) {
         await this.send(chatId, `Error: ${errorText(err)}`).catch(() => {});
       }

@@ -17,6 +17,10 @@ export type Command =
   | { type: "decide"; id: string; approve: boolean }
   | { type: "answer"; id: string; text: string }
   | { type: "doctor" }
+  | { type: "plan"; text: string }
+  | { type: "planAction"; id: string; action: "go" }
+  | { type: "runs" }
+  | { type: "dashboard" }
   | { type: "error"; message: string };
 
 export interface AgentRef {
@@ -87,6 +91,18 @@ export function parseCommand(input: string, agents: AgentRef[]): Command {
       case "health":
       case "check":
         return { type: "doctor" };
+      case "plan": {
+        const goal = text.slice(rawCmd.length + 1).trim();
+        return goal ? { type: "plan", text: goal } : { type: "error", message: "Usage: /plan <goal>. You'll get the recommended plan to launch, switch, or compare." };
+      }
+      case "launch":
+        return args[0] ? { type: "planAction", id: args[0].toLowerCase(), action: "go" } : { type: "error", message: "Usage: /launch <plan id>" };
+      case "runs":
+        return { type: "runs" };
+      case "dashboard":
+      case "phone":
+      case "app":
+        return { type: "dashboard" };
       case "answer":
         return { type: "error", message: "Usage: /answer <id> <your answer>" };
       case "approve":
@@ -321,6 +337,9 @@ export const HELP_TEXT = [
   "",
   "@grok <ask>       talk to one agent",
   "@team <goal>      lead plans, crew splits the work",
+  "/plan <goal>      see the plan first: launch, solo/crew, or compare",
+  "/runs             what's live and how far along",
+  "/dashboard        open Causeway on this phone",
   "roll call         every assistant says hello (\"all bots, say hi\")",
   "<plain text>      auto-picks the best agent",
   "",

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { toPlainText } from "../hub.js";
 import { normalizeHandle } from "./imessage.js";
-import { buildBotCommands, chunk } from "./telegram.js";
+import { buildBotCommands, chunk, parseHubButton } from "./telegram.js";
 
 describe("normalizeHandle", () => {
   it("normalizes US numbers in any format", () => {
@@ -74,5 +74,14 @@ describe("isLocalHost", () => {
     expect(isLocalHost("evil.example.com:4747")).toBe(false);
     expect(isLocalHost("127.0.0.1.evil.com")).toBe(false);
     expect(isLocalHost(undefined)).toBe(false);
+  });
+});
+
+describe("parseHubButton", () => {
+  it("reads plan and verdict buttons and rejects anything else", () => {
+    expect(parseHubButton("pl:ab12cd:go")).toEqual({ kind: "plan", id: "ab12cd", action: "go" });
+    expect(parseHubButton("pl:ab12cd:cmp")).toEqual({ kind: "plan", id: "ab12cd", action: "cmp" });
+    expect(parseHubButton("cv:9f8e7d6c:tie")).toEqual({ kind: "verdict", id: "9f8e7d6c", action: "tie" });
+    for (const bad of ["pl:ab12cd:tie", "cv:x:go", "ap:abc123:y", "pl:../../x:go", undefined]) expect(parseHubButton(bad), String(bad)).toBeNull();
   });
 });

@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { existsSync } from "node:fs";
-import { hostname } from "node:os";
+import { hostname, networkInterfaces } from "node:os";
 import { EventEmitter } from "node:events";
 import { join, resolve } from "node:path";
 import { isReasoning } from "./config.js";
@@ -69,6 +69,14 @@ export interface ChannelAdapter {
   sendApproval?(chatId: string, approval: Approval): Promise<void>;
   /** Update earlier approval messages once decided. */
   updateApproval?(approval: Approval): Promise<void>;
+  /** Send a message with tap-to-act buttons, where the app supports them. */
+  sendButtons?(chatId: string, text: string, buttons: ChatButton[][]): Promise<void>;
+}
+
+/** A tap-to-act button in a chat app (Telegram inline keyboard). */
+export interface ChatButton {
+  text: string;
+  data: string;
 }
 
 export interface AgentView extends AgentConfig {
@@ -105,6 +113,7 @@ const titleOf = (text: string) => {
   const line = text.trim().split("\n")[0];
   return line.length > 90 ? `${line.slice(0, 87)}…` : line;
 };
+const stepsCount = (tasks: Task[], goalId: string) => tasks.filter((t) => t.parentId === goalId && t.kind === "subtask").length;
 const fmtK = (n: number) => (n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
 
 const AVATAR_EXTS = [".gif", ".webp", ".png", ".jpg", ".jpeg", ".svg"] as const;
@@ -162,6 +171,31 @@ export function findAgentBrandLogo(agentId: string, webRoot = resolve(process.en
 export const ROLL_CALL_PROMPT =
   "Roll call from Causeway (your crew's hub): answer in one short line. Say hi and name the one thing you're best at. No tools or actions needed.";
 
+/** This Mac's Tailscale address, if Tailscale is installed and signed in. */
+function tailscaleIp(): string {
+  for (const bin of ["tailscale", "/Applications/Tailscale.app/Contents/MacOS/Tailscale"]) {
+    try {
+      const out = execFileSync(bin, ["ip", "-4"], { timeout: 2000, stdio: ["ignore", "pipe", "ignore"] }).toString().trim().split("\n")[0];
+      if (/^100\.\d+\.\d+\.\d+$/.test(out)) return out;
+    } catch {
+      // not installed or not signed in
+    }
+  }
+  return "";
+}
+
+/** This Mac's address on the local network (not Tailscale, not loopback). */
+function lanIp(): string {
+  const all = Object.entries(networkInterfaces());
+  all.sort(([a], [b]) => (a === "en0" ? -1 : b === "en0" ? 1 : 0));
+  for (const [, addrs] of all) {
+    for (const a of addrs ?? []) {
+      if (a.family === "IPv4" && !a.internal && !a.address.startsWith("100.") && !a.address.startsWith("169.254.")) return a.address;
+    }
+  }
+  return "";
+}
+
 /** Chat apps show markdown markers literally; keep the text, drop the markers. */
 export function toPlainText(md: string): string {
   return md
@@ -179,6 +213,12 @@ export class Hub {
   private readonly waiters = new Map<string, (() => void)[]>();
   /** Requests started but not yet recorded in usage, per agent. */
   private readonly inFlight = new Map<string, number>();
+  /** Plans drafted from a chat app, waiting for a tap: id -> draft. */
+  private readonly chatDrafts = new Map<string, { goal: string; steps: PlanStep[]; mode: TeamMode; modeReason: string; source: string; at: number }>();
+  /** One-time phone sign-in codes: code -> expiry time. */
+  private readonly pairCodes = new Map<string, number>();
+  private pairAttempts: number[] = [];
+  private readonly verdictAsked = new Set<string>();
   /** Owner redirects waiting to be applied to a team step: step task id -> new agent and/or note. */
   private readonly redirects = new Map<string, { agentId: string; note: string }>();
   private readonly health = new Map<string, { ok: boolean; detail: string }>();
@@ -792,7 +832,7 @@ export class Hub {
 
   // ------------------------------------------------------------------ commands
   /** Entry point for every channel. Returns the immediate reply text. */
-  async handleText(text: string, origin: ReplyTarget): Promise<{ reply: string; taskId?: string }> {
+  async handleText(text: string, origin: ReplyTarget): Promise<{ reply: string; taskId?: string; buttons?: ChatButton[][] }> {
     const agents = this.agents();
     const cmd = parseCommand(text, agents);
     switch (cmd.type) {
@@ -842,6 +882,14 @@ export class Hub {
         return this.inbox(cmd, text, origin);
       case "doctor":
         return { reply: await this.doctorText() };
+      case "plan":
+        return this.planForChat(cmd.text, origin);
+      case "planAction":
+        return this.planAction(cmd.id, cmd.action, origin);
+      case "runs":
+        return { reply: this.runsText() };
+      case "dashboard":
+        return { reply: this.dashboardText() };
       case "answer": {
         const { approval: a, changed } = this.answerQuestionDetailed(cmd.id, cmd.text, origin.channel);
         if (!a) return { reply: `No question called ${cmd.id}. Send /approvals to see what's waiting.` };
@@ -1091,6 +1139,177 @@ export class Hub {
     this.store.save();
     this.emit("lessons", this.store.state.lessons.slice(-60));
     return { ok: true, lessonId: lesson.id };
+  }
+
+  /** Draft a plan from a chat app and show it with buttons: launch, switch solo/crew, compare, or discard. */
+  async planForChat(goal: string, origin: ReplyTarget, mode?: TeamMode): Promise<{ reply: string; buttons?: ChatButton[][] }> {
+    const d = await this.draftPlan(goal, mode ? { mode } : {});
+    const now = Date.now();
+    for (const [k, v] of this.chatDrafts) if (now - v.at > 3_600_000) this.chatDrafts.delete(k);
+    while (this.chatDrafts.size >= 20) this.chatDrafts.delete(this.chatDrafts.keys().next().value!);
+    const id = randomUUID().slice(0, 6);
+    this.chatDrafts.set(id, {
+      goal: d.goal,
+      steps: d.steps.map((st) => ({ agentId: st.agentId, task: st.task, after: st.after, ...(st.why ? { why: st.why } : {}) })),
+      mode: d.mode as TeamMode,
+      modeReason: d.modeReason,
+      source: d.source,
+      at: now,
+    });
+    return this.planMessage(id, origin);
+  }
+
+  private planMessage(id: string, origin: ReplyTarget): { reply: string; buttons?: ChatButton[][] } {
+    const d = this.chatDrafts.get(id);
+    if (!d) return { reply: "That plan expired. Send /plan <goal> again." };
+    const name = (aid: string) => this.agent(aid)?.name ?? aid;
+    const waves = planWaves(d.steps);
+    const nW = d.steps.length ? Math.max(...waves) + 1 : 0;
+    const lines = [
+      `📋 ${d.steps.length > 1 ? "Crew" : "Solo"} plan · ${titleOf(d.goal)}`,
+      d.modeReason,
+      "",
+      ...d.steps.flatMap((st, i) => [
+        `${i + 1}. ${name(st.agentId)}${st.after.length ? ` (after ${st.after.map((n) => n + 1).join(", ")})` : ""}: ${titleOf(st.task)}`,
+        ...(st.why && d.steps.length > 1 ? [`   why: ${st.why}`] : []),
+      ]),
+      ...(d.steps.length > 1 ? ["", `${nW} wave${nW === 1 ? "" : "s"}; steps in the same wave run in parallel. A wrap-up combines them.`] : []),
+    ];
+    const channel = this.channels.get(origin.channel);
+    if (!channel?.sendButtons) {
+      lines.push("", `Reply /launch ${id} to start it.`);
+      return { reply: lines.join("\n") };
+    }
+    const go = d.steps.length > 1 ? "🚀 Launch crew" : `🚀 Send to ${name(d.steps[0]?.agentId ?? "")}`;
+    return {
+      reply: lines.join("\n"),
+      buttons: [
+        [{ text: go, data: `pl:${id}:go` }],
+        [
+          d.steps.length > 1 ? { text: "👤 Solo instead", data: `pl:${id}:solo` } : { text: "👥 Use the crew", data: `pl:${id}:crew` },
+          { text: "⚖️ Compare both", data: `pl:${id}:cmp` },
+        ],
+        [{ text: "✖ Discard", data: `pl:${id}:x` }],
+      ],
+    };
+  }
+
+  /** A tap on a plan button (or /launch <id>). */
+  async planAction(id: string, action: "go" | "solo" | "crew" | "cmp" | "x", origin: ReplyTarget): Promise<{ reply: string; buttons?: ChatButton[][]; taskId?: string }> {
+    const d = this.chatDrafts.get(id);
+    if (!d) return { reply: "That plan expired. Send /plan <goal> again." };
+    if (action === "x") {
+      this.chatDrafts.delete(id);
+      return { reply: `Discarded the plan for “${titleOf(d.goal)}”.` };
+    }
+    if (action === "go") {
+      this.chatDrafts.delete(id);
+      const task = this.launchGoal(d.goal, d.steps, origin);
+      return { reply: `🚀 Launched “${titleOf(d.goal)}” (${d.steps.length > 1 ? `crew of ${new Set(d.steps.map((x) => x.agentId)).size}` : "solo"}). Approvals and the result come here.`, taskId: task.id };
+    }
+    if (action === "cmp") {
+      this.chatDrafts.delete(id);
+      const c = await this.compare(d.goal, origin);
+      return { reply: `⚖️ Running “${titleOf(d.goal)}” both ways. You'll get the solo and crew results here, then a question about which was better.`, taskId: c.crew };
+    }
+    const next = await this.draftPlan(d.goal, { mode: action });
+    this.chatDrafts.set(id, {
+      goal: next.goal,
+      steps: next.steps.map((st) => ({ agentId: st.agentId, task: st.task, after: st.after, ...(st.why ? { why: st.why } : {}) })),
+      mode: next.mode as TeamMode,
+      modeReason: next.modeReason,
+      source: next.source,
+      at: Date.now(),
+    });
+    return this.planMessage(id, origin);
+  }
+
+  /** A tap on a comparison verdict button. */
+  verdictFromChat(compareId: string, winner: "solo" | "crew" | "tie"): { reply: string; buttons?: ChatButton[][] } {
+    this.compareVerdict(compareId, winner);
+    return { reply: winner === "tie" ? "Noted: about the same." : `Saved: ${winner === "solo" ? "solo" : "the crew"} was better. Similar goals will start that way.` };
+  }
+
+  /** What's live, for a phone. */
+  runsText(): string {
+    const live = this.store.state.tasks.filter((t) => t.kind === "goal" && (t.status === "running" || t.status === "queued"));
+    const waiting = this.approvals.pending();
+    const lines: string[] = [];
+    if (waiting.length) lines.push(`🩷 ${waiting.length} waiting for you: send /approvals.`, "");
+    if (!live.length) lines.push("Nothing live right now. Send /plan <goal> to start something.");
+    for (const g of live.slice(-6)) {
+      const subs = this.store.state.tasks.filter((t) => t.parentId === g.id && t.kind === "subtask");
+      const done = subs.filter((t) => t.status === "done").length;
+      const mins = Math.max(1, Math.round((Date.now() - Date.parse(g.startedAt ?? g.createdAt)) / 60_000));
+      lines.push(`▶ ${titleOf(g.prompt)} · ${subs.length ? `${done}/${subs.length} steps` : "planning"} · ${mins}m`);
+      for (const t of subs) {
+        const mark = t.status === "done" ? "✓" : t.status === "running" ? "…" : t.awaitingApproval ? "⏸" : t.status === "queued" ? "·" : "✗";
+        lines.push(`   ${mark} ${this.agent(t.agentId)?.name ?? t.agentId}: ${titleOf(t.prompt).slice(0, 60)}`);
+      }
+    }
+    return lines.join("\n");
+  }
+
+  /** Addresses where the dashboard can be reached from a phone, plus a one-time sign-in link. */
+  dashboardText(): string {
+    const host = process.env.HOST?.trim() || "127.0.0.1";
+    const port = process.env.PORT?.trim() || "4747";
+    if (host === "127.0.0.1" || host === "localhost") {
+      return [
+        "📱 Right now the dashboard only opens on the Mac itself.",
+        "To open it on your phone, run this on the Mac (or ask Hermes to run it for you):",
+        "cd ~/agent-loop-runner && npm run setup:phone",
+        "Then send /dashboard again for a one-tap sign-in link. Telegram works anywhere meanwhile.",
+      ].join("\n");
+    }
+    const urls: { label: string; url: string }[] = [];
+    const pub = process.env.RELAY_PUBLIC_URL?.trim();
+    if (pub) urls.push({ label: "Your address", url: pub.replace(/\/$/, "") });
+    const ts = tailscaleIp();
+    if (ts) urls.push({ label: "Anywhere (Tailscale on)", url: `http://${ts}:${port}` });
+    const lan = lanIp();
+    if (lan) urls.push({ label: "Same Wi-Fi as the Mac", url: `http://${lan}:${port}` });
+    if (!urls.length) return "📱 The dashboard accepts other devices, but I couldn't find this Mac's address. Check that Wi-Fi or Tailscale is on.";
+    const token = process.env.HUB_TOKEN?.trim();
+    const code = token ? this.createPairCode() : "";
+    return [
+      "📱 Open Causeway on this phone:",
+      ...urls.map((u) => `• ${u.label}: ${u.url}/${code ? `#pair=${code}` : ""}`),
+      "",
+      code ? "The link signs this phone in once (one use, 10 minutes). After that, just open the address. Add it to your home screen for an app icon." : "Set HUB_TOKEN to require a password before using it away from the Mac.",
+      ...(ts ? [] : ["Away from home? Install Tailscale on the Mac and the phone (free) and run npm run setup:phone again."]),
+    ].join("\n");
+  }
+
+  /** A short-lived, single-use code that a phone trades for the access token. */
+  createPairCode(): string {
+    const now = Date.now();
+    for (const [c, exp] of this.pairCodes) if (exp < now) this.pairCodes.delete(c);
+    while (this.pairCodes.size >= 5) this.pairCodes.delete(this.pairCodes.keys().next().value!);
+    const code = randomBytes(9).toString("base64url");
+    this.pairCodes.set(code, now + 10 * 60_000);
+    return code;
+  }
+
+  /** Trade a sign-in code for the access token. Rate-limited; each code works once. */
+  redeemPairCode(code: unknown, now = Date.now()): string {
+    this.pairAttempts = this.pairAttempts.filter((t) => now - t < 10 * 60_000);
+    if (this.pairAttempts.length >= 20) throw new PublicError("Too many sign-in attempts. Try again in a few minutes.", 429);
+    this.pairAttempts.push(now);
+    const token = process.env.HUB_TOKEN?.trim();
+    if (!token) throw new PublicError("This hub has no access token set.", 400);
+    if (typeof code !== "string" || code.length > 64) throw new PublicError("That sign-in link isn't valid.", 401);
+    for (const [c, exp] of this.pairCodes) {
+      const a = Buffer.from(c);
+      const b = Buffer.from(code);
+      if (a.length === b.length && timingSafeEqual(a, b)) {
+        this.pairCodes.delete(c);
+        if (exp < now) break;
+        console.log("[pair] a phone signed in with a one-time link");
+        return token;
+      }
+    }
+    throw new PublicError("That sign-in link expired or was already used. Send /dashboard again.", 401);
   }
 
   /** Owner-approved planning notes, newest first, as given to the planner. */
@@ -1873,7 +2092,10 @@ export class Hub {
     const channel = this.channels.get(target.channel);
     if (!channel) return;
     const agent = this.agent(task.agentId);
-    const who = task.kind === "goal" ? `Team (lead ${agent?.name})` : `${agent?.name} · ${task.model} · ${task.reasoning}`;
+    const who =
+      task.kind === "goal"
+        ? `${task.compareSide ? `${task.compareSide === "solo" ? "Solo" : "Crew"} version` : (stepsCount(this.store.state.tasks, task.id) > 1 ? "Crew" : "Solo")} · ${titleOf(task.prompt)}`
+        : `${agent?.name} · ${task.model} · ${task.reasoning}`;
     const tokens = (task.usage?.input ?? 0) + (task.usage?.output ?? 0);
     const secs = task.startedAt && task.finishedAt ? ((Date.parse(task.finishedAt) - Date.parse(task.startedAt)) / 1000).toFixed(1) : "?";
     const body =
@@ -1885,6 +2107,21 @@ export class Hub {
       await channel.send(target.chatId, `[${who}]${reroute}\n\n${body}\n\n— ${fmtK(tokens)} tok · ${secs}s`);
     } catch (err) {
       console.error(`[${target.channel}] reply failed:`, err instanceof Error ? err.message : err);
+    }
+    if (task.kind === "goal" && task.compareId && channel.sendButtons && !this.verdictAsked.has(task.compareId)) {
+      const pair = this.store.state.tasks.filter((t) => t.kind === "goal" && t.compareId === task.compareId);
+      if (pair.length === 2 && pair.every((t) => !["queued", "running"].includes(t.status))) {
+        this.verdictAsked.add(task.compareId);
+        await channel
+          .sendButtons(target.chatId, `⚖️ Both versions of “${titleOf(task.prompt)}” are in. Which was better?`, [
+            [
+              { text: "👤 Solo", data: `cv:${task.compareId}:solo` },
+              { text: "👥 Crew", data: `cv:${task.compareId}:crew` },
+              { text: "🤝 Same", data: `cv:${task.compareId}:tie` },
+            ],
+          ])
+          .catch((err) => console.error(`[${target.channel}] verdict prompt failed:`, errorText(err)));
+      }
     }
   }
 }

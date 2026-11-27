@@ -491,3 +491,84 @@ describe("Solo or crew, and comparing them", () => {
     expect(() => hub.compareVerdict(cmp.compareId, "both")).toThrow(/winner must be/);
   });
 });
+
+describe("Phone: plans in chat, sign-in links, verdict prompts", () => {
+  /** A Telegram stand-in that records what it was asked to send. */
+  function fakeTelegram() {
+    const sent: { chatId: string; text: string; buttons?: { text: string; data: string }[][] }[] = [];
+    return {
+      sent,
+      channel: {
+        name: "telegram" as const,
+        status: () => ({ name: "telegram" as const, enabled: true, connected: true, detail: "fake" }),
+        start() {},
+        stop() {},
+        send: async (chatId: string, text: string) => void sent.push({ chatId, text }),
+        sendButtons: async (chatId: string, text: string, buttons: { text: string; data: string }[][]) => void sent.push({ chatId, text, buttons }),
+      },
+    };
+  }
+  const tg = { channel: "telegram" as const, chatId: "42" };
+
+  it("drafts a plan with buttons, switches it, and launches it from a tap", async () => {
+    const { hub, byId, settle } = crew([{ id: "lead", out: `cat >/dev/null; printf '%s' '${PLAN_JSON}'` }, { id: "alpha" }, { id: "beta" }]);
+    const fake = fakeTelegram();
+    hub.channels.set("telegram", fake.channel);
+    const first = await hub.handleText("/plan explain how index funds work in plain words", tg);
+    expect(first.reply).toMatch(/Solo plan/);
+    const data = first.buttons!.flat().map((b) => b.data);
+    const id = /^pl:(\w+):go$/.exec(data[0])![1];
+    expect(data).toEqual([`pl:${id}:go`, `pl:${id}:crew`, `pl:${id}:cmp`, `pl:${id}:x`]);
+    const switched = await hub.planAction(id, "crew", tg);
+    expect(switched.reply).toMatch(/Crew plan/);
+    expect(switched.reply).toMatch(/1\. Alpha: Find the facts/);
+    const go = await hub.planAction(id, "go", tg);
+    expect(go.reply).toMatch(/Launched/);
+    await settle(go.taskId!);
+    expect(byId(go.taskId!)).toMatchObject({ status: "done", replyTo: tg });
+    expect((await hub.planAction(id, "go", tg)).reply).toMatch(/expired/);
+    expect(fake.sent.at(-1)!.text).toMatch(/^\[Crew · /);
+  });
+
+  it("falls back to a /launch command where the app has no buttons", async () => {
+    const { hub } = crew([{ id: "lead" }, { id: "alpha" }]);
+    const res = await hub.handleText("/plan explain how index funds work", { channel: "imessage", chatId: "+1555" });
+    expect(res.buttons).toBeUndefined();
+    expect(res.reply).toMatch(/Reply \/launch \w+ to start it\./);
+  });
+
+  it("asks which version was better once both sides of a comparison are in", async () => {
+    const { hub, settle } = crew([{ id: "lead", out: `cat >/dev/null; printf '%s' '${PLAN_JSON}'` }, { id: "alpha" }, { id: "beta" }]);
+    const fake = fakeTelegram();
+    hub.channels.set("telegram", fake.channel);
+    const cmp = await hub.compare("draft a launch post and have it reviewed", tg);
+    await settle(cmp.solo);
+    await settle(cmp.crew);
+    for (let i = 0; i < 40 && !fake.sent.some((m) => m.buttons); i++) await new Promise((r) => setTimeout(r, 25));
+    const prompt = fake.sent.filter((m) => m.buttons);
+    expect(prompt).toHaveLength(1);
+    expect(prompt[0].buttons!.flat().map((b) => b.data)).toEqual([`cv:${cmp.compareId}:solo`, `cv:${cmp.compareId}:crew`, `cv:${cmp.compareId}:tie`]);
+    expect(hub.verdictFromChat(cmp.compareId, "crew").reply).toMatch(/the crew was better/);
+  });
+
+  it("signs a phone in once with a short-lived code, and refuses everything else", () => {
+    const { hub } = crew([{ id: "lead" }]);
+    const saved = { token: process.env.HUB_TOKEN, host: process.env.HOST };
+    try {
+      process.env.HOST = "127.0.0.1";
+      expect(hub.dashboardText()).toMatch(/only opens on the Mac itself[\s\S]*npm run setup:phone/);
+      process.env.HUB_TOKEN = "secret-token";
+      const code = hub.createPairCode();
+      expect(() => hub.redeemPairCode("nope")).toThrow(/expired or was already used/);
+      expect(hub.redeemPairCode(code)).toBe("secret-token");
+      expect(() => hub.redeemPairCode(code)).toThrow(/expired or was already used/);
+      const late = hub.createPairCode();
+      expect(() => hub.redeemPairCode(late, Date.now() + 11 * 60_000)).toThrow(/expired/);
+      for (let i = 0; i < 20; i++) { try { hub.redeemPairCode("x"); } catch {} }
+      expect(() => hub.redeemPairCode(hub.createPairCode())).toThrow(/Too many sign-in attempts/);
+    } finally {
+      if (saved.token === undefined) delete process.env.HUB_TOKEN; else process.env.HUB_TOKEN = saved.token;
+      if (saved.host === undefined) delete process.env.HOST; else process.env.HOST = saved.host;
+    }
+  });
+});
