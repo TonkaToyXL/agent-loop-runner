@@ -46,9 +46,10 @@ Relay uses the subscriptions and tools you already have. Pay-per-use APIs are **
 | **Hermes** | Hermes Agent's built-in API server on your Mac | Whatever Hermes already uses |
 | **Muse** | Muse Spark 1.3 through ClinePass | Your ClinePass ($9.99/mo flat). Without ClinePass, Muse is off: Meta's own API is pay-per-use, and the Muse app can't be controlled by other apps. |
 | **Cline** | Open models (Kimi K3.1 Pro, GLM 5.3, DeepSeek, Qwen…) through ClinePass | Your ClinePass |
+| **Zen** | OpenCode Zen (optional) | **Prepaid credit, charged per use.** Runs only while it has a monthly budget (default $30). Turn auto-reload off in OpenCode billing so it can't top itself up. |
 | Grok via xAI API | Optional fallback | Pay-per-use, blocked by default |
 
-Agents are defined in [`relay.config.json`](./relay.config.json). Any OpenAI-compatible endpoint (Ollama, LM Studio, OpenRouter) or local command-line assistant can be added as another entry. Mark each connection's `billing` as `subscription`, `local`, or `metered`.
+Agents are defined in [`relay.config.json`](./relay.config.json). Any OpenAI-compatible endpoint (Ollama, LM Studio, OpenRouter) or local command-line assistant can be added as another entry. Mark each connection's `billing` as `subscription`, `local`, `prepaid`, or `metered`. A `prepaid` connection only runs when its agent has a `monthlyBudgetUsd` above 0. Spend is counted from `pricing.models` (per-model USD per 1M tokens) when the model is listed, otherwise from the agent's flat `pricing`, so set the flat price to the priciest model.
 
 ## Connect your agents
 

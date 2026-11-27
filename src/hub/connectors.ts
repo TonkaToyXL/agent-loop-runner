@@ -73,18 +73,23 @@ function available(config: ConnectorConfig): boolean {
 }
 
 export function resolveConnector(agent: AgentConfig): ResolvedConnector {
-  let blocked: ConnectorConfig | undefined;
+  let blocked: { config: ConnectorConfig; why: string } | undefined;
   for (const config of agent.connectors) {
     if (config.kind === "demo") return { config, live: false, label: "Demo" };
     if (!available(config)) continue;
     if (config.billing === "metered" && !meteredAllowed()) {
-      blocked ??= config;
+      blocked ??= { config, why: "is pay-per-use (blocked)" };
+      continue;
+    }
+    // Prepaid credit only runs under a hard monthly cap, so a missing budget can't drain the balance.
+    if (config.billing === "prepaid" && !(agent.limits?.monthlyBudgetUsd > 0) && !meteredAllowed()) {
+      blocked ??= { config, why: "spends prepaid credit (set a monthly budget to turn it on)" };
       continue;
     }
     return { config, live: true, label: config.label, billing: config.billing };
   }
   if (blocked) {
-    return { config: { kind: "demo", label: "Demo" }, live: false, blocked: true, label: `Off · ${blocked.label} is pay-per-use (blocked)` };
+    return { config: { kind: "demo", label: "Demo" }, live: false, blocked: true, label: `Off · ${blocked.config.label} ${blocked.why}` };
   }
   // Only pay-per-use options exist and they're blocked: say so instead of asking for keys.
   if (agent.connectors.length && agent.connectors.every((c) => c.billing === "metered") && !meteredAllowed()) {

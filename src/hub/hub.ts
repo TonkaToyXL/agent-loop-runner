@@ -68,7 +68,7 @@ export interface AgentView extends AgentConfig {
   connectorLabel: string;
   supportsProvider: boolean;
   sendsReasoning: boolean;
-  billing?: "subscription" | "metered" | "local";
+  billing?: "subscription" | "metered" | "local" | "prepaid";
   blocked: boolean;
   /** undefined when the connector has no health check. */
   online?: boolean;
@@ -264,7 +264,7 @@ export class Hub {
       const v = this.agentView(a);
       const icon = v.blocked ? "⛔" : !v.live ? "⚪" : v.online === false ? "🔴" : !v.enabled ? "⏸" : !v.limit.ok ? "🟡" : "✅";
       const state = v.blocked
-        ? "off (pay-per-use, blocked)"
+        ? v.connectorLabel.replace(/^Off · /, "off: ")
         : !v.live
           ? v.connectorLabel.replace(/^Demo · /, "not connected: ")
           : v.online === false
@@ -305,6 +305,12 @@ export class Hub {
       "",
       "Safety",
       metered ? "⚠️ Pay-per-use APIs are ALLOWED (RELAY_ALLOW_METERED=true)" : "✅ Pay-per-use APIs blocked",
+      ...this.agents()
+        .filter((a) => {
+          const v = this.agentView(a);
+          return v.live && v.billing === "prepaid";
+        })
+        .map((a) => `💳 ${a.name} spends prepaid credit (capped at $${a.limits.monthlyBudgetUsd}/mo)`),
       waiting ? `🟡 ${waiting} waiting for your OK (/approvals)` : "✅ Nothing waiting for your OK",
     );
     return lines.join("\n");
@@ -522,6 +528,7 @@ export class Hub {
     }
     if (patch.pricing) {
       clean.pricing = {
+        ...base.pricing, // keep per-model prices; the dashboard only edits the flat rate
         inputPerMTok: nonNeg(patch.pricing.inputPerMTok, base.pricing.inputPerMTok),
         outputPerMTok: nonNeg(patch.pricing.outputPerMTok, base.pricing.outputPerMTok),
       };
@@ -1432,7 +1439,7 @@ export class Hub {
       task.usage = result.usage;
       task.servedModel = result.served ?? (agent.model === "auto" ? effectiveAgent.model : undefined);
       const isFreeModel = /-free$/i.test(effectiveAgent.model);
-      task.costUsd = isFreeModel ? 0 : costOf(result.usage, effectiveAgent.pricing);
+      task.costUsd = isFreeModel ? 0 : costOf(result.usage, effectiveAgent.pricing, result.served, effectiveAgent.model);
       task.result = result.text;
       task.status = "done";
       this.record(task, effectiveAgent, true, Date.now() - started);

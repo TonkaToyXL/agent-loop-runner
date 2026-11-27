@@ -383,7 +383,7 @@
         {
           "kind": "openai",
           "label": "OpenCode Zen",
-          "billing": "subscription",
+          "billing": "prepaid",
           "requiresEnv": [
             "OPENCODE_ZEN_API_KEY"
           ],
@@ -400,8 +400,15 @@
         "monthlyBudgetUsd": 30
       },
       "pricing": {
-        "inputPerMTok": 0.6,
-        "outputPerMTok": 2.0
+        "inputPerMTok": 2.0,
+        "outputPerMTok": 10.0,
+        "models": {
+          "deepseek-v4.1-flash": { "inputPerMTok": 0.3, "outputPerMTok": 1.2 },
+          "glm-5.3-flash": { "inputPerMTok": 0.15, "outputPerMTok": 0.5 },
+          "glm-5.3": { "inputPerMTok": 1.4, "outputPerMTok": 4.4 },
+          "mistral-large-4": { "inputPerMTok": 1.36, "outputPerMTok": 4.18 },
+          "kimi-k3.1-pro": { "inputPerMTok": 2.0, "outputPerMTok": 10.0 }
+        }
       },
       "enabled": true,
       "maxConcurrent": 2,

@@ -62,6 +62,42 @@ describe("riskyAction", () => {
       expect(riskyAction(t)).toBeNull();
     }
   });
+  it("catches everyday phrasings of outreach, money, and machine actions", () => {
+    for (const t of [
+      "tell Sam I'm running late",
+      "let the team know we shipped",
+      "ping the group chat",
+      "invite Jess to Friday's call",
+      "retweet this thread",
+      "unfollow these spam accounts",
+      "venmo Alex $20 for lunch",
+      "sell my Tesla shares",
+      "push it to main",
+      "git push the fix",
+      "commit these changes",
+      "run the cleanup script",
+      "rm -rf the old build folder",
+      "restart the server",
+      "go live with the new page",
+    ]) {
+      expect(riskyAction(t), t).not.toBeNull();
+    }
+  });
+  it("doesn't flag research that mentions those words", () => {
+    for (const t of [
+      "tell me what's trending on X",
+      "latest on the government shutdown",
+      "reactions to the US trade war",
+      "who is in charge of xAI now",
+      "why the Tesla sell-off happened",
+      "explain push notifications",
+      "summarize reactions to the GPT-6 launch",
+      "what's ClinePass's refund policy",
+      "find the best bet for a budget laptop",
+    ]) {
+      expect(riskyAction(t), t).toBeNull();
+    }
+  });
 });
 
 describe("approval commands", () => {

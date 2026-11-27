@@ -45,6 +45,16 @@ export function normalizeAgent(raw: Partial<AgentConfig>, index: number): AgentC
     pricing: {
       inputPerMTok: num(raw.pricing?.inputPerMTok, 0),
       outputPerMTok: num(raw.pricing?.outputPerMTok, 0),
+      ...(raw.pricing?.models && typeof raw.pricing.models === "object"
+        ? {
+            models: Object.fromEntries(
+              Object.entries(raw.pricing.models).map(([id, p]) => [
+                id.toLowerCase(),
+                { inputPerMTok: num(p?.inputPerMTok, 0), outputPerMTok: num(p?.outputPerMTok, 0) },
+              ]),
+            ),
+          }
+        : {}),
     },
     enabled: raw.enabled ?? true,
     optional: raw.optional ?? false,

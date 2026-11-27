@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { agentUsage, costOf, leaderboard, limitState } from "./usage.js";
+import { agentUsage, costOf, leaderboard, limitState, priceFor } from "./usage.js";
 import type { Task, UsageEvent } from "./types.js";
 
 const now = new Date(2026, 10, 25, 15, 0, 0);
@@ -51,6 +51,25 @@ describe("limitState", () => {
 describe("costOf", () => {
   it("prices per million tokens", () => {
     expect(costOf({ input: 1_000_000, output: 500_000 }, { inputPerMTok: 3, outputPerMTok: 15 })).toBe(10.5);
+  });
+
+  const zen = {
+    inputPerMTok: 2,
+    outputPerMTok: 10,
+    models: { "glm-5.3-flash": { inputPerMTok: 0.15, outputPerMTok: 0.5 }, "kimi-k3.1-pro": { inputPerMTok: 2, outputPerMTok: 10 } },
+  };
+  const million = { input: 1_000_000, output: 1_000_000 };
+
+  it("uses the per-model price for the model that served the request", () => {
+    expect(costOf(million, zen, "glm-5.3-flash")).toBeCloseTo(0.65);
+    expect(costOf(million, zen, undefined, "kimi-k3.1-pro")).toBe(12);
+  });
+  it("prefers the served model, matches case-insensitively, and ignores a provider prefix", () => {
+    expect(costOf(million, zen, "Zen/GLM-5.3-Flash", "kimi-k3.1-pro")).toBeCloseTo(0.65);
+  });
+  it("falls back to the flat (priciest) rate for unlisted models", () => {
+    expect(costOf(million, zen, "brand-new-model")).toBe(12);
+    expect(priceFor(zen, "auto")).toBe(zen);
   });
 });
 

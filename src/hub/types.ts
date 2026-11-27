@@ -3,8 +3,11 @@ export type Reasoning = (typeof REASONING_LEVELS)[number];
 
 export type ConnectorKind = "openai" | "webhook" | "cli" | "demo";
 
-/** subscription: runs on a plan you already pay for. metered: billed per use. local: runs on your machine. */
-export type Billing = "subscription" | "metered" | "local";
+/**
+ * subscription: runs on a plan you already pay for. metered: billed per use. local: runs on your machine.
+ * prepaid: spends a prepaid credit balance per use; only runs while the agent has a monthly budget cap.
+ */
+export type Billing = "subscription" | "metered" | "local" | "prepaid";
 
 /**
  * How the hub reaches an agent. An agent can list several connectors; the first
@@ -14,7 +17,10 @@ export type Billing = "subscription" | "metered" | "local";
 export interface ConnectorConfig {
   kind: ConnectorKind;
   label: string;
-  /** How this connection is paid for. Metered connectors are skipped unless RELAY_ALLOW_METERED=true. */
+  /**
+   * How this connection is paid for. Metered connectors are skipped unless RELAY_ALLOW_METERED=true.
+   * Prepaid connectors are skipped unless the agent has a monthly budget (or RELAY_ALLOW_METERED=true).
+   */
   billing?: Billing;
   /** cli: executable to run (looked up on PATH). */
   command?: string;
@@ -73,9 +79,14 @@ export interface AgentLimits {
   monthlyBudgetUsd: number;
 }
 
-export interface AgentPricing {
+export interface ModelPrice {
   inputPerMTok: number;
   outputPerMTok: number;
+}
+
+export interface AgentPricing extends ModelPrice {
+  /** Per-model prices (USD per 1M tokens). Models not listed use the agent-level price. */
+  models?: Record<string, ModelPrice>;
 }
 
 export interface AgentQuickAction {

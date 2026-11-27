@@ -156,10 +156,40 @@ export class ApprovalDesk {
  * Deliberately broad: a false alarm costs one tap, a miss could cost much more.
  * Returns the matching phrase, or null.
  */
+const RISKY = new RegExp(
+  "\\b(" +
+    [
+      // Messages and outreach
+      String.raw`send|sending|e-?mail(?:ing)?|reply(?:ing)? to|respond to|forward|dm|submit`,
+      String.raw`text (?:him|her|them|my)|message (?:him|her|them|my)`,
+      String.raw`tell (?!me\b|us\b|you\b|a\b|an\b)\w+|let (?:\w+ ){1,3}know|ping (?:him|her|them|my|the|everyone|@)|notify`,
+      String.raw`reach out|contact (?:him|her|them|my|the)|call (?:him|her|them|my|mom|dad)|invite|rsvp`,
+      // Social
+      String.raw`post(?:ing)?|tweet|retweet|repost|quote[- ]tweet|publish|share|comment on|unfollow|follow (?:him|her|them|back|@)`,
+      String.raw`like (?:the|this|that|their|his|her|my) (?:post|tweet|photo|video|reel)`,
+      // Money
+      String.raw`buy|purchase|order (?:a|an|the|me|my|some|food|it|them)|place (?:an|the|my) order|pay|payment|checkout`,
+      String.raw`transfer|wire|venmo|zelle|paypal|cash ?app|donate|tip (?:him|her|them|the)|place a bet|wager`,
+      String.raw`(?:sell|trade|swap) (?:my|the|it|them|some|all|\d)|refund (?:my|the|him|her|them|it)|issue a refund`,
+      String.raw`charge (?:my|the|their|his|her) (?:card|account|customer)|(?:withdraw|deposit) (?:\$|money|funds|cash)`,
+      // Accounts and bookings
+      String.raw`subscribe|unsubscribe|cancel (?:my|the|a|an) |book (?:a|an|the|me|my|it|tickets?|flights?|hotel)|reserve`,
+      String.raw`sign (?:up|in)|log ?in|accept|decline|(?:grant|revoke) (?:access|permission|him|her|them)`,
+      String.raw`change (?:my|the) (?:password|settings|email|plan)|update (?:my|the) (?:profile|bio|settings|status|password)`,
+      // Files, code, and machines
+      String.raw`delete|remove|erase|wipe|overwrite|rename|move (?:the |my |these |those |all )?files?|chmod|rm -\w+|sudo`,
+      String.raw`deploy|merge|upload|install|uninstall|git (?:push|commit|reset)|force[- ]push`,
+      String.raw`push (?:it|this|that|the (?:code|changes|branch|fix)|to (?:main|prod|production|github))`,
+      String.raw`commit (?:it|this|that|the (?:changes|code|files)|these|those|all)`,
+      String.raw`execute|run (?:the|this|that|my|a) (?:script|command|cleanup|job|migration|backup|update|code)`,
+      String.raw`kill (?:the|it|this|that|all|process)|(?:restart|reboot|shut down) (?:the|my|it|this|that|your|all)`,
+      String.raw`go live|(?:launch|release|ship) (?:it|this|the)`,
+    ].join("|") +
+    ")\\b",
+  "i",
+);
+
 export function riskyAction(text: string): string | null {
-  const m =
-    /\b(send|sending|e-?mail(?:ing)?|reply(?:ing)? to|respond to|forward|post(?:ing)?|tweet|publish|share|buy|purchase|order (?:a|an|the|me|my|some|food|it|them)|place (?:an|the|my) order|pay|payment|checkout|subscribe|unsubscribe|cancel (?:my|the|a|an) |delete|remove|erase|wipe|transfer|wire|book (?:a|an|the|me|my|it|tickets?|flights?|hotel)|reserve|dm|text (?:him|her|them|my)|message (?:him|her|them|my)|submit|sign (?:up|in)|log ?in|deploy|merge|upload|install|uninstall|accept|decline)\b/i.exec(
-      text,
-    );
+  const m = RISKY.exec(text);
   return m ? m[0].trim().toLowerCase() : null;
 }

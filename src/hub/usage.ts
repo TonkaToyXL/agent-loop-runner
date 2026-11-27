@@ -8,8 +8,27 @@ export function startOfMonth(now: Date): number {
   return new Date(now.getFullYear(), now.getMonth(), 1).getTime();
 }
 
-export function costOf(usage: TokenUsage, pricing: AgentPricing): number {
-  return (usage.input * pricing.inputPerMTok + usage.output * pricing.outputPerMTok) / 1_000_000;
+/**
+ * Price for the model that actually served a request. Tries each candidate (served model first,
+ * then the requested one) exactly, then by its last path segment ("org/model" -> "model").
+ * Falls back to the agent-level price, so set that to the priciest model to keep caps conservative.
+ */
+export function priceFor(pricing: AgentPricing, ...models: (string | undefined)[]): AgentPricing {
+  const table = pricing.models;
+  if (table) {
+    for (const raw of models) {
+      const id = raw?.trim().toLowerCase();
+      if (!id) continue;
+      const hit = table[id] ?? table[id.split("/").pop()!];
+      if (hit) return hit;
+    }
+  }
+  return pricing;
+}
+
+export function costOf(usage: TokenUsage, pricing: AgentPricing, ...models: (string | undefined)[]): number {
+  const p = priceFor(pricing, ...models);
+  return (usage.input * p.inputPerMTok + usage.output * p.outputPerMTok) / 1_000_000;
 }
 
 /** Rough token estimate when a provider does not report usage (~4 chars per token). */

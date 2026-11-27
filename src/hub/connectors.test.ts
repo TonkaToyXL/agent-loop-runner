@@ -118,6 +118,32 @@ describe("resolveConnector billing guard", () => {
     );
     expect(resolveConnector(a)).toMatchObject({ live: false, label: "Demo · install relay-test-missing-cli-xyz" });
   });
+
+  const zen = (monthlyBudgetUsd: number) =>
+    normalizeAgent(
+      {
+        id: "zen",
+        model: "auto",
+        limits: { dailyRequests: 0, dailyTokens: 0, monthlyBudgetUsd },
+        connectors: [{ kind: "openai", label: "OpenCode Zen", billing: "prepaid", requiresEnv: ["T_ZEN_KEY"] }],
+      },
+      0,
+    );
+
+  it("runs prepaid credit only under a monthly budget cap", () => {
+    withEnv({ T_ZEN_KEY: "zen-key", RELAY_ALLOW_METERED: undefined }, () => {
+      expect(resolveConnector(zen(30))).toMatchObject({ live: true, label: "OpenCode Zen", billing: "prepaid" });
+      const off = resolveConnector(zen(0));
+      expect(off).toMatchObject({ live: false, blocked: true });
+      expect(off.label).toBe("Off · OpenCode Zen spends prepaid credit (set a monthly budget to turn it on)");
+    });
+  });
+
+  it("lets RELAY_ALLOW_METERED run prepaid credit without a cap", () => {
+    withEnv({ T_ZEN_KEY: "zen-key", RELAY_ALLOW_METERED: "true" }, () => {
+      expect(resolveConnector(zen(0))).toMatchObject({ live: true, billing: "prepaid" });
+    });
+  });
 });
 
 describe("parseCliOutput", () => {

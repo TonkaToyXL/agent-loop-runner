@@ -1440,6 +1440,7 @@ const BILL_HELP = {
   subscription: "Included with your existing subscription.",
   local: "Runs locally on your Mac.",
   metered: "Pay-per-use API.",
+  prepaid: "Spends prepaid credit per use, capped by its monthly budget.",
 };
 
 function renderCompactMeter(a) {
