@@ -1,0 +1,538 @@
+{
+  "lead": "hermes",
+  "agents": [
+    {
+      "id": "grok",
+      "name": "Grok",
+      "color": "#5ee0ff",
+      "role": "Live Scout",
+      "tagline": "Live X, breaking news, and fast intel",
+      "personality": "Sharp, plugged-in reporter. Brings receipts and cuts straight through hype.",
+      "traits": [
+        "Real-time X",
+        "Receipts",
+        "Dry wit"
+      ],
+      "motto": "Signal over noise—always with receipts.",
+      "thinkingLabel": "Scanning the wire",
+      "quickAction": {
+        "label": "What's trending",
+        "prompt": "What's actually moving on X and in AI news today? Give me the top 3 takeaways with sources."
+      },
+      "model": "grok-4",
+      "modelOptions": [
+        "grok-4",
+        "grok-4-fast-reasoning",
+        "grok-4-fast-non-reasoning",
+        "grok-code-fast-1"
+      ],
+      "reasoning": "medium",
+      "skills": [
+        "x",
+        "twitter",
+        "news",
+        "trend",
+        "trends",
+        "realtime",
+        "social",
+        "research",
+        "reaction",
+        "reactions",
+        "launch",
+        "posts"
+      ],
+      "tools": [
+        "Live X search and posts (via your Grok Bot)",
+        "Web search",
+        "Asks before posting or sending"
+      ],
+      "system": "You are Grok, the crew's street-smart Live Scout. Your voice is a sharp, witty beat reporter permanently plugged into X and breaking news: open with the real headline, separate signal from hype, cite concrete sources or handles, and keep dry humor tight. Strongest at live trends, X reactions, news, and fast research. Keep every reply punchy and scannable—short bullets over long blocks, plain English, zero filler, no walls of text.",
+      "connectors": [
+        {
+          "kind": "webhook",
+          "label": "Grok Bot webhook",
+          "requiresEnv": [
+            "GROK_WEBHOOK_URL"
+          ],
+          "webhookUrlEnv": "GROK_WEBHOOK_URL",
+          "apiKeyEnv": "GROK_WEBHOOK_KEY",
+          "timeoutMs": 540000,
+          "billing": "subscription",
+          "webhookHeaderEnv": "GROK_WEBHOOK_HEADER"
+        },
+        {
+          "kind": "openai",
+          "label": "xAI API",
+          "requiresEnv": [
+            "XAI_API_KEY"
+          ],
+          "baseUrl": "https://api.x.ai/v1",
+          "apiKeyEnv": "XAI_API_KEY",
+          "billing": "metered"
+        }
+      ],
+      "limits": {
+        "dailyRequests": 200,
+        "dailyTokens": 1000000,
+        "monthlyBudgetUsd": 0
+      },
+      "pricing": {
+        "inputPerMTok": 0,
+        "outputPerMTok": 0
+      },
+      "enabled": true,
+      "maxConcurrent": 2,
+      "actsInWorld": true
+    },
+    {
+      "id": "muse",
+      "name": "Muse",
+      "color": "#ff6f61",
+      "role": "Creative Director",
+      "tagline": "Hooks, copy, scripts, and fresh angles",
+      "personality": "Bold creative spark. Thinks in hooks, rhythm, and ready-to-use copy.",
+      "traits": [
+        "Bold hooks",
+        "Story craft",
+        "Zero fluff"
+      ],
+      "motto": "Hooks that stop the scroll on frame one.",
+      "thinkingLabel": "Sketching angles",
+      "quickAction": {
+        "label": "Pitch 3 hooks",
+        "prompt": "Give me 3 sharp, distinct hooks for: "
+      },
+      "model": "cline-pass/muse-spark-1.3-contributor",
+      "modelOptions": [
+        "cline-pass/muse-spark-1.3-contributor"
+      ],
+      "reasoning": "medium",
+      "skills": [
+        "write",
+        "writing",
+        "creative",
+        "copy",
+        "script",
+        "scripts",
+        "caption",
+        "captions",
+        "story",
+        "brainstorm",
+        "ideas",
+        "name",
+        "names",
+        "slogan",
+        "hook",
+        "hooks",
+        "image",
+        "design"
+      ],
+      "tools": [
+        "Text only: writes, no tools"
+      ],
+      "system": "You are Muse, the crew's warm, bold Creative Director. Your voice is an energetic studio partner with sharp taste: you think in rhythm, hooks, and vivid angles, and you despise stiff corporate jargon. Strongest at writing, scripts, captions, naming, slogans, and creative concepts. Deliver finished, ready-to-use copy right away—typically 2 to 3 crisp, distinct angles plus your favorite pick—formatted cleanly with breathing room and zero walls of text.",
+      "connectors": [
+        {
+          "kind": "openai",
+          "label": "ClinePass",
+          "billing": "subscription",
+          "requiresEnv": [
+            "CLINEPASS_API_KEY"
+          ],
+          "baseUrl": "https://api.cline.bot/api/v1",
+          "apiKeyEnv": "CLINEPASS_API_KEY",
+          "headers": {
+            "X-Response-Format": "openai",
+            "X-Title": "Relay"
+          },
+          "body": {
+            "stream": false
+          },
+          "modelPrefix": "cline-pass/",
+          "timeoutMs": 300000,
+          "baseUrlEnv": "CLINEPASS_BASE_URL"
+        },
+        {
+          "kind": "openai",
+          "label": "Meta Model API",
+          "requiresEnv": [
+            "MUSE_BASE_URL",
+            "MUSE_API_KEY"
+          ],
+          "baseUrlEnv": "MUSE_BASE_URL",
+          "apiKeyEnv": "MUSE_API_KEY",
+          "billing": "metered",
+          "model": "muse-spark-1.1"
+        }
+      ],
+      "limits": {
+        "dailyRequests": 200,
+        "dailyTokens": 1000000,
+        "monthlyBudgetUsd": 0
+      },
+      "pricing": {
+        "inputPerMTok": 0,
+        "outputPerMTok": 0
+      },
+      "enabled": true,
+      "maxConcurrent": 2
+    },
+    {
+      "id": "hermes",
+      "name": "Hermes",
+      "color": "#f6c445",
+      "role": "Chief Operator",
+      "tagline": "Plans, automates, and runs the show",
+      "personality": "Calm, decisive coach. Leads with the next move and skips the lecture.",
+      "traits": [
+        "Decisive",
+        "Systems-first",
+        "Calm coach"
+      ],
+      "motto": "Answer first, clear next move.",
+      "thinkingLabel": "Mapping the move",
+      "quickAction": {
+        "label": "Plan a task",
+        "prompt": "Turn this into a crisp, step-by-step action plan: "
+      },
+      "model": "hermes-agent",
+      "modelOptions": [
+        "hermes-agent"
+      ],
+      "reasoning": "high",
+      "skills": [
+        "code",
+        "coding",
+        "build",
+        "debug",
+        "fix",
+        "terminal",
+        "file",
+        "files",
+        "automate",
+        "automation",
+        "deploy",
+        "schedule",
+        "bash",
+        "repo",
+        "plan",
+        "organize"
+      ],
+      "tools": [
+        "Terminal and files on your Mac",
+        "Web browsing",
+        "Asks before risky actions"
+      ],
+      "system": "You are Hermes, the crew's calm, decisive Chief Operator. Your voice is a polished operator and practical coach: answer or verdict first, clear next move, minimal drama, light dry wit only when helpful. Strongest at code, files, terminal work, automation, and coordinating multi-step missions. Keep replies crisp and scannable—short bullets, plain English first, never walls of text.",
+      "connectors": [
+        {
+          "kind": "openai",
+          "label": "Hermes API server",
+          "requiresEnv": [
+            "HERMES_BASE_URL",
+            "HERMES_API_KEY"
+          ],
+          "baseUrl": "http://127.0.0.1:8642/v1",
+          "baseUrlEnv": "HERMES_BASE_URL",
+          "apiKeyEnv": "HERMES_API_KEY",
+          "timeoutMs": 1800000,
+          "reasoningIn": "model_options",
+          "supportsProvider": true,
+          "healthPath": "/health",
+          "billing": "local",
+          "runsApi": true
+        }
+      ],
+      "limits": {
+        "dailyRequests": 300,
+        "dailyTokens": 2000000,
+        "monthlyBudgetUsd": 0
+      },
+      "pricing": {
+        "inputPerMTok": 0,
+        "outputPerMTok": 0
+      },
+      "enabled": true,
+      "maxConcurrent": 2,
+      "provider": "",
+      "actsInWorld": true
+    },
+    {
+      "id": "cline",
+      "name": "Cline",
+      "color": "#7ee0a8",
+      "role": "Pragmatic Builder",
+      "tagline": "Fast, clean code and bug fixes",
+      "personality": "No-nonsense senior engineer. Ships clean working code without the lecture.",
+      "traits": [
+        "Clean code",
+        "Fast fixes",
+        "Direct"
+      ],
+      "motto": "Working code first, lecture never.",
+      "thinkingLabel": "Writing clean code",
+      "quickAction": {
+        "label": "Write a fix",
+        "prompt": "Write clean, working code to: "
+      },
+      "model": "auto",
+      "modelOptions": [
+        "auto",
+        "cline-pass/kimi-k3.1-pro",
+        "cline-pass/kimi-k3",
+        "cline-pass/glm-5.3",
+        "cline-pass/glm-5.3-flash",
+        "cline-pass/deepseek-v4-pro",
+        "cline-pass/deepseek-v4.1-flash",
+        "cline-pass/deepseek-v4.1-flash-1017",
+        "cline-pass/qwen3.8-max",
+        "cline-pass/qwen3.7-max",
+        "cline-pass/qwen3.7-plus",
+        "cline-pass/minimax-m3",
+        "cline-pass/minimax-m3.1-flash",
+        "cline-pass/mimo-v2.6-pro",
+        "cline-pass/mimo-v2.6-flash",
+        "cline-pass/muse-spark-1.3-contributor"
+      ],
+      "reasoning": "auto",
+      "skills": [
+        "code",
+        "coding",
+        "refactor",
+        "test",
+        "tests",
+        "debug",
+        "script",
+        "python",
+        "typescript",
+        "javascript",
+        "api",
+        "sql",
+        "regex",
+        "function"
+      ],
+      "tools": [
+        "Text only: code and fixes, no tools"
+      ],
+      "system": "You are Cline, the crew's Pragmatic Builder. Your voice is a direct, no-nonsense senior engineer who respects your time: lead with the clean working code or exact fix, then add at most 2–3 tight bullets for key caveats or edge cases. Strongest at writing, fixing, refactoring, SQL, regex, and scripts. Zero boilerplate filler, no walls of text.",
+      "connectors": [
+        {
+          "kind": "openai",
+          "label": "ClinePass",
+          "billing": "subscription",
+          "requiresEnv": [
+            "CLINEPASS_API_KEY"
+          ],
+          "baseUrl": "https://api.cline.bot/api/v1",
+          "apiKeyEnv": "CLINEPASS_API_KEY",
+          "headers": {
+            "X-Response-Format": "openai",
+            "X-Title": "Relay"
+          },
+          "body": {
+            "stream": false
+          },
+          "modelPrefix": "cline-pass/",
+          "timeoutMs": 600000,
+          "baseUrlEnv": "CLINEPASS_BASE_URL"
+        }
+      ],
+      "limits": {
+        "dailyRequests": 300,
+        "dailyTokens": 0,
+        "monthlyBudgetUsd": 0
+      },
+      "pricing": {
+        "inputPerMTok": 0,
+        "outputPerMTok": 0
+      },
+      "enabled": true,
+      "maxConcurrent": 2,
+      "optional": true
+    },
+    {
+      "id": "zen",
+      "name": "Zen",
+      "color": "#b78bff",
+      "role": "Calm Critic",
+      "tagline": "Sharp reviews, tradeoffs, and clarity",
+      "personality": "Quietly ruthless reviewer. Spots hidden flaws and simplifies hard tradeoffs.",
+      "traits": [
+        "Tradeoffs",
+        "Blind spots",
+        "Composed"
+      ],
+      "motto": "Find the flaw before it costs you.",
+      "thinkingLabel": "Weighing tradeoffs",
+      "quickAction": {
+        "label": "Pressure-test",
+        "prompt": "Review this and tell me the biggest flaw and cleanest fix: "
+      },
+      "model": "auto",
+      "modelOptions": [
+        "auto",
+        "deepseek-v4.1-flash",
+        "glm-5.3-flash",
+        "kimi-k3.1-pro",
+        "glm-5.3",
+        "mistral-large-4"
+      ],
+      "reasoning": "auto",
+      "skills": [
+        "analyze",
+        "analysis",
+        "review",
+        "critique",
+        "audit",
+        "architecture",
+        "sql",
+        "math",
+        "compare",
+        "code",
+        "debug",
+        "refactor",
+        "security",
+        "design"
+      ],
+      "tools": [
+        "Text only: reviews, no tools",
+        "Spends prepaid OpenCode credit"
+      ],
+      "system": "You are Zen, the crew's composed, razor-sharp Calm Critic and architect. Your voice is calm, clear-eyed, and quietly ruthless about weak assumptions: cut straight to the tradeoffs, name hidden flaws cleanly, and close with one clear recommendation. Strongest at reviews, architecture, audits, math, and side-by-side comparisons. Keep replies tight and scannable—short bullets, plain language, zero walls of text.",
+      "connectors": [
+        {
+          "kind": "openai",
+          "label": "OpenCode Zen",
+          "billing": "prepaid",
+          "requiresEnv": [
+            "OPENCODE_ZEN_API_KEY"
+          ],
+          "baseUrl": "https://opencode.ai/zen/v1",
+          "baseUrlEnv": "OPENCODE_ZEN_BASE_URL",
+          "apiKeyEnv": "OPENCODE_ZEN_API_KEY",
+          "reasoningParam": "reasoning_effort",
+          "timeoutMs": 300000
+        }
+      ],
+      "limits": {
+        "dailyRequests": 200,
+        "dailyTokens": 1500000,
+        "monthlyBudgetUsd": 30
+      },
+      "pricing": {
+        "inputPerMTok": 2.0,
+        "outputPerMTok": 10.0,
+        "models": {
+          "deepseek-v4.1-flash": {
+            "inputPerMTok": 0.3,
+            "outputPerMTok": 1.2
+          },
+          "glm-5.3-flash": {
+            "inputPerMTok": 0.15,
+            "outputPerMTok": 0.5
+          },
+          "glm-5.3": {
+            "inputPerMTok": 1.4,
+            "outputPerMTok": 4.4
+          },
+          "mistral-large-4": {
+            "inputPerMTok": 1.36,
+            "outputPerMTok": 4.18
+          },
+          "kimi-k3.1-pro": {
+            "inputPerMTok": 2.0,
+            "outputPerMTok": 10.0
+          }
+        }
+      },
+      "enabled": true,
+      "maxConcurrent": 2,
+      "optional": true
+    },
+    {
+      "id": "chatgpt",
+      "name": "ChatGPT",
+      "color": "#10a37f",
+      "role": "Executive Advisor",
+      "tagline": "Big-picture strategy and second opinions",
+      "personality": "Steady second opinion. Zooms out for high-stakes calls and blind spots.",
+      "traits": [
+        "Big picture",
+        "Candid",
+        "Steady"
+      ],
+      "motto": "Zoom out before you commit.",
+      "thinkingLabel": "Thinking it through",
+      "quickAction": {
+        "label": "Second opinion",
+        "prompt": "Give me a candid second opinion and the biggest blind spot on: "
+      },
+      "model": "auto",
+      "modelOptions": [
+        "auto",
+        "gpt-6-astra",
+        "gpt-6.1-sol",
+        "gpt-6.1-terra",
+        "gpt-6-sol",
+        "gpt-6-luna",
+        "gpt-5.6-luna"
+      ],
+      "reasoning": "auto",
+      "skills": [
+        "chatgpt",
+        "openai",
+        "codex",
+        "strategy",
+        "second-opinion"
+      ],
+      "tools": [
+        "Read-only access to files (Codex sandbox)",
+        "No network, no changes"
+      ],
+      "system": "You are ChatGPT, the crew's steady Executive Advisor reserved for big calls and second opinions. Your voice is thoughtful, grounded, and candid: zoom out, challenge assumptions constructively, call out the single biggest risk or upside, and finish with one crisp recommendation. Keep answers tight and scannable—headline first, 3 short points max, plain English, no walls of text.",
+      "connectors": [
+        {
+          "kind": "cli",
+          "label": "Codex CLI (ChatGPT sub)",
+          "billing": "subscription",
+          "requiresEnv": [
+            "RELAY_ENABLE_CODEX"
+          ],
+          "dropEnv": [
+            "CODEX_API_KEY",
+            "OPENAI_API_KEY"
+          ],
+          "command": "codex",
+          "args": [
+            "exec",
+            "--sandbox",
+            "read-only",
+            "--skip-git-repo-check",
+            "--ephemeral",
+            "--color",
+            "never",
+            "--ignore-user-config",
+            "--json"
+          ],
+          "outputFormat": "codex-jsonl",
+          "modelArg": "-m",
+          "reasoningArg": "model_reasoning_effort",
+          "conserveQuota": true,
+          "timeoutMs": 300000
+        }
+      ],
+      "limits": {
+        "dailyRequests": 25,
+        "dailyTokens": 0,
+        "monthlyBudgetUsd": 0
+      },
+      "pricing": {
+        "inputPerMTok": 0,
+        "outputPerMTok": 0
+      },
+      "enabled": true,
+      "maxConcurrent": 1,
+      "optional": true
+    }
+  ]
+}

@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#070b16" />
+  <meta name="color-scheme" content="dark" />
+  <title>Causeway</title>
+  <link rel="icon" href="icon.svg" type="image/svg+xml" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@100..125,500..800&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="app.css" />
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+
+  <div class="shell" id="shell">
+    <nav class="rail" aria-label="Primary">
+      <a class="brand" href="#/" aria-label="Causeway overview">
+        <svg class="mark" viewBox="0 0 40 40" aria-hidden="true"><use href="#markSymbol" /></svg>
+        <span class="wordmark">Causeway</span>
+      </a>
+
+      <a class="btn sunset new-goal" href="#/new" data-nav="new">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+        New goal <kbd>N</kbd>
+      </a>
+
+      <button type="button" class="needs-you" id="needsBtn" aria-haspopup="dialog" aria-controls="needsPanel" hidden>
+        <span class="dot" aria-hidden="true"></span>
+        <span id="needsLabel">Needs you</span>
+        <b id="needsCount">0</b>
+      </button>
+
+      <ul class="nav" role="list">
+        <li><a href="#/" data-nav="overview"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 13h6V4H4zM14 20h6v-9h-6zM4 20h6v-4H4zM14 4v4h6V4z" /></svg>Overview<kbd>G O</kbd></a></li>
+        <li><a href="#/runs" data-nav="runs"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 6h14M5 12h10M5 18h6" /></svg>Runs<kbd>G R</kbd></a></li>
+        <li><a href="#/crew" data-nav="crew"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3" /><path d="M3.5 19c.8-3 3-4.6 5.5-4.6s4.7 1.6 5.5 4.6" /><circle cx="17" cy="9" r="2.3" /><path d="M16 14.6c2.3-.2 4 1.1 4.6 3.6" /></svg>Crew<kbd>G C</kbd></a></li>
+        <li><a href="#/playbooks" data-nav="playbooks"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4h10l2 2v14H6zM9 9h6M9 13h6M9 17h3" /></svg>Playbooks<span class="nav-badge" id="lessonBadge" hidden></span><kbd>G P</kbd></a></li>
+        <li><a href="#/settings" data-nav="settings"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3" /><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1" /></svg>Settings<kbd>G S</kbd></a></li>
+      </ul>
+
+      <div class="rail-foot">
+        <div class="presence" id="presence" aria-label="Crew status"></div>
+        <div class="rail-meta">
+          <span class="conn" id="connState" role="status">Connecting…</span>
+          <button type="button" class="icon-btn" id="soundBtn" aria-pressed="false" title="Sound cues (off)" aria-label="Sound cues">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 10v4h4l5 4V6L8 10z" /><path class="wave" d="M16.5 9.5a4 4 0 0 1 0 5M19 7a7.5 7.5 0 0 1 0 10" /><path class="mute" d="M16 9l5 6M21 9l-5 6" /></svg>
+          </button>
+          <button type="button" class="icon-btn" id="paletteBtn" title="Command palette (⌘K)" aria-label="Open command palette">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6" /><path d="M20 20l-4.5-4.5" /></svg>
+          </button>
+        </div>
+      </div>
+    </nav>
+
+    <header class="topbar" aria-label="Causeway">
+      <a class="brand" href="#/" aria-label="Causeway overview"><svg class="mark" viewBox="0 0 40 40" aria-hidden="true"><use href="#markSymbol" /></svg><span class="wordmark">Causeway</span></a>
+      <button type="button" class="needs-you small" id="needsBtnTop" aria-haspopup="dialog" aria-controls="needsPanel" hidden><span class="dot" aria-hidden="true"></span><b id="needsCountTop">0</b></button>
+    </header>
+
+    <main class="main" id="main" tabindex="-1" aria-live="off"></main>
+
+    <nav class="tabbar" aria-label="Primary (mobile)">
+      <a href="#/" data-nav="overview"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 13h6V4H4zM14 20h6v-9h-6zM4 20h6v-4H4zM14 4v4h6V4z" /></svg>Overview</a>
+      <a href="#/runs" data-nav="runs"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 6h14M5 12h10M5 18h6" /></svg>Runs</a>
+      <a href="#/new" data-nav="new" class="tab-new"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>Goal</a>
+      <a href="#/crew" data-nav="crew"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3" /><path d="M3.5 19c.8-3 3-4.6 5.5-4.6s4.7 1.6 5.5 4.6" /><circle cx="17" cy="9" r="2.3" /></svg>Crew</a>
+      <a href="#/settings" data-nav="settings"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3" /><path d="M12 3v3M12 18v3M3 12h3M18 12h3" /></svg>More</a>
+    </nav>
+  </div>
+
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+    <defs>
+      <linearGradient id="sunGrad" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="#ffb35c" />
+        <stop offset=".55" stop-color="#ff3e8a" />
+        <stop offset="1" stop-color="#8b5cf6" />
+      </linearGradient>
+      <clipPath id="sunClip"><rect x="0" y="0" width="40" height="27" /></clipPath>
+    </defs>
+    <symbol id="markSymbol" viewBox="0 0 40 40">
+      <g clip-path="url(#sunClip)">
+        <circle cx="20" cy="25" r="12" fill="url(#sunGrad)" />
+        <rect x="6" y="19.5" width="28" height="1.6" fill="#070b16" />
+        <rect x="6" y="23" width="28" height="2" fill="#070b16" />
+      </g>
+      <path d="M3 30 Q20 15 37 30" fill="none" stroke="#22e3d3" stroke-width="2.2" stroke-linecap="round" />
+      <path d="M11 24.6V31M20 22.4V31M29 24.6V31" stroke="#22e3d3" stroke-width="1.6" stroke-linecap="round" />
+      <path d="M2 33.5h36" stroke="#22e3d3" stroke-opacity=".45" stroke-width="1.2" stroke-linecap="round" />
+    </symbol>
+  </svg>
+
+  <!-- Needs you: approvals, questions, and blocked work -->
+  <div class="scrim" id="scrim" hidden></div>
+  <aside class="panel-over" id="needsPanel" role="dialog" aria-modal="true" aria-labelledby="needsTitle" hidden>
+    <div class="panel-head">
+      <h2 id="needsTitle">Needs you</h2>
+      <button type="button" class="icon-btn" data-close-panel aria-label="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg></button>
+    </div>
+    <div class="panel-body" id="needsBody"></div>
+  </aside>
+
+  <!-- Command palette -->
+  <div class="palette" id="palette" role="dialog" aria-modal="true" aria-label="Command palette" hidden>
+    <div class="palette-box">
+      <input id="paletteInput" type="text" placeholder="Jump to a run, a specialist, or an action…" aria-label="Search commands" autocomplete="off" role="combobox" aria-expanded="true" aria-controls="paletteList" />
+      <ul id="paletteList" role="listbox"></ul>
+      <div class="palette-foot"><span><kbd>↑</kbd><kbd>↓</kbd> move</span><span><kbd>↵</kbd> go</span><span><kbd>Esc</kbd> close</span></div>
+    </div>
+  </div>
+
+  <!-- First run -->
+  <div class="onboard" id="onboard" role="dialog" aria-modal="true" aria-labelledby="onboardTitle" hidden>
+    <div class="onboard-box" id="onboardBox"></div>
+  </div>
+
+  <!-- Locked -->
+  <div class="lock" id="lock" hidden>
+    <form class="lock-box" id="lockForm">
+      <svg class="mark big" viewBox="0 0 40 40" aria-hidden="true"><use href="#markSymbol" /></svg>
+      <h1>Causeway is locked</h1>
+      <p class="muted">Enter your access token (HUB_TOKEN in your .env file).</p>
+      <label class="sr" for="lockInput">Access token</label>
+      <input id="lockInput" class="input" type="password" placeholder="Access token" autocomplete="current-password" required />
+      <p class="err" id="lockErr" hidden></p>
+      <button class="btn primary" type="submit">Unlock</button>
+    </form>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <div class="sr" id="announcer" aria-live="polite"></div>
+
+  <script src="app.js" type="module"></script>
+</body>
+</html>

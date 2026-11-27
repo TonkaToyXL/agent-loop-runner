@@ -1,29 +1,167 @@
-# PR Babysit
+# Causeway
 
-Loop a Cursor agent on an open pull request until CI is green and review threads are resolved.
+Direct a crew of AI specialists. Describe the outcome you want; Causeway recommends who does each step, why, and what runs in parallel. You edit the plan, launch it, and watch the work hand off between specialists until one finished answer lands. Works from the dashboard, Telegram, or iMessage.
+
+Causeway was called Relay. Internal names are unchanged so existing installs keep working: `RELAY_*` settings in `.env`, the `com.relay.hub` background service, `npm run relay:update`, and the `~/agent-loop-runner` folder.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 [![CI](https://github.com/TonkaToyXL/agent-loop-runner/actions/workflows/ci.yml/badge.svg)](https://github.com/TonkaToyXL/agent-loop-runner/actions/workflows/ci.yml)
 [![Node >=22.13](https://img.shields.io/badge/node-%3E%3D22.13-brightgreen)](./package.json)
 
-Uses [`@cursor/sdk`](https://www.npmjs.com/package/@cursor/sdk) and the [`gh`](https://cli.github.com/) CLI.
+![Causeway run view: parallel steps, a handoff, and the step inspector](docs/causeway-run.jpg)
 
-## Install
+## What it does
+
+- **Start with a goal, review the plan.** Causeway drafts a plan: the specialist for each step, the reason, what runs in parallel, which steps are peer reviews, and which will ask for your OK. Swap specialists, rewrite steps, change what builds on what, then launch.
+- **Solo or crew, with the reason.** One strong specialist is the default: faster, one voice, nothing lost in handoffs. Causeway splits the work only when it pays off: a tool only one specialist has plus other work (live X then writing), an independent review, or several parts that can run in parallel. Flip it on the plan, or **compare both** side by side on the same goal; your pick sets the default for similar goals. Plans and the final wrap-up use the strongest model your plan covers.
+- **Watch the crew work together.** The run view shows parallel waves, dependencies, handoffs as they land, reviews, blockers, and the final output. Open any step to see the findings it built on and what it handed off.
+- **Every specialist has a lane.** Each profile shows what it does best, the tools it can actually use, what it's doing now, and its recent work. Talk to one directly, or reassign work without losing context.
+- **You stay in control.** Anything that needs you (approvals, questions, blocked steps) shows in pink on every screen and in Telegram. Specialists that can act (Hermes on your Mac, Grok Bot on X) ask before sending, posting, spending, or changing things; no answer in 15 minutes means no. Stop a run or a step, or redirect a step to someone else with your note.
+- **Lessons you approve.** After a run, Causeway proposes a reusable playbook and planning notes from what actually happened (a backup that worked, an approval that timed out). Approved notes go into the planner's brief. No agent is retrained.
+- **Read-only email.** `/inbox`, `/inbox unread`, `/inbox search <words>`, and `/inbox summary`. Causeway can't send, delete, move, or mark mail as read.
+- **Limits that reroute, and no surprise bills.** Daily caps and monthly budgets per specialist; pay-per-use APIs are blocked unless you allow them.
+- **Fast to drive.** `N` new goal, `⌘K` command palette, `!` what needs you, `G` then `O/R/C/P/S` to jump around. Opt-in sound cues for a finished run or an approval request. Reduced motion is respected.
+- **Works before you add keys.** Specialists without keys run in a labeled demo mode so you can try the whole flow first.
+
+## Set up on a Mac (one command)
+
+On an always-on Mac such as a Mac mini, paste this into Terminal:
 
 ```bash
-npm install
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/TonkaToyXL/agent-loop-runner/claude/friendly-babbage-yr8apd/scripts/install.sh)"
 ```
 
-## Usage
+It downloads Relay to `~/agent-loop-runner` (or updates it), then runs the guided setup. Run the same line, or `npm run relay:update`, to update later; your `.env` is kept.
+
+It installs what Relay needs, connects the agents you already use, links Telegram, blocks pay-per-use APIs, and keeps Relay running in the background (it starts at login and restarts if it stops). Run it again any time to add something. Each piece also has its own command: `npm run setup:hermes`, `setup:grok`, `setup:clinepass`, `setup:email`, `setup:telegram`, `setup:imessage`.
+
+From your phone, send `/doctor` to the Telegram bot for a full check of agents, channels, email, and safety settings. Relay also messages you when it starts (for example after the Mac restarts) and when an agent goes offline or comes back. Set `RELAY_NOTIFY=false` to turn those notices off.
+
+To try it without connecting anything: `npm install && npm run hub`, then open http://127.0.0.1:4747. Unconnected agents answer in a labeled demo mode and never join real team work.
+
+## On your phone
+
+- **Telegram works anywhere.** `/plan <goal>` shows the recommended plan with buttons to launch it, switch solo/crew, or compare both. `/runs` shows what's live, `/approvals` what's waiting on you, and results arrive in the chat.
+- **The full dashboard:** run `npm run setup:phone` on the Mac once (Hermes can run it for you from Telegram). It requires the access token, opens the dashboard to your devices, and prints the addresses. Then send `/dashboard` in Telegram for a one-tap sign-in link (single use, 10 minutes). On the same Wi-Fi it works right away; away from home, install the free Tailscale app on the Mac and the phone.
+
+## No surprise bills
+
+Relay uses the subscriptions and tools you already have. Pay-per-use APIs are **blocked by default**, even if a key is in `.env`; set `RELAY_ALLOW_METERED=true` only if you want them. Every agent card shows how it's paid for.
+
+| Agent | How Relay reaches it | Cost |
+|---|---|---|
+| **Grok** | A Grok Bot routine with a Webhook trigger | Your Grok subscription (Grok Bot usage) |
+| **Hermes** | Hermes Agent's built-in API server on your Mac | Whatever Hermes already uses |
+| **Muse** | Muse Spark 1.3 through ClinePass | Your ClinePass ($9.99/mo flat). Without ClinePass, Muse is off: Meta's own API is pay-per-use, and the Muse app can't be controlled by other apps. |
+| **Cline** | Open models (Kimi K3.1 Pro, GLM 5.3, DeepSeek, Qwen…) through ClinePass | Your ClinePass |
+| **Zen** | OpenCode Zen (optional) | **Prepaid credit, charged per use.** Runs only while it has a monthly budget (default $30). Turn auto-reload off in OpenCode billing so it can't top itself up. |
+| Grok via xAI API | Optional fallback | Pay-per-use, blocked by default |
+
+Agents are defined in [`relay.config.json`](./relay.config.json). Any OpenAI-compatible endpoint (Ollama, LM Studio, OpenRouter) or local command-line assistant can be added as another entry. Mark each connection's `billing` as `subscription`, `local`, `prepaid`, or `metered`. A `prepaid` connection only runs when its agent has a `monthlyBudgetUsd` above 0. Spend is counted from `pricing.models` (per-model USD per 1M tokens) when the model is listed, otherwise from the agent's flat `pricing`, so set the flat price to the priciest model.
+
+## Connect your agents
+
+**Hermes Agent.** On the computer that runs Hermes, from this folder:
+
+```bash
+npm run setup:hermes
+```
+
+It turns on Hermes' API server with a random key (backing up `~/.hermes/.env` first), copies the key into Relay's `.env` without printing it, offers to restart the Hermes gateway, and checks that Hermes accepts the key. Safe to run again. To do it by hand instead: put `API_SERVER_ENABLED=true` and `API_SERVER_KEY=<long random string>` in `~/.hermes/.env`, restart `hermes gateway`, and set `HERMES_BASE_URL=http://127.0.0.1:8642/v1` and the same key as `HERMES_API_KEY` in Relay's `.env`.
+
+Once connected, Hermes' card shows online/offline, the reasoning level is sent with each request, and each reply shows the model that actually answered. Hermes uses its own default model unless you set a **Provider** in its editor (for example `openrouter`); then the Model field picks the exact model Hermes runs.
+
+**Muse.** Runs on Muse Spark 1.3 through ClinePass. Without ClinePass, Muse stays off unless you set `MUSE_BASE_URL`, `MUSE_API_KEY`, and `RELAY_ALLOW_METERED=true` for Meta's pay-per-use API. Relay can't drive the Muse phone app.
+
+**Grok Bot.** `npm run setup:grok` walks you through it: create a new Grok Bot routine named Relay with a Webhook trigger, paste the instructions it prints (also copied to your clipboard), then paste the routine's webhook URL, key, and key header. The routine answers by running `scripts/relay-reply.sh`, which only ever posts to Relay's own callback address. The routine's computer must be the Mac running Relay, or set `RELAY_PUBLIC_URL` to an address it can reach.
+
+**ClinePass.** `npm run setup:clinepass` saves your key (app.cline.bot → Settings → API Keys) and sends one tiny test message. Relay sends only `cline-pass/` models on that key, so it can't spend Cline credits, and the editor refuses other models. Usage counts against ClinePass's 5-hour, weekly, and monthly limits.
+
+**Claude and Gemini (not included).** Gemini is left out by choice. Anthropic's Consumer Terms for Free, Pro, and Max plans prohibit accessing Claude "through automated or non-human means, whether through a bot, script, or otherwise" except with an API key or where Anthropic explicitly permits it, and Claude Code's legal page says plan sign-in is for ordinary, individual use. A bot-driven crew isn't clearly covered, so Relay doesn't run Claude on a subscription. The only clearly allowed route is a pay-per-use Anthropic API key.
+
+**Other agents.** Add an entry to `relay.config.json` with an `openai` connector (any OpenAI-compatible URL) or a `cli` connector (a local command that takes the prompt on stdin). Set `reasoningParam: "reasoning_effort"` on an `openai` connector only if that model accepts it.
+
+## Telegram
+
+Free. Run `npm run setup:telegram` (or let `setup:mac` do it):
+
+1. In Telegram, message [@BotFather](https://t.me/BotFather), send `/newbot`, and paste the token when asked.
+2. Send your new bot any message while the script waits. It allowlists that chat automatically. Anyone else gets refused.
+
+Uses long polling, so no public URL is needed.
+
+## iMessage
+
+iMessage needs a Mac signed in to Messages, running [BlueBubbles Server](https://bluebubbles.app) (free). A separate Apple ID for the bot is cleanest.
+
+1. Run `npm run setup:imessage`. It checks BlueBubbles' password, saves which number or email may text Relay, and creates the secret webhook URL (copied to your clipboard).
+2. In BlueBubbles: Settings → API & Webhooks → add a webhook for **New Messages** with that URL.
+3. Text the bot's Apple ID from your phone.
+
+Relay ignores messages from non-allowlisted handles and its own sent messages, so replies never loop.
+
+## Email (read-only)
+
+`npm run setup:email` connects one inbox over IMAP with an app password (free): Gmail/Google Workspace, iCloud, Yahoo, Fastmail, or any IMAP server. Outlook/Hotmail isn't supported (Microsoft requires an OAuth sign-in flow).
+
+Read-only is enforced in code, not just by policy:
+- IMAP can't send mail. Relay has no SMTP code at all.
+- Relay refuses every IMAP command except sign-in, `EXAMINE` (opens the inbox read-only), search, fetch, and sign-out.
+- Messages are fetched with `BODY.PEEK`, so nothing is even marked as read.
+
+Summaries go to the agent named in `MAIL_SUMMARIZER` (`muse`, `cline`, or `none`), and the mail it reads goes to that agent's provider. Agents that can act for you (Hermes, Grok Bot) are refused as readers, because anyone can email you instructions. Emails are passed as fenced, untrusted data with orders not to follow anything inside them. The app password lives in `.env` (owner-only permissions); summaries and the email snippets sent with them are kept in Relay's local task history.
+
+Commands: `/inbox [unread] [48h|3d]`, `/inbox search <words>` (last 7 days), `/inbox summary [48h] [question]`.
+
+## Approvals
+
+Two checks protect anything that can act outside Relay (agents marked `actsInWorld` in `relay.config.json`: Hermes and Grok Bot):
+
+1. **Before starting:** if the task mentions sending, posting, replying, buying, paying, deleting, booking, installing, deploying and similar, Relay asks you first.
+2. **Mid-task (Hermes):** Relay runs Hermes through its Runs API. When Hermes' own approval policy pauses a tool call, Relay forwards it to you and passes back your answer.
+
+Answer with the Telegram buttons, the dashboard cards, or by text in any channel: `/approve <id>`, `/deny <id>`, or on iMessage just `yes <id>` / `no <id>`. `/approvals` lists what's waiting. Unanswered requests are denied after 15 minutes (`RELAY_APPROVAL_TIMEOUT_MS`).
+
+When Hermes asks a question that needs a typed answer, you get it in Telegram: just reply to that message (or send `/answer <id> <text>`, or type in the dashboard card). Skip it, or don't answer within 15 minutes, and the task stops.
+
+## Chat commands
+
+Same everywhere: dashboard, Telegram, iMessage.
+
+```text
+@grok <ask>       talk to one agent
+@team <goal>      lead plans, crew splits the work
+<plain text>      auto-picks the best agent
+/agents           models, reasoning, usage
+/status           what's running now
+/board            who did the most work
+/model <agent> <model-id>
+/reasoning <agent> off|low|medium|high|max
+/lead <agent>     choose who plans team goals
+/inbox            recent email (read-only, no AI)
+/inbox summary    what needs your attention
+/approvals        what's waiting for your OK
+/approve <id>     allow it      /deny <id>  block it
+/answer <id> …    answer an agent's question (or reply to its message)
+/doctor           check that everything is connected
+```
+
+## Use the dashboard from your phone
+
+Telegram is the easiest way to use Relay from your phone. For the full dashboard on your phone, install Tailscale (free for personal use) on the Mac and phone and say yes to the phone-dashboard step in `npm run setup:mac`. It sets `HOST=0.0.0.0` and a password (`HUB_TOKEN`). The hub refuses to listen beyond localhost without one. The dashboard installs as a home-screen app.
+
+## Data
+
+State (tasks, usage, your model/limit edits) lives in `~/.local/share/agent-relay/hub/state.json`. Override with `RELAY_STATE`. Keys are never written there.
+
+## PR Babysit
+
+This repo also ships the original CLI that loops a Cursor agent on an open PR until CI is green and review threads are resolved.
 
 ```bash
 export CURSOR_API_KEY="your-key"
 npm run babysit-pr -- --repo owner/repo --pr-number 42 --cwd /path/to/clone
 ```
-
-Watches CI and review state, prompts a Cursor agent to fix scoped issues, and stops when merge-ready or blocked.
-
-### Options
 
 | Flag | Description |
 |------|-------------|
@@ -31,26 +169,12 @@ Watches CI and review state, prompts a Cursor agent to fix scoped issues, and st
 | `--pr-number` / `--pr` | PR number (required) |
 | `--cwd` | Local clone path (default: cwd) |
 
-### Exit codes
-
-| Code | Meaning |
-|------|---------|
-| `0` | Merge-ready |
-| `2` | Merge conflicts — needs human |
-| `3` | Agent run did not finish |
-| `4` | Max iterations reached |
-
-### Logs
-
-```text
-~/.local/share/agent-relay/pr-babysit/<owner>__<repo>/pr-<number>.jsonl
-```
+Exit codes: `0` merge-ready, `2` merge conflicts, `3` agent run did not finish, `4` max iterations reached. Logs go to `~/.local/share/agent-relay/pr-babysit/<owner>__<repo>/pr-<number>.jsonl`. Requires `gh` authenticated for the target repo.
 
 ## Requirements
 
 - Node.js 22.13+
-- `gh` authenticated for the target repo
-- `CURSOR_API_KEY` environment variable
+- No extra runtime dependencies for the hub
 
 ## License
 
