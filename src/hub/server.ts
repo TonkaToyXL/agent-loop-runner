@@ -220,9 +220,28 @@ export function createHubServer({ hub, token, imessage }: ServerOptions) {
         }
 
         if (path === "/api/plan" && req.method === "POST") {
-          const { goal, playbookId } = await readJson<{ goal?: unknown; playbookId?: unknown }>(req);
+          const { goal, playbookId, mode } = await readJson<{ goal?: unknown; playbookId?: unknown; mode?: unknown }>(req);
           if (typeof goal !== "string") return send(res, 400, { error: "goal is required" });
-          return send(res, 200, await hub.draftPlan(goal, typeof playbookId === "string" ? { playbookId } : {}));
+          return send(
+            res,
+            200,
+            await hub.draftPlan(goal, {
+              ...(typeof playbookId === "string" ? { playbookId } : {}),
+              ...(mode === "solo" || mode === "crew" ? { mode } : {}),
+            }),
+          );
+        }
+
+        if (path === "/api/compare" && req.method === "POST") {
+          const { goal } = await readJson<{ goal?: unknown }>(req);
+          if (typeof goal !== "string") return send(res, 400, { error: "goal is required" });
+          return send(res, 200, await hub.compare(goal, { channel: "web", chatId: "web" }));
+        }
+
+        const verdict = /^\/api\/compare\/([\w-]+)\/verdict$/.exec(path);
+        if (verdict && req.method === "POST") {
+          const { winner } = await readJson<{ winner?: unknown }>(req);
+          return send(res, 200, hub.compareVerdict(verdict[1], winner));
         }
 
         if (path === "/api/goals" && req.method === "POST") {

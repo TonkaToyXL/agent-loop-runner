@@ -628,3 +628,11 @@ a.tbl-row:hover { background: var(--ink-2); }
 .panel-body .need-card { grid-template-columns: auto minmax(0, 1fr); }
 .panel-body .need-actions, .panel-body .need-answer { grid-column: 1 / -1; justify-content: flex-start; }
 .step-card textarea.input { overflow: hidden; }
+
+/* Solo vs crew */
+.compare-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: start; }
+.compare-side { margin-top: 0; }
+.compare-side.won { border-color: rgba(34, 227, 211, 0.55); box-shadow: 0 0 0 1px rgba(34, 227, 211, 0.35); }
+.verdict { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 18px; padding: 14px 16px; border-radius: 14px; background: var(--ink-1); border: 1px solid var(--line); }
+.verdict .eyebrow { margin-right: auto; }
+@media (max-width: 900px) { .compare-grid { grid-template-columns: minmax(0, 1fr); } }

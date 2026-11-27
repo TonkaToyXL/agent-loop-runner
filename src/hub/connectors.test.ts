@@ -454,3 +454,12 @@ describe("cliEnv", () => {
     ).rejects.toThrow(/exited with code 2.*boom/);
   });
 });
+
+describe("orchestration model choice", () => {
+  it("plans and wraps up on the strongest covered model, with more thought for the wrap-up", () => {
+    const cline = normalizeAgent({ id: "cline", model: "auto", reasoning: "auto", modelOptions: ["auto", "cline-pass/deepseek-v4.1-flash", "cline-pass/kimi-k3.1-pro", "cline-pass/glm-5.3"] }, 0);
+    const cp: ConnectorConfig = { kind: "openai", label: "ClinePass", billing: "subscription", modelPrefix: "cline-pass/" };
+    expect(pickModelForTask(cline, cp, "plan this", [], "plan")).toMatchObject({ model: "cline-pass/kimi-k3.1-pro", reasoning: "low" });
+    expect(pickModelForTask(cline, cp, "combine", [], "synthesis")).toMatchObject({ model: "cline-pass/kimi-k3.1-pro", reasoning: "medium" });
+  });
+});

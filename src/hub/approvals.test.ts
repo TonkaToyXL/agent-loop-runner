@@ -254,3 +254,16 @@ describe("riskyAction and the word upload", () => {
     }
   });
 });
+
+describe("riskyAction and the word email", () => {
+  it("holds emailing someone", () => {
+    for (const x of ["email Bob the report", "email the team today's status", "emailing them now", "send an email to the team"]) {
+      expect(riskyAction(x), x).not.toBeNull();
+    }
+  });
+  it("lets writing an email through", () => {
+    for (const x of ["Write a short welcome email for new subscribers", "draft an email to Bob", "improve this email copy", "write 3 email subject lines", "a cold email template for golf shops"]) {
+      expect(riskyAction(x), x).toBeNull();
+    }
+  });
+});

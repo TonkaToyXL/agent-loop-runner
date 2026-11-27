@@ -456,3 +456,38 @@ describe("Lessons from finished runs", () => {
     expect(() => hub.updateLesson("n1", { status: "maybe" })).toThrow(/status must be/);
   });
 });
+
+describe("Solo or crew, and comparing them", () => {
+  it("drafts a single strong specialist for a plain goal, and a planned crew when asked", async () => {
+    const { hub, tasks } = crew([{ id: "lead", out: `cat >/dev/null; printf '%s' '${PLAN_JSON}'` }, { id: "alpha" }, { id: "beta" }]);
+    const solo = await hub.draftPlan("explain how index funds work in plain words");
+    expect(solo).toMatchObject({ mode: "solo", source: "solo" });
+    expect(solo.steps).toHaveLength(1);
+    expect(solo.steps[0].why).toMatch(/One strong specialist/);
+    expect(tasks().some((t) => t.kind === "plan")).toBe(false);
+    const forced = await hub.draftPlan("explain how index funds work in plain words", { mode: "crew" });
+    expect(forced).toMatchObject({ mode: "crew", source: "planner", modeReason: "You chose the crew." });
+    expect(forced.steps.map((s) => s.agentId)).toEqual(["alpha", "beta"]);
+  });
+
+  it("runs both ways side by side, and the verdict steers similar goals", async () => {
+    const { hub, tasks, byId, settle } = crew([{ id: "lead", out: `cat >/dev/null; printf '%s' '${PLAN_JSON}'` }, { id: "alpha" }, { id: "beta" }]);
+    const goal = "draft a launch post for the golf glove and have it reviewed";
+    expect((await hub.draftPlan(goal)).mode).toBe("crew");
+    const cmp = await hub.compare(goal, web);
+    await settle(cmp.solo);
+    await settle(cmp.crew);
+    expect(byId(cmp.solo)).toMatchObject({ status: "done", compareId: cmp.compareId, compareSide: "solo", mode: "solo" });
+    expect(byId(cmp.crew)).toMatchObject({ status: "done", compareId: cmp.compareId, compareSide: "crew", mode: "crew" });
+    expect(tasks().filter((t) => t.parentId === cmp.solo && t.kind === "subtask")).toHaveLength(1);
+    expect(tasks().filter((t) => t.parentId === cmp.crew && t.kind === "subtask")).toHaveLength(2);
+
+    const v = hub.compareVerdict(cmp.compareId, "solo");
+    expect(byId(cmp.crew).compareWinner).toBe("solo");
+    expect(hub.store.state.lessons.find((l) => l.id === v.lessonId)).toMatchObject({ status: "approved", mode: "solo" });
+    expect(hub.approvedNotes()).toEqual([]);
+    const again = await hub.draftPlan(goal);
+    expect(again).toMatchObject({ mode: "solo", modeReason: expect.stringMatching(/You preferred one specialist/) });
+    expect(() => hub.compareVerdict(cmp.compareId, "both")).toThrow(/winner must be/);
+  });
+});

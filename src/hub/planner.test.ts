@@ -12,6 +12,8 @@ import {
   explainStep,
   planWaves,
   validatePlan,
+  chooseMode,
+  goalKeywords,
 } from "./planner.js";
 
 const team: PlannerAgent[] = [
@@ -143,10 +145,10 @@ describe("stepPrompt", () => {
 
   it("leaves independent steps untouched and trims very long inputs", () => {
     expect(stepPrompt("solo", [])).toBe("solo");
-    const long = stepPrompt("t", [{ step: 1, agentName: "Grok", ok: false, text: "x".repeat(9000) }]);
+    const long = stepPrompt("t", [{ step: 1, agentName: "Grok", ok: false, text: "x".repeat(20000) }]);
     expect(long).toContain("(failed)");
     expect(long).toContain("[…cut for length]");
-    expect(long.length).toBeLessThan(7000);
+    expect(long.length).toBeLessThan(17000);
   });
 });
 
@@ -259,5 +261,25 @@ describe("plan review helpers", () => {
     const p = planPrompt("goal", team, ["Prefer Zen for SQL reviews."]);
     expect(p).toMatch(/Planning notes the owner approved[\s\S]*- Prefer Zen for SQL reviews\./);
     expect(planPrompt("goal", team)).not.toMatch(/Planning notes/);
+  });
+});
+
+describe("chooseMode (solo vs crew)", () => {
+  it("defaults to one strong specialist", () => {
+    for (const g of ["write a cover letter for a remote data role", "explain how index funds work", "refactor this function to be async", "what's trending on X about golf"]) {
+      expect(chooseMode(g).mode, g).toBe("solo");
+    }
+  });
+  it("uses the crew when tools plus writing, a review, or several parts are involved", () => {
+    expect(chooseMode("find what's trending on X about golf and write 3 hooks").mode).toBe("crew");
+    expect(chooseMode("draft a launch post and have it reviewed").mode).toBe("crew");
+    expect(chooseMode("research two CRMs, compare them, then write a recommendation").mode).toBe("crew");
+    expect(chooseMode("@team plan the week").mode).toBe("crew");
+    expect(chooseMode("draft a launch post and have it reviewed").reason).toMatch(/review/);
+  });
+  it("follows the owner's verdict on a similar earlier goal", () => {
+    const prefs = [{ mode: "solo" as const, keywords: goalKeywords("draft a launch post for the golf glove and have it reviewed"), title: "launch post" }];
+    expect(chooseMode("draft a launch post for the golf glove and have it reviewed", prefs)).toMatchObject({ mode: "solo", reason: expect.stringMatching(/similar goal/) });
+    expect(chooseMode("audit the database schema and review it", prefs).mode).toBe("crew");
   });
 });

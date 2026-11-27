@@ -193,7 +193,15 @@ export interface Task {
   /** Team steps: why this specialist got the step. */
   why?: string;
   /** Goals: where the plan came from. */
-  planSource?: "owner" | "planner" | "fallback" | "fast";
+  planSource?: "owner" | "planner" | "fallback" | "fast" | "solo";
+  /** Goals: solo (one specialist) or crew (a multi-step plan), and why. */
+  mode?: "solo" | "crew";
+  modeReason?: string;
+  /** Goals in a solo-vs-crew comparison share this id. */
+  compareId?: string;
+  compareSide?: "solo" | "crew";
+  /** The owner's verdict on a comparison, stored on both runs. */
+  compareWinner?: "solo" | "crew" | "tie";
   /** Set when the owner redirected this work; the id of the task that replaced or continued it. */
   redirectedTo?: string;
   /** Set on a task the owner started from another one (redirect / follow-up). */
@@ -276,4 +284,7 @@ export interface Lesson {
   text: string;
   /** Playbooks: the plan that worked, ready to reuse. */
   steps?: { agentId: string; task: string; after: number[]; why?: string }[];
+  /** Comparison verdicts: which mode won, and the goal's keywords for matching similar goals. */
+  mode?: "solo" | "crew";
+  keywords?: string[];
 }

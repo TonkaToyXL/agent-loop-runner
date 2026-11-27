@@ -32,6 +32,10 @@ import {
   type PlanStep,
   type StepResult,
   explainStep,
+  chooseMode,
+  goalKeywords,
+  type ModePreference,
+  type TeamMode,
   isReviewStep,
   planWaves,
   validatePlan,
@@ -1019,7 +1023,7 @@ export class Hub {
     return task;
   }
 
-  submitGoal(goal: string, origin: ReplyTarget, preset?: PlanStep[]): Task {
+  submitGoal(goal: string, origin: ReplyTarget, preset?: PlanStep[], extra: Partial<Pick<Task, "planSource" | "mode" | "modeReason" | "compareId" | "compareSide">> = {}): Task {
     const task = this.createTask({
       kind: "goal",
       agentId: this.leadId,
@@ -1027,7 +1031,8 @@ export class Hub {
       channel: origin.channel,
       replyTo: origin,
       routing: "auto",
-      ...(preset ? { planSource: "owner" as const } : {}),
+      ...(preset ? { planSource: "owner" as const, mode: preset.length > 1 ? ("crew" as const) : ("solo" as const) } : {}),
+      ...extra,
     });
     void this.runGoal(task, preset).finally(() => this.deliver(task));
     return task;
@@ -1042,29 +1047,97 @@ export class Hub {
     return this.submitGoal(text.slice(0, 20_000), origin, checked.steps);
   }
 
+  /**
+   * Run the same goal two ways: one strong specialist (solo) and the full crew, side by side, so the owner can
+   * judge from real results. Costs both runs' usage. The verdict is remembered for similar goals.
+   */
+  async compare(goal: string, origin: ReplyTarget): Promise<{ compareId: string; solo: string; crew: string }> {
+    const text = goal.trim();
+    if (!text) throw new PublicError("Describe the goal first.");
+    if (text.length > 20_000) throw new PublicError("That goal is too long.");
+    const solo = await this.buildPlan(text, { mode: "solo" });
+    const crew = await this.buildPlan(text, { mode: "crew", title: `Plan (comparison): ${titleOf(text)}` });
+    const compareId = randomUUID().slice(0, 8);
+    const a = this.submitGoal(text, origin, solo.steps, { planSource: "solo", mode: "solo", modeReason: "Comparison: one specialist.", compareId, compareSide: "solo" });
+    const b = this.submitGoal(text, origin, crew.steps, { planSource: crew.source, mode: "crew", modeReason: "Comparison: the full crew.", compareId, compareSide: "crew" });
+    return { compareId, solo: a.id, crew: b.id };
+  }
+
+  /** Record which side of a comparison won. A clear winner becomes an approved preference for similar goals. */
+  compareVerdict(compareId: string, winner: unknown): { ok: true; lessonId?: string } {
+    if (winner !== "solo" && winner !== "crew" && winner !== "tie") throw new PublicError("winner must be solo, crew, or tie");
+    const runs = this.store.state.tasks.filter((t) => t.kind === "goal" && t.compareId === compareId);
+    if (!runs.length) throw new PublicError("That comparison isn't here anymore.", 404);
+    for (const r of runs) {
+      r.compareWinner = winner;
+      this.touch(r);
+    }
+    if (winner === "tie") return { ok: true };
+    const goal = runs[0];
+    const title = titleOf(goal.prompt);
+    const lesson: Lesson = {
+      id: randomUUID().slice(0, 8),
+      kind: "note",
+      status: "approved",
+      createdAt: new Date().toISOString(),
+      goalId: goal.id,
+      title,
+      text: `For goals like “${title}”, ${winner === "solo" ? "one strong specialist (solo)" : "the full crew"} gave the better result.`,
+      mode: winner,
+      keywords: goalKeywords(goal.prompt),
+    };
+    this.store.state.lessons = this.store.state.lessons.filter((l) => !(l.mode && l.goalId && runs.some((r) => r.id === l.goalId)));
+    this.store.state.lessons.push(lesson);
+    this.store.save();
+    this.emit("lessons", this.store.state.lessons.slice(-60));
+    return { ok: true, lessonId: lesson.id };
+  }
+
   /** Owner-approved planning notes, newest first, as given to the planner. */
   approvedNotes(): string[] {
     return this.store.state.lessons
-      .filter((l) => l.kind === "note" && l.status === "approved" && l.text.trim())
+      .filter((l) => l.kind === "note" && l.status === "approved" && !l.mode && l.text.trim())
       .slice(-8)
       .reverse()
       .map((l) => l.text.trim());
   }
 
   /** Plan a goal (planner call, fast path, or fallback) without running it. Shared by drafts and runs. */
+  /** Owner verdicts from solo-vs-crew comparisons, used to pick the mode for similar goals. */
+  modePreferences(): ModePreference[] {
+    return this.store.state.lessons
+      .filter((l) => l.status === "approved" && l.mode && l.keywords?.length)
+      .slice(-20)
+      .reverse()
+      .map((l) => ({ mode: l.mode!, keywords: l.keywords!, title: l.title }));
+  }
+
+  /** The specialist for a solo run: the best skill match, else the strongest free text-only generalist. */
+  private soloAgentFor(goalText: string, lead: AgentConfig): string {
+    const pool = this.routableWithLoad();
+    const open = pool.filter((a) => this.limitFor(a).ok);
+    const candidates = open.length ? open : pool;
+    const strong = this.orchestratorFor(lead);
+    const fallback = candidates.some((a) => a.id === strong.id) ? strong.id : candidates.some((a) => a.id === lead.id) ? lead.id : candidates[0]?.id ?? lead.id;
+    return pickAgent(goalText, candidates, fallback);
+  }
+
   private async buildPlan(
     goalText: string,
-    opts: { parentId?: string; chatCtx?: string; title?: string },
-  ): Promise<{ steps: PlanStep[]; source: "planner" | "fallback" | "fast"; plannerId: string }> {
+    opts: { parentId?: string; chatCtx?: string; title?: string; mode?: TeamMode },
+  ): Promise<{ steps: PlanStep[]; source: "planner" | "fallback" | "solo"; plannerId: string; mode: TeamMode; modeReason: string }> {
     const lead = this.agent(this.leadId);
     if (!lead) throw new PublicError("No agents are currently available.");
     const team = this.team();
     const planner = this.orchestratorFor(lead);
-    if (shouldFastTrackSingleStep(goalText)) {
-      const pool = this.routableWithLoad();
-      const fallback = pool.some((a) => a.id === lead.id) ? lead.id : pool[0]?.id ?? lead.id;
-      const pickedId = pickAgent(goalText, pool, fallback);
-      return { steps: [{ agentId: pickedId, task: goalText, after: [], why: "A small, single-specialist ask: no plan needed." }], source: "fast", plannerId: planner.id };
+    const choice = opts.mode
+      ? { mode: opts.mode, reason: opts.mode === "solo" ? "You chose one specialist." : "You chose the crew." }
+      : shouldFastTrackSingleStep(goalText)
+        ? { mode: "solo" as const, reason: "A small ask: one specialist is enough." }
+        : chooseMode(goalText, this.modePreferences());
+    if (choice.mode === "solo") {
+      const pickedId = this.soloAgentFor(goalText, lead);
+      return { steps: [{ agentId: pickedId, task: goalText, after: [], why: choice.reason }], source: "solo", plannerId: planner.id, mode: "solo", modeReason: choice.reason };
     }
     const planTask = this.createTask({
       kind: "plan",
@@ -1078,25 +1151,27 @@ export class Hub {
     try {
       const reply = await this.execute(planTask, "plan", planTask.prompt);
       const parsed = parsePlan(reply, team.filter((a) => a.enabled).map((a) => a.id));
-      if (parsed) return { steps: refinePlan(parsed, team), source: "planner", plannerId: planner.id };
+      if (parsed) return { steps: refinePlan(parsed, team), source: "planner", plannerId: planner.id, mode: "crew", modeReason: choice.reason };
     } catch {
       // fall through to the keyword fallback
     }
-    return { steps: refinePlan(fallbackPlan(goalText, team), team), source: "fallback", plannerId: planner.id };
+    return { steps: refinePlan(fallbackPlan(goalText, team), team), source: "fallback", plannerId: planner.id, mode: "crew", modeReason: choice.reason };
   }
 
   /**
    * Recommend a plan for the owner to review before launch: who does what, why, and what runs in parallel.
    * Nothing runs except the planning call itself. A saved playbook skips the planner entirely.
    */
-  async draftPlan(goal: string, opts: { playbookId?: string } = {}) {
+  async draftPlan(goal: string, opts: { playbookId?: string; mode?: TeamMode } = {}) {
     const text = goal.trim();
     if (!text) throw new PublicError("Describe the goal first.");
     if (text.length > 20_000) throw new PublicError("That goal is too long.");
     const team = this.team();
     let steps: PlanStep[];
-    let source: "planner" | "fallback" | "fast" | "playbook";
+    let source: "planner" | "fallback" | "solo" | "playbook";
     let plannerId = this.orchestratorFor(this.agent(this.leadId) ?? this.agents()[0]).id;
+    let mode: TeamMode = "crew";
+    let modeReason = "From your approved playbook.";
     if (opts.playbookId) {
       const book = this.store.state.lessons.find((l) => l.id === opts.playbookId && l.kind === "playbook" && l.status === "approved");
       if (!book?.steps?.length) throw new PublicError("That playbook isn't available.", 404);
@@ -1105,15 +1180,19 @@ export class Hub {
       steps = checked.steps;
       source = "playbook";
     } else {
-      const built = await this.buildPlan(text, { title: `Draft plan: ${titleOf(text)}` });
+      const built = await this.buildPlan(text, { title: `Draft plan: ${titleOf(text)}`, ...(opts.mode ? { mode: opts.mode } : {}) });
       steps = built.steps;
       source = built.source;
       plannerId = built.plannerId;
+      mode = built.mode;
+      modeReason = built.modeReason;
     }
     const waves = planWaves(steps);
     return {
       goal: text,
       source,
+      mode: steps.length > 1 ? "crew" : mode,
+      modeReason,
       planner: { id: plannerId, name: this.agent(plannerId)?.name ?? plannerId },
       notes: this.approvedNotes(),
       steps: steps.map((st, i) => {
@@ -1301,11 +1380,13 @@ export class Hub {
       let steps: PlanStep[];
       if (preset) {
         steps = preset;
-        goal.planSource = "owner";
+        goal.planSource ??= "owner";
       } else {
         const built = await this.buildPlan(goal.prompt, { parentId: goal.id, chatCtx });
         steps = built.steps;
         goal.planSource = built.source;
+        goal.mode = built.mode;
+        goal.modeReason = built.modeReason;
       }
       this.touch(goal);
       if (controller.signal.aborted) throw new Error("Cancelled");

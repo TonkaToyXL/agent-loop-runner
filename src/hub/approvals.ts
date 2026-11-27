@@ -160,7 +160,9 @@ const RISKY = new RegExp(
   "\\b(" +
     [
       // Messages and outreach
-      String.raw`send|sending|e-?mail(?:ing)?|reply(?:ing)? to|respond to|forward|dm|submit`,
+      String.raw`send|sending|reply(?:ing)? to|respond to|forward|dm|submit`,
+      // "email" as an action ("email Bob", "email the team"), not the thing being written ("a welcome email").
+      String.raw`(?<!\b(?:an?|the|this|that|my|your|our|their|welcome|draft|short|cold|follow[- ]up|marketing|newsletter|thank[- ]you|intro|reply|sales|outreach)\s)e-?mail(?:ing)?(?=\s+(?:him|her|them|it|me|us|the|this|that|these|those|my|our|everyone|all|back|[a-z0-9._%+-]+@|[a-z]+\b))(?!\s+(?:for|about|to|that|which|with|template|copy|draft|sequence|subject|newsletter|campaign)\b)`,
       String.raw`text (?:him|her|them|my)|message (?:him|her|them|my)`,
       String.raw`tell (?!me\b|us\b|you\b|a\b|an\b)\w+|let (?:\w+ ){1,3}know|ping (?:him|her|them|my|the|everyone|@)|notify`,
       String.raw`reach out|contact (?:him|her|them|my|the)|call (?:him|her|them|my|mom|dad)|invite|rsvp`,

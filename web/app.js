@@ -43,7 +43,7 @@ const childrenOf = (id) => tasksArr().filter((t) => t.parentId === id);
 const stepsOf = (goalId) => childrenOf(goalId).filter((t) => t.kind === "subtask").sort((a, b) => (a.step ?? 0) - (b.step ?? 0));
 const pendingApprovals = () => S.approvals.filter((a) => a.status === "pending");
 const approvalFor = (taskId) => S.approvals.find((a) => a.taskId === taskId && a.status === "pending");
-const isRisky = (t) => /\b(send|post|tweet|publish|share|buy|purchase|pay|order|delete|remove|upload|deploy|e-?mail|reply to|message|book|subscribe|transfer|install)\b/i.test(t);
+const isRisky = (t) => /\b(send|post|tweet|publish|share|buy|purchase|pay|order|delete|remove|deploy|reply to|book|subscribe|transfer|install)\b|\bupload (?:it|this|the|my|these|them)\b|\be-?mail (?:him|her|them|the team|everyone|[a-z]+@)/i.test(t);
 const isReview = (t) => /\b(review|critique|audit|verify|fact[- ]?check|pressure[- ]?test|evaluate)\b/i.test(t);
 
 function toast(text) {
@@ -244,6 +244,7 @@ function view(r) {
     case "overview": return viewOverview();
     case "new": return viewNew(r);
     case "run": return viewRun(r);
+    case "compare": return viewCompare(r);
     case "runs": return viewRuns();
     case "task": return viewTask(r);
     case "crew": return r.id ? viewAgent(r.id) : viewCrew();
@@ -268,7 +269,7 @@ function afterRender(r, same) {
 
 // ------------------------------------------------------------------ chrome
 function updateChrome(r) {
-  const navName = r.name === "run" || r.name === "task" ? "runs" : r.name;
+  const navName = r.name === "run" || r.name === "task" || r.name === "compare" ? "runs" : r.name;
   for (const a of $$("[data-nav]")) a.classList.toggle("on", a.dataset.nav === navName);
   for (const a of $$("[data-nav]")) a.toggleAttribute("aria-current", a.dataset.nav === navName);
   const n = needsItems().length;
@@ -421,7 +422,7 @@ function viewNew(r) {
   }
   if (d.loading) {
     return `<div class="view"><div class="page-head"><div><div class="eyebrow">Plan review</div><h1>${esc(firstLine(d.goal, 120))}</h1></div></div>
-      <div class="drafting" role="status"><div class="bar-progress" aria-hidden="true"><i></i></div><span>${d.playbookId ? "Loading your playbook…" : "Drafting a plan with your planner…"}</span></div></div>`;
+      <div class="drafting" role="status"><div class="bar-progress" aria-hidden="true"><i></i></div><span>${d.playbookId ? "Loading your playbook…" : d.mode === "solo" ? "Picking the right specialist…" : d.compare ? "Planning both ways…" : "Drafting a plan…"}</span></div></div>`;
   }
   if (d.error) {
     return `<div class="view"><div class="page-head"><div><div class="eyebrow">Plan review</div><h1>${esc(firstLine(d.goal, 120))}</h1></div></div>
@@ -432,7 +433,8 @@ function viewNew(r) {
   const waves = planWaves(steps);
   const nWaves = steps.length ? Math.max(...waves) + 1 : 0;
   const SOURCE = {
-    planner: `Recommended by ${esc(d.planner?.name ?? "your planner")}`,
+    solo: "Solo: one specialist end to end",
+    planner: `Crew plan by ${esc(d.planner?.name ?? "your planner")}`,
     fast: "Quick ask: one specialist is enough",
     fallback: "Planner unavailable: matched by skills (review closely)",
     playbook: "From your approved playbook",
@@ -451,10 +453,14 @@ function viewNew(r) {
       <label class="sr" for="draft-goal">Goal</label>
       <textarea class="input" id="draft-goal" rows="2" style="font:650 18px/1.35 var(--font-display);background:transparent;border-color:transparent;padding:4px 0;resize:none" data-no-restore>${esc(d.goal)}</textarea></div></div>
     <div class="plan-meta">
+      ${d.source !== "playbook" && d.source !== "rerun" ? `<div class="seg" role="group" aria-label="Solo or crew">
+        <button type="button" data-mode="solo" aria-pressed="${steps.length <= 1}" title="One strong specialist does it all">Solo</button>
+        <button type="button" data-mode="crew" aria-pressed="${steps.length > 1}" title="Split it across specialists">Crew</button></div>` : ""}
       <span class="tag">${SOURCE[d.source] ?? esc(d.source)}</span>
+      ${d.source !== "playbook" && d.source !== "rerun" ? `<button type="button" class="btn sm ghost" data-compare title="Runs it both ways side by side. Uses both runs' usage.">Compare solo vs crew</button>` : ""}
       ${d.notes?.length ? `<details id="notes-applied"><summary class="tag" style="cursor:pointer">${d.notes.length} approved note${d.notes.length === 1 ? "" : "s"} applied</summary><ul class="small muted">${d.notes.map((n) => `<li>${esc(n)}</li>`).join("")}</ul></details>` : ""}
     </div>
-    <div class="why-setup"><div class="eyebrow">Why this setup</div><p>${esc(whySetup(steps, waves))}</p></div>
+    <div class="why-setup"><div class="eyebrow">Why this setup</div><p>${d.modeReason ? `<b style="color:var(--text)">${esc(d.modeReason)}</b> ` : ""}${esc(whySetup(steps, waves))}</p></div>
     <div class="board" id="board">${cols.join("")}</div>
     <div class="plan-actions">
       <button type="button" class="btn sm" data-add-step>+ Add step</button>
@@ -462,12 +468,13 @@ function viewNew(r) {
       <button type="button" class="btn sm ghost" data-draft-cancel>Discard</button>
       <span class="spacer"></span>
       <p class="err" id="plan-err" role="alert" hidden></p>
-      <button type="button" class="btn sunset lg" data-launch>Launch crew <kbd style="border-color:rgba(20,8,20,.25);color:rgba(20,8,20,.7)">⌘↵</kbd></button>
+      <button type="button" class="btn sunset lg" data-launch>${steps.length === 1 ? `Send to ${esc(nameOf(steps[0].agentId))}` : "Launch crew"} <kbd style="border-color:rgba(20,8,20,.25);color:rgba(20,8,20,.7)">⌘↵</kbd></button>
     </div>
   </div>`;
 }
 function whySetup(steps, waves) {
   if (!steps.length) return "Add at least one step.";
+  if (steps.length === 1) return `${nameOf(steps[0].agentId)} takes it end to end with its strongest settings. Switch to Crew to split it, or compare both.`;
   const names = (ids) => [...new Set(ids.map((i) => nameOf(steps[i].agentId)))].join(" and ");
   const first = steps.map((_, i) => i).filter((i) => waves[i] === 0);
   const nW = Math.max(...waves) + 1;
@@ -527,14 +534,14 @@ function editDraft(fn) {
   fn(S.draft);
   render(true);
 }
-async function startDraft(goal, { playbookId = "" } = {}) {
+async function startDraft(goal, { playbookId = "", mode = "" } = {}) {
   const text = goal.trim();
   if (!text) { toast("Describe the goal first"); return; }
-  S.draft = { goal: text, loading: true, playbookId };
+  S.draft = { goal: text, loading: true, playbookId, mode };
   go("#/new");
   render(true);
   try {
-    const d = await api("/api/plan", { method: "POST", body: { goal: text, ...(playbookId ? { playbookId } : {}) } });
+    const d = await api("/api/plan", { method: "POST", body: { goal: text, ...(playbookId ? { playbookId } : {}), ...(mode ? { mode } : {}) } });
     if (S.draft?.goal !== text) return;
     S.draft = { ...d, playbookId, steps: d.steps.map((s) => ({ ...s, origAgent: s.agentId })) };
     announce(`Plan ready: ${d.steps.length} steps. Review it, then launch.`);
@@ -685,7 +692,9 @@ function viewRun(r) {
       <div class="grow"><div class="eyebrow"><a class="link" href="#/runs" style="color:var(--faint)">Runs</a> / Team run</div>
         <h1 class="run-title">${esc(goal.prompt.length > 220 ? `${goal.prompt.slice(0, 219)}…` : goal.prompt)}</h1>
         <div class="run-facts">${stPill(gst, gst === "done" ? "Finished" : gst === "run" ? "Running" : undefined)} ${since(goal)}
+          <span class="tag" title="${esc(goal.modeReason ?? "")}">${steps.length > 1 || goal.mode === "crew" ? "Crew" : "Solo"}</span>
           <span>${steps.length} step${steps.length === 1 ? "" : "s"} · ${nW} wave${nW === 1 ? "" : "s"}</span>
+          ${goal.compareId ? `<a class="link" href="#/compare/${esc(goal.compareId)}">Compare solo vs crew →</a>` : ""}
           <span class="av-stack">${crew.map((id) => avatar(agentById(id), "sm", false)).join("")}</span>
           ${goal.costUsd ? `<span>${fmtUsd(goal.costUsd)}</span>` : ""}
           ${goal.usage ? `<span>${fmtK(goal.usage.input + goal.usage.output)} tokens</span>` : ""}</div></div>
@@ -783,6 +792,39 @@ function inspector(t, goal, steps) {
   </aside>`;
 }
 
+// ------------------------------------------------------------------ solo vs crew
+function viewCompare(r) {
+  const runs = tasksArr().filter((t) => t.kind === "goal" && t.compareId === r.id);
+  const solo = runs.find((t) => t.compareSide === "solo");
+  const crewRun = runs.find((t) => t.compareSide === "crew");
+  if (!solo || !crewRun) return `<div class="view"><div class="empty">This comparison isn't in recent history. <a class="link" href="#/runs">See runs</a></div></div>`;
+  const winner = solo.compareWinner;
+  const both = solo.status === "done" && crewRun.status === "done";
+  const side = (g, label, blurb) => {
+    const steps = stepsOf(g.id);
+    const ids = [...new Set(steps.map((s) => s.agentId))];
+    const tokens = g.usage ? g.usage.input + g.usage.output : 0;
+    return `<section class="final ${g.status === "done" ? "done" : ""} compare-side${winner === g.compareSide ? " won" : ""}" aria-label="${esc(label)}">
+      <div class="final-head"><div><div class="eyebrow">${esc(label)}</div><div class="small muted">${esc(blurb)}</div></div>${winner === g.compareSide ? '<span class="st done">Your pick</span>' : stPill(stateOf(g), g.status === "done" ? "Finished" : undefined)}</div>
+      <div class="run-facts" style="margin:0 0 12px"><span class="av-stack">${ids.map((id) => avatar(agentById(id), "sm", false)).join("")}</span>${since(g)}<span>${steps.length} step${steps.length === 1 ? "" : "s"}</span>${tokens ? `<span>${fmtK(tokens)} tokens</span>` : ""}${g.costUsd ? `<span>${fmtUsd(g.costUsd)}</span>` : ""}<a class="link" href="#/run/${esc(g.id)}">Open run →</a></div>
+      ${g.result ? `<div class="prose">${md(g.result)}</div>` : g.error ? `<p class="err">${esc(g.error)}</p>` : `<div style="margin-top:6px">${runStrip(g)}</div>`}
+    </section>`;
+  };
+  return `<div class="view">
+    <div class="page-head"><div class="grow"><div class="eyebrow"><a class="link" href="#/runs" style="color:var(--faint)">Runs</a> / Solo vs crew</div>
+      <h1 class="run-title">${esc(firstLine(solo.prompt, 200))}</h1>
+      <p class="sub">Same goal, run two ways. Judge the outputs, not the theory: your pick sets the default for similar goals.</p></div></div>
+    ${needsItems().filter((n) => [solo.id, crewRun.id].includes(goalOf(n.task)?.id)).map(needCard).join("")}
+    <div class="compare-grid">${side(solo, "Solo", "One strong specialist, end to end")}${side(crewRun, "Crew", "Planned, split, handed off, wrapped up")}</div>
+    <div class="verdict" role="group" aria-label="Which was better?">
+      <span class="eyebrow">${both ? "Which was better?" : "Pick a winner once both finish"}</span>
+      <button type="button" class="btn ${winner === "solo" ? "primary" : ""}" data-verdict="solo" data-compare-id="${esc(r.id)}" ${both ? "" : "disabled"}>Solo was better</button>
+      <button type="button" class="btn ${winner === "crew" ? "primary" : ""}" data-verdict="crew" data-compare-id="${esc(r.id)}" ${both ? "" : "disabled"}>Crew was better</button>
+      <button type="button" class="btn ghost ${winner === "tie" ? "primary" : ""}" data-verdict="tie" data-compare-id="${esc(r.id)}" ${both ? "" : "disabled"}>About the same</button>
+    </div>
+  </div>`;
+}
+
 // ------------------------------------------------------------------ single output
 function viewTask(r) {
   const t = S.tasks.get(r.id);
@@ -852,7 +894,7 @@ function viewRuns() {
         const dur = t.startedAt && t.finishedAt ? fmtDur(Date.parse(t.finishedAt) - Date.parse(t.startedAt)) : t.status === "running" ? "…" : "—";
         return `<a class="tbl-row" role="row" href="${t.kind === "goal" ? `#/run/${esc(t.id)}` : `#/task/${esc(t.id)}`}">
           <span role="cell">${stPill(st)}</span>
-          <span role="cell" class="grow"><span class="ellipsis" style="display:block;font-weight:600">${esc(firstLine(t.display ?? t.prompt, 120))}</span><span class="kind">${t.kind === "goal" ? `Team run · ${steps.length} step${steps.length === 1 ? "" : "s"}` : `Direct ask · ${esc(t.channel)}`}</span></span>
+          <span role="cell" class="grow"><span class="ellipsis" style="display:block;font-weight:600">${esc(firstLine(t.display ?? t.prompt, 120))}</span><span class="kind">${t.kind === "goal" ? `${steps.length > 1 ? "Crew" : "Solo"} run · ${steps.length} step${steps.length === 1 ? "" : "s"}${t.compareId ? " · part of a comparison" : ""}` : `Direct ask · ${esc(t.channel)}`}</span></span>
           <span role="cell" class="av-stack">${crew.slice(0, 5).map((id) => avatar(agentById(id), "sm", false)).join("")}</span>
           <span role="cell" class="small muted">${esc(ago(t.createdAt))}</span>
           <span role="cell" class="num">${dur}</span></a>`;
@@ -1225,6 +1267,31 @@ async function setLesson(id, patch) {
     if (err.message !== "locked") toast(err.message);
   }
 }
+async function startCompare(goal) {
+  const text = goal.trim();
+  if (!text) { toast("Describe the goal first"); return; }
+  S.draft = { goal: text, loading: true, compare: true };
+  render(true);
+  try {
+    const res = await api("/api/compare", { method: "POST", body: { goal: text } });
+    S.draft = null;
+    announce("Comparison started: one specialist and the full crew, side by side.");
+    go(`#/compare/${res.compareId}`);
+  } catch (err) {
+    if (err.message === "locked") return;
+    S.draft = { goal: text, error: err.message };
+    render(true);
+  }
+}
+async function sendVerdict(compareId, winner) {
+  try {
+    await api(`/api/compare/${compareId}/verdict`, { method: "POST", body: { winner } });
+    toast(winner === "tie" ? "Noted: about the same." : `Saved. Similar goals will start as ${winner === "solo" ? "solo" : "a crew"}.`);
+  } catch (err) {
+    if (err.message !== "locked") toast(err.message);
+  }
+}
+
 function rerunFrom(goalId) {
   const goal = S.tasks.get(goalId);
   const steps = stepsOf(goalId);
@@ -1262,6 +1329,9 @@ document.addEventListener("click", (e) => {
   if (el.hasAttribute("data-close-panel")) return closeNeeds();
   // plan editor
   if (el.hasAttribute("data-launch")) return void launchDraft();
+  if (d.mode && S.draft?.steps) { readDraftInputs(); return void startDraft(S.draft.goal, { mode: d.mode }); }
+  if (el.hasAttribute("data-compare")) { readDraftInputs(); return void startCompare(S.draft?.goal ?? ""); }
+  if (d.verdict) return void sendVerdict(d.compareId, d.verdict);
   if (el.hasAttribute("data-replan")) { readDraftInputs(); return void startDraft(S.draft?.goal ?? "", { playbookId: S.draft?.playbookId ?? "" }); }
   if (el.hasAttribute("data-draft-cancel")) { S.draft = null; return go("#/"); }
   if (el.hasAttribute("data-draft-edit")) { S.draft = { goal: S.draft?.goal ?? "" }; return render(true); }

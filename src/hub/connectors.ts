@@ -323,9 +323,8 @@ export function pickReasoningForTask(
   conserveQuota = false,
   purpose: Purpose = "work",
 ): Exclude<Reasoning, "auto"> {
-  if (purpose === "plan" || purpose === "synthesis") {
-    return reasoning === "off" ? "off" : "low";
-  }
+  if (purpose === "plan") return reasoning === "off" ? "off" : "low";
+  if (purpose === "synthesis") return reasoning === "off" ? "off" : "medium";
   if (reasoning !== "auto") return reasoning;
   const kind = classifyTask(prompt);
   if (conserveQuota) {
@@ -386,12 +385,13 @@ export function pickModelForTask(
     return candidates[0];
   };
 
-  // Team planning and wrap-up synthesis are fast orchestration calls — use fast models so the crew starts immediately.
+  // The plan decides who does what, and the wrap-up is the answer the owner actually reads:
+  // both get the strongest covered model, not the fastest one.
   if (purpose === "plan" || purpose === "synthesis") {
     return {
-      model: prefer("gpt-6-astra", "deepseek-v4.1-flash", "glm-5.3-flash", "gpt-6-luna", "kimi-k3.1-pro"),
+      model: prefer("kimi-k3.1-pro", "gpt-6.1-sol", "glm-5.3", "deepseek-v4-pro", "kimi-k3", "qwen3.8-max"),
       reasoning,
-      reason: purpose === "plan" ? "fast team planner" : "fast wrap-up",
+      reason: purpose === "plan" ? "strong team planner" : "strong wrap-up",
     };
   }
 
