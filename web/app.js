@@ -410,7 +410,7 @@ function viewNew(r) {
         <div class="composer-bar">
           <div class="starters">
             ${books.length ? `<label class="small muted" for="playbook-pick">Start from</label><select class="input" id="playbook-pick" style="width:auto;min-height:30px;padding:3px 8px">
-              <option value="">A fresh plan</option>${books.map((b) => `<option value="${esc(b.id)}" ${b.id === playbookId ? "selected" : ""}>${esc(b.title.replace(/^Playbook: /, "Playbook: "))}</option>`).join("")}</select>` : ""}
+              <option value="">A fresh plan</option>${books.map((b) => `<option value="${esc(b.id)}" ${b.id === playbookId ? "selected" : ""}>${esc(b.title)}</option>`).join("")}</select>` : ""}
             ${EXAMPLES.map((x) => `<button type="button" class="starter" data-example="${esc(x)}">${esc(x)}</button>`).join("")}
           </div>
           <button class="btn primary" type="submit">Recommend a plan <kbd>⌘↵</kbd></button>
