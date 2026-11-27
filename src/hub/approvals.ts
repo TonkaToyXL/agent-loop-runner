@@ -178,7 +178,9 @@ const RISKY = new RegExp(
       String.raw`change (?:my|the) (?:password|settings|email|plan)|update (?:my|the) (?:profile|bio|settings|status|password)`,
       // Files, code, and machines
       String.raw`delete|remove|erase|wipe|overwrite|rename|move (?:the |my |these |those |all )?files?|chmod|rm -\w+|sudo`,
-      String.raw`deploy|merge|upload|install|uninstall|git (?:push|commit|reset)|force[- ]push`,
+      String.raw`deploy|merge|install|uninstall|git (?:push|commit|reset)|force[- ]push`,
+      // "upload" as an action, not as a noun in research ("latest upload", "upload schedule").
+      String.raw`(?<!\b(?:recent|latest|last|newest|first|next|new|each|per|every|an?|the|their|its|his|her|our|your|my|channel|video) )upload(?:ing)?(?! (?:schedule|frequency|cadence|history|dates?|times?|counts?|rate|pace|consistency|patterns?|habits?|stats?|volume))`,
       String.raw`push (?:it|this|that|the (?:code|changes|branch|fix)|to (?:main|prod|production|github))`,
       String.raw`commit (?:it|this|that|the (?:changes|code|files)|these|those|all)`,
       String.raw`execute|run (?:the|this|that|my|a) (?:script|command|cleanup|job|migration|backup|update|code)`,

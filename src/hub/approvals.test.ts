@@ -235,3 +235,22 @@ describe("riskyAction and results that come back to you", () => {
     }
   });
 });
+
+describe("riskyAction and the word upload", () => {
+  it("holds uploading as an action", () => {
+    for (const t of ["upload the video to YouTube", "upload it", "upload these photos to Drive", "uploading the new thumbnail now"]) {
+      expect(riskyAction(t), t).not.toBeNull();
+    }
+  });
+  it("lets research about uploads through", () => {
+    for (const t of [
+      "Audit the channel: list the latest upload and its views",
+      "check the upload schedule for the last month",
+      "how consistent is their upload cadence",
+      "analyze upload frequency across both channels",
+      "list recent uploads",
+    ]) {
+      expect(riskyAction(t), t).toBeNull();
+    }
+  });
+});
